@@ -28,6 +28,9 @@ type revokeReq struct {
 }
 
 func (s *server) handleAuthBootstrapCreate(w http.ResponseWriter, r *http.Request) {
+	if !s.requireOperator(w, r) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", 405)
 		return
@@ -103,6 +106,9 @@ func (s *server) handleAuthSessionMint(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleAuthRevoke(w http.ResponseWriter, r *http.Request) {
+	if !s.requireOperator(w, r) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", 405)
 		return

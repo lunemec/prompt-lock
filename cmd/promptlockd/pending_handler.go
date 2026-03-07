@@ -3,6 +3,9 @@ package main
 import "net/http"
 
 func (s *server) handlePendingRequests(w http.ResponseWriter, r *http.Request) {
+	if !s.requireOperator(w, r) {
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", 405)
 		return

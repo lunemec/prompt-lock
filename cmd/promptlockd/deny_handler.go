@@ -10,6 +10,9 @@ type denyReq struct {
 }
 
 func (s *server) handleDeny(w http.ResponseWriter, r *http.Request) {
+	if !s.requireOperator(w, r) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", 405)
 		return

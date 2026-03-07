@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added explicit watcher subcommands: `approve-queue list|allow|deny`.
 - Added auth foundation: pairing bootstrap/grant/session/revoke endpoints and in-memory auth store.
 - Added auth config block for long-running container support (idle + absolute grant TTL).
+- Added initial endpoint authz enforcement (operator token + agent session token) when auth is enabled.
 - Wrapper execution docs and intent examples in config.
 
 ### Changed

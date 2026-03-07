@@ -24,14 +24,17 @@ PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 ```bash
 # list pending requests
 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
+PROMPTLOCK_OPERATOR_TOKEN=... \
   go run ./cmd/promptlock approve-queue list
 
 # allow specific request
 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
+PROMPTLOCK_OPERATOR_TOKEN=... \
   go run ./cmd/promptlock approve-queue allow --ttl 5 <request_id>
 
 # deny specific request
 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
+PROMPTLOCK_OPERATOR_TOKEN=... \
   go run ./cmd/promptlock approve-queue deny --reason "scope too broad" <request_id>
 ```
 
@@ -46,9 +49,10 @@ PROMPTLOCK_DEV_MODE=1 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 - `--intent` resolves secrets via broker intent map.
 - `--secrets` can be used explicitly instead of intent.
 - Wrapper computes command and working-directory fingerprints and includes them in lease/access calls.
+- When auth is enabled, wrapper uses `--session-token` (or `PROMPTLOCK_SESSION_TOKEN`) for agent endpoints.
 - Default mode waits for external human approval (`--wait-approve`, `--poll-interval`).
 - `promptlock approve-queue` is a host-side watcher CLI for approving/denying pending requests.
-- `--auto-approve` exists only for local prototyping and requires `PROMPTLOCK_DEV_MODE=1`.
+- `--auto-approve` exists only for local prototyping and requires `PROMPTLOCK_DEV_MODE=1` and operator token.
 - Basic command policy blocks risky secret-dumping command patterns unless `--allow-risky-command` is explicitly set.
 
 ## Security direction

@@ -130,3 +130,17 @@ func (s *Store) RevokeSession(token string) error {
 	s.sessions[token] = t
 	return nil
 }
+
+func (s *Store) ValidateSession(token string, now time.Time) (SessionToken, error) {
+	t, err := s.GetSession(token)
+	if err != nil {
+		return SessionToken{}, err
+	}
+	if t.Revoked {
+		return SessionToken{}, errors.New("session revoked")
+	}
+	if !now.Before(t.ExpiresAt) {
+		return SessionToken{}, errors.New("session expired")
+	}
+	return t, nil
+}

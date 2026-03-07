@@ -63,6 +63,9 @@ func main() {
 	if v := os.Getenv("PROMPTLOCK_ADDR"); v != "" {
 		cfg.Address = v
 	}
+	if v := os.Getenv("PROMPTLOCK_OPERATOR_TOKEN"); v != "" {
+		cfg.Auth.OperatorToken = v
+	}
 
 	store := memory.NewStore()
 	store.SetSecret("github_token", getenv("PROMPTLOCK_DEMO_GITHUB_TOKEN", "DEMO_GITHUB_TOKEN"))
@@ -94,6 +97,9 @@ func main() {
 		NewLeaseTok:  newLease,
 	}
 
+	if cfg.Auth.EnableAuth && cfg.Auth.OperatorToken == "" {
+		log.Fatal("auth enabled but operator_token is empty")
+	}
 	authStore := auth.NewStore()
 	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, authStore: authStore, seq: &seq, now: func() time.Time { return time.Now().UTC() }}
 	http.HandleFunc("/v1/intents/resolve", s.handleResolveIntent)
@@ -114,6 +120,9 @@ func main() {
 }
 
 func (s *server) handleResolveIntent(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAgentSession(w, r) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", 405)
 		return
@@ -132,6 +141,9 @@ func (s *server) handleResolveIntent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleRequestStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAgentSession(w, r) {
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", 405)
 		return
@@ -150,6 +162,9 @@ func (s *server) handleRequestStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAgentSession(w, r) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", 405)
 		return
@@ -171,6 +186,9 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
+	if !s.requireOperator(w, r) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", 405)
 		return
@@ -191,6 +209,9 @@ func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleAccess(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAgentSession(w, r) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", 405)
 		return

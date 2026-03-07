@@ -45,6 +45,7 @@ func runExec(args []string) {
 	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
 	agent := fs.String("agent", "agent", "agent id")
 	task := fs.String("task", "task", "task id")
+	sessionToken := fs.String("session-token", getenv("PROMPTLOCK_SESSION_TOKEN", ""), "agent session token")
 	reason := fs.String("reason", "execute command", "reason")
 	ttl := fs.Int("ttl", 5, "ttl minutes")
 	intent := fs.String("intent", "", "intent name")
@@ -72,7 +73,7 @@ func runExec(args []string) {
 
 	secrets := []string{}
 	if *intent != "" {
-		resolved, err := resolveIntent(*broker, *intent)
+		resolved, err := resolveIntent(*broker, *sessionToken, *intent)
 		if err != nil {
 			fatal(err)
 		}
@@ -94,7 +95,7 @@ func runExec(args []string) {
 	if err != nil {
 		fatal(err)
 	}
-	reqID, err := requestLease(*broker, requestBody{AgentID: *agent, TaskID: *task, Reason: *reason, TTLMinutes: *ttl, Secrets: secrets, CommandFingerprint: fingerprint, WorkdirFingerprint: wdfp})
+	reqID, err := requestLease(*broker, *sessionToken, requestBody{AgentID: *agent, TaskID: *task, Reason: *reason, TTLMinutes: *ttl, Secrets: secrets, CommandFingerprint: fingerprint, WorkdirFingerprint: wdfp})
 	if err != nil {
 		fatal(err)
 	}
@@ -104,12 +105,12 @@ func runExec(args []string) {
 		if getenv("PROMPTLOCK_DEV_MODE", "") != "1" {
 			fatal(fmt.Errorf("--auto-approve is disabled unless PROMPTLOCK_DEV_MODE=1"))
 		}
-		lease, err = approve(*broker, reqID, *ttl)
+		lease, err = approve(*broker, getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), reqID, *ttl)
 		if err != nil {
 			fatal(err)
 		}
 	} else {
-		lease, err = waitForApproval(*broker, reqID, *waitApprove, *pollInterval)
+		lease, err = waitForApproval(*broker, *sessionToken, reqID, *waitApprove, *pollInterval)
 		if err != nil {
 			fatal(err)
 		}
@@ -117,7 +118,7 @@ func runExec(args []string) {
 
 	env := os.Environ()
 	for _, s := range secrets {
-		v, err := accessSecret(*broker, lease, s, fingerprint, wdfp)
+		v, err := accessSecret(*broker, *sessionToken, lease, s, fingerprint, wdfp)
 		if err != nil {
 			fatal(err)
 		}
@@ -138,21 +139,21 @@ func runExec(args []string) {
 	}
 }
 
-func resolveIntent(broker, intent string) ([]string, error) {
+func resolveIntent(broker, sessionToken, intent string) ([]string, error) {
 	var out struct {
 		Secrets []string `json:"secrets"`
 	}
-	if err := postJSON(broker+"/v1/intents/resolve", map[string]string{"intent": intent}, &out); err != nil {
+	if err := postJSONAuth(broker+"/v1/intents/resolve", sessionToken, map[string]string{"intent": intent}, &out); err != nil {
 		return nil, err
 	}
 	return out.Secrets, nil
 }
 
-func requestLease(broker string, req requestBody) (string, error) {
+func requestLease(broker, sessionToken string, req requestBody) (string, error) {
 	var out struct {
 		RequestID string `json:"request_id"`
 	}
-	if err := postJSON(broker+"/v1/leases/request", req, &out); err != nil {
+	if err := postJSONAuth(broker+"/v1/leases/request", sessionToken, req, &out); err != nil {
 		return "", err
 	}
 	if out.RequestID == "" {
@@ -161,11 +162,11 @@ func requestLease(broker string, req requestBody) (string, error) {
 	return out.RequestID, nil
 }
 
-func approve(broker, requestID string, ttl int) (string, error) {
+func approve(broker, operatorToken, requestID string, ttl int) (string, error) {
 	var out struct {
 		LeaseToken string `json:"lease_token"`
 	}
-	if err := postJSON(broker+"/v1/leases/approve?request_id="+requestID, map[string]int{"ttl_minutes": ttl}, &out); err != nil {
+	if err := postJSONAuth(broker+"/v1/leases/approve?request_id="+requestID, operatorToken, map[string]int{"ttl_minutes": ttl}, &out); err != nil {
 		return "", err
 	}
 	if out.LeaseToken == "" {
@@ -174,19 +175,27 @@ func approve(broker, requestID string, ttl int) (string, error) {
 	return out.LeaseToken, nil
 }
 
-func accessSecret(broker, lease, secret, fingerprint, workdirFP string) (string, error) {
+func accessSecret(broker, sessionToken, lease, secret, fingerprint, workdirFP string) (string, error) {
 	var out struct {
 		Value string `json:"value"`
 	}
-	if err := postJSON(broker+"/v1/leases/access", map[string]string{"lease_token": lease, "secret": secret, "command_fingerprint": fingerprint, "workdir_fingerprint": workdirFP}, &out); err != nil {
+	if err := postJSONAuth(broker+"/v1/leases/access", sessionToken, map[string]string{"lease_token": lease, "secret": secret, "command_fingerprint": fingerprint, "workdir_fingerprint": workdirFP}, &out); err != nil {
 		return "", err
 	}
 	return out.Value, nil
 }
 
-func postJSON(url string, in any, out any) error {
+func postJSONAuth(url, bearer string, in any, out any) error {
 	b, _ := json.Marshal(in)
-	resp, err := http.Post(url, "application/json", bytes.NewReader(b))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -195,6 +204,17 @@ func postJSON(url string, in any, out any) error {
 		return fmt.Errorf("request failed: %s", resp.Status)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func getAuth(url, bearer string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	return http.DefaultClient.Do(req)
 }
 
 func fatal(err error) {
@@ -244,8 +264,8 @@ func detectRiskyCommand(cmd []string) string {
 	return ""
 }
 
-func fetchLeaseByRequest(broker, requestID string) (string, error) {
-	resp, err := http.Get(broker + "/v1/leases/by-request?request_id=" + requestID)
+func fetchLeaseByRequest(broker, sessionToken, requestID string) (string, error) {
+	resp, err := getAuth(broker+"/v1/leases/by-request?request_id="+requestID, sessionToken)
 	if err != nil {
 		return "", err
 	}
@@ -265,8 +285,8 @@ func fetchLeaseByRequest(broker, requestID string) (string, error) {
 	return out.LeaseToken, nil
 }
 
-func requestStatus(broker, requestID string) (string, error) {
-	resp, err := http.Get(broker + "/v1/requests/status?request_id=" + requestID)
+func requestStatus(broker, sessionToken, requestID string) (string, error) {
+	resp, err := getAuth(broker+"/v1/requests/status?request_id="+requestID, sessionToken)
 	if err != nil {
 		return "", err
 	}
@@ -283,16 +303,16 @@ func requestStatus(broker, requestID string) (string, error) {
 	return out.Status, nil
 }
 
-func waitForApproval(broker, requestID string, timeout, poll time.Duration) (string, error) {
+func waitForApproval(broker, sessionToken, requestID string, timeout, poll time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	for {
-		status, err := requestStatus(broker, requestID)
+		status, err := requestStatus(broker, sessionToken, requestID)
 		if err != nil {
 			return "", err
 		}
 		switch status {
 		case "approved":
-			return fetchLeaseByRequest(broker, requestID)
+			return fetchLeaseByRequest(broker, sessionToken, requestID)
 		case "denied":
 			return "", fmt.Errorf("request denied: %s", requestID)
 		}
@@ -333,11 +353,12 @@ func runApproveQueue(args []string) {
 	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
 	poll := fs.Duration("poll-interval", 3*time.Second, "poll interval")
 	defaultTTL := fs.Int("ttl", 5, "approval ttl override")
+	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	once := fs.Bool("once", false, "process one pass and exit")
 	fs.Parse(args)
 
 	for {
-		items, err := listPending(*broker)
+		items, err := listPending(*broker, *operatorToken)
 		if err != nil {
 			fatal(err)
 		}
@@ -350,14 +371,14 @@ func runApproveQueue(args []string) {
 			_, _ = fmt.Fscanln(os.Stdin, &ans)
 			switch strings.ToLower(strings.TrimSpace(ans)) {
 			case "y", "yes":
-				_, err := approve(*broker, it.ID, *defaultTTL)
+				_, err := approve(*broker, *operatorToken, it.ID, *defaultTTL)
 				if err != nil {
 					fmt.Println("approve failed:", err)
 				} else {
 					fmt.Println("approved")
 				}
 			case "n", "no":
-				if err := deny(*broker, it.ID, "denied by operator"); err != nil {
+				if err := deny(*broker, *operatorToken, it.ID, "denied by operator"); err != nil {
 					fmt.Println("deny failed:", err)
 				} else {
 					fmt.Println("denied")
@@ -376,8 +397,9 @@ func runApproveQueue(args []string) {
 func runApproveList(args []string) {
 	fs := flag.NewFlagSet("approve-queue list", flag.ExitOnError)
 	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
+	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	fs.Parse(args)
-	items, err := listPending(*broker)
+	items, err := listPending(*broker, *operatorToken)
 	if err != nil {
 		fatal(err)
 	}
@@ -393,13 +415,14 @@ func runApproveList(args []string) {
 func runApproveAllow(args []string) {
 	fs := flag.NewFlagSet("approve-queue allow", flag.ExitOnError)
 	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
+	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	ttl := fs.Int("ttl", 5, "approval ttl override")
 	fs.Parse(args)
 	if fs.NArg() < 1 {
 		fatal(fmt.Errorf("usage: promptlock approve-queue allow [--broker URL] [--ttl N] <request_id>"))
 	}
 	requestID := fs.Arg(0)
-	if _, err := approve(*broker, requestID, *ttl); err != nil {
+	if _, err := approve(*broker, *operatorToken, requestID, *ttl); err != nil {
 		fatal(err)
 	}
 	fmt.Println("approved", requestID)
@@ -408,19 +431,20 @@ func runApproveAllow(args []string) {
 func runApproveDeny(args []string) {
 	fs := flag.NewFlagSet("approve-queue deny", flag.ExitOnError)
 	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
+	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	reason := fs.String("reason", "denied by operator", "deny reason")
 	fs.Parse(args)
 	if fs.NArg() < 1 {
 		fatal(fmt.Errorf("usage: promptlock approve-queue deny [--broker URL] [--reason TEXT] <request_id>"))
 	}
 	requestID := fs.Arg(0)
-	if err := deny(*broker, requestID, *reason); err != nil {
+	if err := deny(*broker, *operatorToken, requestID, *reason); err != nil {
 		fatal(err)
 	}
 	fmt.Println("denied", requestID)
 }
 
-func listPending(broker string) ([]struct {
+func listPending(broker, operatorToken string) ([]struct {
 	ID         string   `json:"ID"`
 	AgentID    string   `json:"AgentID"`
 	TaskID     string   `json:"TaskID"`
@@ -428,7 +452,7 @@ func listPending(broker string) ([]struct {
 	TTLMinutes int      `json:"TTLMinutes"`
 	Secrets    []string `json:"Secrets"`
 }, error) {
-	resp, err := http.Get(broker + "/v1/requests/pending")
+	resp, err := getAuth(broker+"/v1/requests/pending", operatorToken)
 	if err != nil {
 		return nil, err
 	}
@@ -443,7 +467,7 @@ func listPending(broker string) ([]struct {
 	return out.Pending, nil
 }
 
-func deny(broker, requestID, reason string) error {
+func deny(broker, operatorToken, requestID, reason string) error {
 	var out map[string]any
-	return postJSON(broker+"/v1/leases/deny?request_id="+requestID, map[string]string{"reason": reason}, &out)
+	return postJSONAuth(broker+"/v1/leases/deny?request_id="+requestID, operatorToken, map[string]string{"reason": reason}, &out)
 }

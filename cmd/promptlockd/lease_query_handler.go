@@ -3,6 +3,9 @@ package main
 import "net/http"
 
 func (s *server) handleLeaseByRequest(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAgentSession(w, r) {
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", 405)
 		return
