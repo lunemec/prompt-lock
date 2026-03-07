@@ -1,0 +1,27 @@
+{
+  "address": "0.0.0.0:8765",
+  "audit_path": "/tmp/promptlock-audit.jsonl",
+  "auth": {
+    "enable_auth": false,
+    "operator_token": "",
+    "allow_plaintext_secret_return": false,
+    "session_ttl_minutes": 10,
+    "grant_idle_timeout_minutes": 480,
+    "grant_absolute_max_minutes": 10080,
+    "bootstrap_token_ttl_seconds": 60,
+    "cleanup_interval_seconds": 60
+  },
+  "execution_policy": {
+    "allowlist_prefixes": ["bash"],
+    "denylist_substrings": ["printenv", "/proc/", "environ"],
+    "max_output_bytes": 65536,
+    "default_timeout_sec": 30,
+    "max_timeout_sec": 60
+  },
+  "secrets": [
+    { "name": "github_token", "value": "E2E_OK" }
+  ],
+  "intents": {
+    "run_tests": ["github_token"]
+  }
+}

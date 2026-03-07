@@ -1,7 +1,7 @@
-.PHONY: help lint test security docs validate-changelog validate-final ci
+.PHONY: help lint test fuzz security docs validate-changelog validate-final ci e2e-compose
 
 help:
-	@echo "Targets: lint test security docs validate-changelog validate-final ci"
+	@echo "Targets: lint test fuzz security docs validate-changelog validate-final ci e2e-compose"
 
 lint:
 	bash -n scripts/secretctl.sh scripts/human-approve.sh
@@ -9,6 +9,10 @@ lint:
 
 test:
 	go test ./...
+
+fuzz:
+	go test ./cmd/promptlock-mcp -run=^$$ -fuzz=FuzzParseAndValidateExecArgs -fuzztime=5s
+	go test ./cmd/promptlockd -run=^$$ -fuzz=FuzzValidateExecuteCommand -fuzztime=5s
 
 security:
 	python3 scripts/validate_security_basics.py
@@ -28,3 +32,7 @@ validate-final: lint security docs validate-changelog test
 	@echo "Final validation gate passed."
 
 ci: validate-final
+
+e2e-compose:
+	docker compose -f docker-compose.e2e.yml up --build --abort-on-container-exit --exit-code-from e2e-runner
+	docker compose -f docker-compose.e2e.yml down -v

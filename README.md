@@ -55,6 +55,18 @@ Run final validation gate manually:
 make validate-final
 ```
 
+Run quick fuzzing pass:
+
+```bash
+make fuzz
+```
+
+Run docker-compose real-path smoke test:
+
+```bash
+make e2e-compose
+```
+
 Start broker (prototype Python mock):
 
 ```bash

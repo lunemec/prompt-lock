@@ -1,0 +1,35 @@
+services:
+  promptlockd:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: promptlockd-e2e
+    environment:
+      PROMPTLOCK_CONFIG: /app/config.e2e.json
+      PROMPTLOCK_ALLOW_INSECURE_TCP: "1"
+    volumes:
+      - ./deploy/docker/config.e2e.json:/app/config.e2e.json:ro
+    ports:
+      - "8765:8765"
+
+  e2e-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: promptlock-e2e-runner
+    depends_on:
+      - promptlockd
+    entrypoint: ["/bin/sh", "-lc"]
+    command:
+      - >
+        sleep 2 &&
+        PROMPTLOCK_DEV_MODE=1
+        promptlock exec
+        --broker http://promptlockd:8765
+        --agent e2e-agent
+        --task e2e-task
+        --intent run_tests
+        --ttl 5
+        --auto-approve
+        --broker-exec
+        -- bash -lc 'echo -n $GITHUB_TOKEN'
