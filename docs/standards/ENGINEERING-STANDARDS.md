@@ -17,3 +17,11 @@ Every task completion must include:
 - mitigation status (implemented / deferred)
 
 If unsure about security impact, explicitly escalate in output.
+
+## Project process requirements
+- Provide Makefile commands for common contributor workflows.
+- Document architectural and requirement decisions in ADRs.
+- Maintain CHANGELOG.md using Keep-a-Changelog.
+- New changes must be under `[Unreleased]`.
+- Released versions must use proper SemVer headings.
+- `make validate-final` must pass before commit/merge.

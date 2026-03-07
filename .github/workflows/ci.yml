@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: ["master", "main"]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install security linters
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit
+
+      - name: Final validation gate
+        run: make validate-final
+
+      - name: Security static analysis (bandit)
+        run: bandit -q -r scripts
+
+      - name: Changelog gate
+        run: make validate-changelog

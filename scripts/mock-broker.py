@@ -12,9 +12,9 @@ MAX_TTL_MIN = 60
 
 # Demo secrets store (replace with Vault/1Password/etc in production)
 SECRETS = {
-    'github_token': 'ghp_demo_token_replace_me',
-    'npm_token': 'npm_demo_token_replace_me',
-    'openai_api_key': 'sk-demo-replace-me'
+    'github_token': 'DEMO_GITHUB_TOKEN_REPLACE_ME',
+    'npm_token': 'DEMO_NPM_TOKEN_REPLACE_ME',
+    'openai_api_key': 'DEMO_OPENAI_KEY_REPLACE_ME'
 }
 
 

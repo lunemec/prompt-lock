@@ -18,12 +18,15 @@ See `docs/CONTRACT.md`.
 
 ## Repository contents
 - `AGENTS.md` — project map and non-negotiable engineering/security rules
+- `CHANGELOG.md` — Keep-a-Changelog history (`[Unreleased]` required)
+- `Makefile` — exposed commands for developers/users
 - `docs/CONTRACT.md` — API and security contract
 - `docs/NOTE-project-style-adoption.md` — reusable agent/docs style for other projects
 - `docs/architecture/` — architecture source of truth (hexagonal required)
+- `docs/decisions/` — ADRs for architecture and requirement changes
 - `docs/standards/` — engineering standards (Red-Green-Blue TDD, security reporting)
 - `docs/plans/` — active execution plan and gates
-- `docs/operations/` — runbook
+- `docs/operations/` — runbooks and Dockerization notes
 - `docs/context/` — product context and trust boundaries
 - `scripts/mock-broker.py` — minimal local broker (demo)
 - `scripts/secretctl.sh` — agent-facing CLI wrapper
@@ -32,6 +35,19 @@ See `docs/CONTRACT.md`.
 - `examples/` — sample workflow commands
 
 ## Quick demo
+
+Install local git hook (recommended):
+
+```bash
+git config core.hooksPath .githooks
+chmod +x .githooks/pre-commit
+```
+
+Run final validation gate manually:
+
+```bash
+make validate-final
+```
 
 Start broker:
 
@@ -69,3 +85,5 @@ This is a draft prototype for flow design and integration testing, not a product
 Production hardening should include mTLS, unix sockets, policy engine, encrypted at-rest storage, tamper-evident audit logs, and external secret backend integration (Vault/1Password/etc.).
 
 **Critical:** audit trail must be persisted on the host (outside agent-controlled workspace/container paths) so request/approval/access history cannot be silently altered by agent workloads.
+
+Docker deployment guidance: `docs/operations/DOCKER.md`.
