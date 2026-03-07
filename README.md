@@ -84,6 +84,9 @@ Agent fetches secret by lease token:
 scripts/secretctl.sh access --lease <lease_token> --secret github_token
 ```
 
+## Agent-generated code note
+This repository is primarily **agent-generated code and documentation**, following the same agent-first workflow style as the `codex-docker` project.
+
 ## Important
 This is a draft prototype for flow design and integration testing, not a production-grade secret manager.
 
