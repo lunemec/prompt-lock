@@ -315,6 +315,20 @@ type pendingResponse struct {
 }
 
 func runApproveQueue(args []string) {
+	if len(args) > 0 {
+		switch args[0] {
+		case "list":
+			runApproveList(args[1:])
+			return
+		case "allow":
+			runApproveAllow(args[1:])
+			return
+		case "deny":
+			runApproveDeny(args[1:])
+			return
+		}
+	}
+
 	fs := flag.NewFlagSet("approve-queue", flag.ExitOnError)
 	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
 	poll := fs.Duration("poll-interval", 3*time.Second, "poll interval")
@@ -357,6 +371,53 @@ func runApproveQueue(args []string) {
 		}
 		time.Sleep(*poll)
 	}
+}
+
+func runApproveList(args []string) {
+	fs := flag.NewFlagSet("approve-queue list", flag.ExitOnError)
+	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
+	fs.Parse(args)
+	items, err := listPending(*broker)
+	if err != nil {
+		fatal(err)
+	}
+	if len(items) == 0 {
+		fmt.Println("no pending requests")
+		return
+	}
+	for _, it := range items {
+		fmt.Printf("%s | agent=%s task=%s ttl=%d | secrets=%s | reason=%s\n", it.ID, it.AgentID, it.TaskID, it.TTLMinutes, strings.Join(it.Secrets, ","), it.Reason)
+	}
+}
+
+func runApproveAllow(args []string) {
+	fs := flag.NewFlagSet("approve-queue allow", flag.ExitOnError)
+	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
+	ttl := fs.Int("ttl", 5, "approval ttl override")
+	fs.Parse(args)
+	if fs.NArg() < 1 {
+		fatal(fmt.Errorf("usage: promptlock approve-queue allow [--broker URL] [--ttl N] <request_id>"))
+	}
+	requestID := fs.Arg(0)
+	if _, err := approve(*broker, requestID, *ttl); err != nil {
+		fatal(err)
+	}
+	fmt.Println("approved", requestID)
+}
+
+func runApproveDeny(args []string) {
+	fs := flag.NewFlagSet("approve-queue deny", flag.ExitOnError)
+	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
+	reason := fs.String("reason", "denied by operator", "deny reason")
+	fs.Parse(args)
+	if fs.NArg() < 1 {
+		fatal(fmt.Errorf("usage: promptlock approve-queue deny [--broker URL] [--reason TEXT] <request_id>"))
+	}
+	requestID := fs.Arg(0)
+	if err := deny(*broker, requestID, *reason); err != nil {
+		fatal(err)
+	}
+	fmt.Println("denied", requestID)
 }
 
 func listPending(broker string) ([]struct {

@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lease query by request endpoint to support external approval flow.
 - Pending requests endpoint for approval watcher.
 - `promptlock approve-queue` host-side watcher CLI for approving/denying queued requests.
+- Added explicit watcher subcommands: `approve-queue list|allow|deny`.
 - Wrapper execution docs and intent examples in config.
 
 ### Changed

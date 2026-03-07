@@ -5,7 +5,7 @@
 ## Example
 
 ```bash
-# Terminal A: human approval watcher
+# Terminal A: human approval watcher (interactive)
 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
   go run ./cmd/promptlock approve-queue
 
@@ -17,6 +17,22 @@ PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
   --intent run_tests \
   --ttl 5 \
   -- bash -lc 'echo running tests'
+```
+
+## Approval watcher commands
+
+```bash
+# list pending requests
+PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
+  go run ./cmd/promptlock approve-queue list
+
+# allow specific request
+PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
+  go run ./cmd/promptlock approve-queue allow --ttl 5 <request_id>
+
+# deny specific request
+PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
+  go run ./cmd/promptlock approve-queue deny --reason "scope too broad" <request_id>
 ```
 
 For local demo only (no external approval watcher):
