@@ -18,6 +18,7 @@ Move MCP adapter from scaffold-level confidence to integration-level confidence 
    - start test broker with auth/session fixture
    - run MCP execute_with_intent flow
    - assert lease lifecycle + execute output + audit events
+   - status: partially implemented (live broker-backed positive path added)
 4. Negative/security tests
    - malformed JSON-RPC payloads
    - oversized arguments

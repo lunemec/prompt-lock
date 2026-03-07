@@ -2,11 +2,14 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -138,4 +141,116 @@ func TestMCPToolsCallExecuteWithIntentRoundtrip(t *testing.T) {
 	if !strings.Contains(text, "exit=0") {
 		t.Fatalf("expected exit=0 in text, got: %s", text)
 	}
+}
+
+func TestMCPToolsCallRealBrokerE2E(t *testing.T) {
+	addr := freeAddr(t)
+	cfgPath := filepath.Join(t.TempDir(), "promptlock-config.json")
+	cfg := map[string]any{
+		"address":    addr,
+		"audit_path": filepath.Join(t.TempDir(), "audit.jsonl"),
+		"auth": map[string]any{
+			"enable_auth": false,
+		},
+		"execution_policy": map[string]any{
+			"allowlist_prefixes":  []string{"bash"},
+			"denylist_substrings": []string{"printenv"},
+			"max_output_bytes":    65536,
+			"default_timeout_sec": 30,
+			"max_timeout_sec":     60,
+		},
+		"secrets": []map[string]string{{"name": "github_token", "value": "E2E_OK"}},
+		"intents": map[string][]string{"run_tests": {"github_token"}},
+	}
+	b, _ := json.Marshal(cfg)
+	if err := os.WriteFile(cfgPath, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	brokerCmd := exec.Command("go", "run", "./cmd/promptlockd")
+	brokerCmd.Dir = "../.."
+	brokerCmd.Env = append(os.Environ(), "PROMPTLOCK_CONFIG="+cfgPath)
+	if err := brokerCmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = brokerCmd.Process.Kill() })
+	waitBroker(t, "http://"+addr)
+
+	_, writeLine, readJSON := launchMCP(t, map[string]string{
+		"PROMPTLOCK_BROKER_URL":    "http://" + addr,
+		"PROMPTLOCK_SESSION_TOKEN": "dummy",
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			resp, err := http.Get("http://" + addr + "/v1/requests/pending")
+			if err == nil {
+				var p struct {
+					Pending []struct {
+						ID string `json:"ID"`
+					} `json:"pending"`
+				}
+				_ = json.NewDecoder(resp.Body).Decode(&p)
+				_ = resp.Body.Close()
+				if len(p.Pending) > 0 {
+					_, _ = http.Post("http://"+addr+"/v1/leases/approve?request_id="+p.Pending[0].ID, "application/json", bytes.NewBufferString(`{"ttl_minutes":5}`))
+					return
+				}
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+
+	writeLine(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo -n $GITHUB_TOKEN"],"ttl_minutes":5}}}`)
+	msg := readJSON()
+	<-done
+	if msg["error"] != nil {
+		t.Fatalf("tools/call E2E returned error: %+v", msg)
+	}
+	res, ok := msg["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("invalid result: %+v", msg)
+	}
+	content, ok := res["content"].([]any)
+	if !ok || len(content) == 0 {
+		t.Fatalf("missing content: %+v", msg)
+	}
+	item, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("invalid content shape: %+v", msg)
+	}
+	text, _ := item["text"].(string)
+	if !strings.Contains(text, "exit=0") || !strings.Contains(text, "E2E_OK") {
+		t.Fatalf("unexpected text: %s", text)
+	}
+}
+
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	return addr
+}
+
+func waitBroker(t *testing.T, base string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(base + "/v1/meta/capabilities")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode < 500 {
+				return
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("broker did not become ready: %s", base)
 }

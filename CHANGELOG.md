@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added MCP adapter input validation and unit tests.
 - Added initial MCP RPC response-shape tests and MCP integration test roadmap.
 - Added MCP stdio harness tests for initialize/tools/list and tools/call mocked-broker roundtrip.
+- Added MCP tools/call live broker-backed E2E positive-path harness test.
 - Wrapper execution docs and intent examples in config.
 
 ### Changed
