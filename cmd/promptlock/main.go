@@ -24,6 +24,11 @@ type requestBody struct {
 	WorkdirFingerprint string   `json:"workdir_fingerprint"`
 }
 
+type capabilities struct {
+	AuthEnabled                bool `json:"auth_enabled"`
+	AllowPlaintextSecretReturn bool `json:"allow_plaintext_secret_return"`
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|approve-queue> [flags]")
@@ -88,6 +93,16 @@ func runExec(args []string) {
 	}
 	if len(secrets) == 0 {
 		fatal(fmt.Errorf("no secrets resolved; use --intent or --secrets"))
+	}
+
+	caps, err := brokerCapabilities(*broker)
+	if err == nil {
+		if caps.AuthEnabled && *sessionToken == "" {
+			fatal(fmt.Errorf("broker requires session token; provide --session-token or PROMPTLOCK_SESSION_TOKEN"))
+		}
+		if caps.AuthEnabled && !caps.AllowPlaintextSecretReturn {
+			fatal(fmt.Errorf("broker policy disables plaintext secret return; current wrapper mode is incompatible (next step: execute-with-secret mode)"))
+		}
 	}
 
 	fingerprint := commandFingerprint(cmdArgs)
@@ -470,4 +485,20 @@ func listPending(broker, operatorToken string) ([]struct {
 func deny(broker, operatorToken, requestID, reason string) error {
 	var out map[string]any
 	return postJSONAuth(broker+"/v1/leases/deny?request_id="+requestID, operatorToken, map[string]string{"reason": reason}, &out)
+}
+
+func brokerCapabilities(broker string) (capabilities, error) {
+	resp, err := http.Get(broker + "/v1/meta/capabilities")
+	if err != nil {
+		return capabilities{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return capabilities{}, fmt.Errorf("capabilities request failed: %s", resp.Status)
+	}
+	var out capabilities
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return capabilities{}, err
+	}
+	return out, nil
 }

@@ -20,13 +20,14 @@ import (
 )
 
 type server struct {
-	svc         app.Service
-	intents     map[string][]string
-	authEnabled bool
-	authCfg     config.AuthConfig
-	authStore   *auth.Store
-	seq         *uint64
-	now         func() time.Time
+	svc                  app.Service
+	intents              map[string][]string
+	authEnabled          bool
+	authCfg              config.AuthConfig
+	authStore            *auth.Store
+	unixSocketConfigured bool
+	seq                  *uint64
+	now                  func() time.Time
 }
 
 type leaseReq struct {
@@ -110,10 +111,11 @@ func main() {
 		log.Fatal("auth enabled on non-local TCP without unix socket; set unix_socket or PROMPTLOCK_ALLOW_INSECURE_TCP=1")
 	}
 	authStore := auth.NewStore()
-	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, authStore: authStore, seq: &seq, now: func() time.Time { return time.Now().UTC() }}
+	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, authStore: authStore, unixSocketConfigured: cfg.UnixSocket != "", seq: &seq, now: func() time.Time { return time.Now().UTC() }}
 	if cfg.Auth.EnableAuth {
 		startAuthCleanupLoop(s)
 	}
+	http.HandleFunc("/v1/meta/capabilities", s.handleMetaCapabilities)
 	http.HandleFunc("/v1/intents/resolve", s.handleResolveIntent)
 	http.HandleFunc("/v1/requests/status", s.handleRequestStatus)
 	http.HandleFunc("/v1/requests/pending", s.handlePendingRequests)
