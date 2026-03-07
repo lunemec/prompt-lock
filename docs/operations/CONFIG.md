@@ -45,6 +45,7 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 - `allow_plaintext_secret_return=false` is recommended for hardened mode; plaintext secret API calls are blocked.
 - `cleanup_interval_seconds` controls background auth garbage collection of expired/used records.
 - For hardened local deployments, prefer `unix_socket` and keep TCP on localhost only.
+- CLI clients can target unix socket with `--broker-unix-socket` / `PROMPTLOCK_BROKER_UNIX_SOCKET`.
 - If auth is enabled and TCP is non-local without unix socket, broker fails to start unless `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is set.
 
 ## Execution policy notes

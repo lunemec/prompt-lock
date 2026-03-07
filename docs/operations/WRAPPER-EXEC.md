@@ -9,6 +9,9 @@
 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
   go run ./cmd/promptlock approve-queue
 
+# (or via unix socket)
+go run ./cmd/promptlock approve-queue --broker-unix-socket /tmp/promptlock.sock
+
 # Terminal B: agent command waiting for approval
 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
   go run ./cmd/promptlock exec \
@@ -18,6 +21,9 @@ PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
   --ttl 5 \
   --broker-exec \
   -- bash -lc 'echo running tests'
+
+# (or via unix socket)
+go run ./cmd/promptlock exec --broker-unix-socket /tmp/promptlock.sock --agent r1 --task t1 --intent run_tests --ttl 5 --broker-exec -- bash -lc 'echo ok'
 ```
 
 ## Approval watcher commands
@@ -54,6 +60,7 @@ PROMPTLOCK_DEV_MODE=1 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 - `--broker-exec` uses `/v1/leases/execute` and is the preferred secure mode.
 - Broker-side execution policy can enforce command allowlist/denylist, output limits, and timeouts.
 - When auth is enabled, wrapper uses `--session-token` (or `PROMPTLOCK_SESSION_TOKEN`) for agent endpoints.
+- Wrapper supports TCP broker URL (`--broker`) and unix socket transport (`--broker-unix-socket`).
 - Default mode waits for external human approval (`--wait-approve`, `--poll-interval`).
 - `promptlock approve-queue` is a host-side watcher CLI for approving/denying pending requests.
 - `--auto-approve` exists only for local prototyping and requires `PROMPTLOCK_DEV_MODE=1` and operator token.

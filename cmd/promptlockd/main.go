@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -108,8 +109,8 @@ func main() {
 	if cfg.Auth.EnableAuth && cfg.Auth.OperatorToken == "" {
 		log.Fatal("auth enabled but operator_token is empty")
 	}
-	if cfg.Auth.EnableAuth && cfg.UnixSocket == "" && !isLocalAddress(cfg.Address) && getenv("PROMPTLOCK_ALLOW_INSECURE_TCP", "") != "1" {
-		log.Fatal("auth enabled on non-local TCP without unix socket; set unix_socket or PROMPTLOCK_ALLOW_INSECURE_TCP=1")
+	if err := validateTransportSafety(cfg, getenv("PROMPTLOCK_ALLOW_INSECURE_TCP", "")); err != nil {
+		log.Fatal(err)
 	}
 	authStore := auth.NewStore()
 	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, authStore: authStore, unixSocketConfigured: cfg.UnixSocket != "", seq: &seq, now: func() time.Time { return time.Now().UTC() }}
@@ -305,4 +306,11 @@ func isLocalAddress(addr string) bool {
 		return true
 	}
 	return false
+}
+
+func validateTransportSafety(cfg config.Config, allowInsecure string) error {
+	if cfg.Auth.EnableAuth && cfg.UnixSocket == "" && !isLocalAddress(cfg.Address) && allowInsecure != "1" {
+		return fmt.Errorf("auth enabled on non-local TCP without unix socket; set unix_socket or PROMPTLOCK_ALLOW_INSECURE_TCP=1")
+	}
+	return nil
 }
