@@ -14,6 +14,7 @@ import (
 	"github.com/lunemec/promptlock/internal/app"
 	"github.com/lunemec/promptlock/internal/auth"
 	"github.com/lunemec/promptlock/internal/config"
+	"github.com/lunemec/promptlock/internal/core/ports"
 )
 
 type server struct {
@@ -120,7 +121,9 @@ func main() {
 }
 
 func (s *server) handleResolveIntent(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAgentSession(w, r) {
+	var ok bool
+	r, ok = s.requireAgentSession(w, r)
+	if !ok {
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -141,7 +144,9 @@ func (s *server) handleResolveIntent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleRequestStatus(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAgentSession(w, r) {
+	var ok bool
+	r, ok = s.requireAgentSession(w, r)
+	if !ok {
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -162,7 +167,9 @@ func (s *server) handleRequestStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAgentSession(w, r) {
+	var ok bool
+	r, ok = s.requireAgentSession(w, r)
+	if !ok {
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -186,7 +193,9 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
-	if !s.requireOperator(w, r) {
+	var ok bool
+	r, ok = s.requireOperator(w, r)
+	if !ok {
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -205,11 +214,15 @@ func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
+	at, aid := actorFromRequest(r)
+	_ = s.svc.Audit.Write(ports.AuditEvent{Event: "operator_approved_request", Timestamp: s.now(), ActorType: at, ActorID: aid, RequestID: requestID, LeaseToken: lease.Token})
 	writeJSON(w, map[string]any{"status": "approved", "lease_token": lease.Token, "expires_at": lease.ExpiresAt})
 }
 
 func (s *server) handleAccess(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAgentSession(w, r) {
+	var ok bool
+	r, ok = s.requireAgentSession(w, r)
+	if !ok {
 		return
 	}
 	if r.Method != http.MethodPost {

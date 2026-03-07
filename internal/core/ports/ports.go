@@ -30,6 +30,8 @@ type AuditSink interface {
 type AuditEvent struct {
 	Event      string            `json:"event"`
 	Timestamp  time.Time         `json:"timestamp"`
+	ActorType  string            `json:"actor_type,omitempty"`
+	ActorID    string            `json:"actor_id,omitempty"`
 	AgentID    string            `json:"agent_id,omitempty"`
 	TaskID     string            `json:"task_id,omitempty"`
 	RequestID  string            `json:"request_id,omitempty"`

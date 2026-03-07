@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added auth foundation: pairing bootstrap/grant/session/revoke endpoints and in-memory auth store.
 - Added auth config block for long-running container support (idle + absolute grant TTL).
 - Added initial endpoint authz enforcement (operator token + agent session token) when auth is enabled.
+- Added actor attribution fields in audit events (`actor_type`, `actor_id`) and operator action audit records.
 - Wrapper execution docs and intent examples in config.
 
 ### Changed

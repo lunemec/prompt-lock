@@ -3,7 +3,9 @@ package main
 import "net/http"
 
 func (s *server) handlePendingRequests(w http.ResponseWriter, r *http.Request) {
-	if !s.requireOperator(w, r) {
+	var ok bool
+	r, ok = s.requireOperator(w, r)
+	if !ok {
 		return
 	}
 	if r.Method != http.MethodGet {

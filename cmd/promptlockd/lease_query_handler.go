@@ -3,7 +3,9 @@ package main
 import "net/http"
 
 func (s *server) handleLeaseByRequest(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAgentSession(w, r) {
+	var ok bool
+	r, ok = s.requireAgentSession(w, r)
+	if !ok {
 		return
 	}
 	if r.Method != http.MethodGet {
