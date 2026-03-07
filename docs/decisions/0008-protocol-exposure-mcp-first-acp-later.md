@@ -19,3 +19,5 @@ PromptLock should integrate with multiple agent ecosystems. Protocol choice impa
 ## Security implications
 - Protocol adapters must not weaken core non-disclosure/lease enforcement.
 - Adapter layers must preserve audit events and operator approval semantics.
+- MCP exposure must be **capability-first** (execute-with-secret) and not plaintext-secret-first.
+- Raw secret-return MCP methods are disallowed by default and require explicit break-glass policy if ever enabled.

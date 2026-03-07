@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ADR-0004 documenting Codex CLI integration strategy.
 - ADR-0005 documenting multi-CLI auth integration model.
 - ADR-0006/0007/0008 for intent API, TTL-bypass prevention, and MCP-first protocol exposure.
+- ADR-0009/0010 for secret delivery mechanisms and leakage containment policy.
 - CLI compatibility matrix draft and integration discovery plan docs.
 - Host configuration docs and sample config file.
 - Secure execution flow and threat-model documentation.

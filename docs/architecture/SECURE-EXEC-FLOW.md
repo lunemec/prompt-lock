@@ -92,6 +92,10 @@ Audit logs are host-side and outside agent-writable paths.
 
 Adapters must preserve non-disclosure defaults and full audit semantics.
 
+### MCP-specific requirement
+- MCP tools must expose **capability execution** (e.g., `run_with_intent`) rather than plaintext secret retrieval.
+- Plaintext secret-return MCP methods are disallowed by default.
+
 ---
 
 ## Developer ergonomics

@@ -13,6 +13,7 @@ This matrix tracks how PromptLock can integrate with major coding/agent CLIs.
 - Build one PromptLock execution wrapper contract.
 - Implement per-tool adapters incrementally.
 - Keep adapter behavior and risk model documented and testable.
+- For MCP exposure, keep tools capability-first; avoid default plaintext-secret APIs.
 
 ## Validation scenarios for each tool
 1. Lease request + approval
