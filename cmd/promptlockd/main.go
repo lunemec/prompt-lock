@@ -91,6 +91,7 @@ func main() {
 	s := &server{svc: svc, intents: cfg.Intents}
 	http.HandleFunc("/v1/intents/resolve", s.handleResolveIntent)
 	http.HandleFunc("/v1/requests/status", s.handleRequestStatus)
+	http.HandleFunc("/v1/requests/pending", s.handlePendingRequests)
 	http.HandleFunc("/v1/leases/request", s.handleRequest)
 	http.HandleFunc("/v1/leases/approve", s.handleApprove)
 	http.HandleFunc("/v1/leases/deny", s.handleDeny)

@@ -10,6 +10,7 @@ type RequestStore interface {
 	SaveRequest(req domain.LeaseRequest) error
 	GetRequest(id string) (domain.LeaseRequest, error)
 	UpdateRequest(req domain.LeaseRequest) error
+	ListPendingRequests() ([]domain.LeaseRequest, error)
 }
 
 type LeaseStore interface {

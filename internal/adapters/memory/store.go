@@ -46,6 +46,18 @@ func (s *Store) UpdateRequest(req domain.LeaseRequest) error {
 	return nil
 }
 
+func (s *Store) ListPendingRequests() ([]domain.LeaseRequest, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]domain.LeaseRequest, 0)
+	for _, r := range s.requests {
+		if r.Status == domain.RequestPending {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
 func (s *Store) SaveLease(lease domain.Lease) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

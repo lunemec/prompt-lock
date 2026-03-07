@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `promptlock exec` prototype wrapper command for intent/secrets-driven execution.
 - Intent resolution endpoint and request status endpoint in Go broker.
 - Lease query by request endpoint to support external approval flow.
+- Pending requests endpoint for approval watcher.
+- `promptlock approve-queue` host-side watcher CLI for approving/denying queued requests.
 - Wrapper execution docs and intent examples in config.
 
 ### Changed

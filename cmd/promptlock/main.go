@@ -25,11 +25,22 @@ type requestBody struct {
 }
 
 func main() {
-	if len(os.Args) < 2 || os.Args[1] != "exec" {
-		fmt.Fprintln(os.Stderr, "usage: promptlock exec [flags] -- <command>")
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|approve-queue> [flags]")
 		os.Exit(2)
 	}
+	switch os.Args[1] {
+	case "exec":
+		runExec(os.Args[2:])
+	case "approve-queue":
+		runApproveQueue(os.Args[2:])
+	default:
+		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|approve-queue> [flags]")
+		os.Exit(2)
+	}
+}
 
+func runExec(args []string) {
 	fs := flag.NewFlagSet("exec", flag.ExitOnError)
 	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
 	agent := fs.String("agent", "agent", "agent id")
@@ -42,7 +53,7 @@ func main() {
 	waitApprove := fs.Duration("wait-approve", 2*time.Minute, "max time to wait for external approval")
 	pollInterval := fs.Duration("poll-interval", 2*time.Second, "poll interval while waiting for approval")
 	allowRisky := fs.Bool("allow-risky-command", false, "allow risky commands (env/printenv/proc environ reads)")
-	fs.Parse(os.Args[2:])
+	fs.Parse(args)
 
 	cmdArgs := fs.Args()
 	sep := indexOf(cmdArgs, "--")
@@ -290,4 +301,88 @@ func waitForApproval(broker, requestID string, timeout, poll time.Duration) (str
 		}
 		time.Sleep(poll)
 	}
+}
+
+type pendingResponse struct {
+	Pending []struct {
+		ID         string   `json:"ID"`
+		AgentID    string   `json:"AgentID"`
+		TaskID     string   `json:"TaskID"`
+		Reason     string   `json:"Reason"`
+		TTLMinutes int      `json:"TTLMinutes"`
+		Secrets    []string `json:"Secrets"`
+	} `json:"pending"`
+}
+
+func runApproveQueue(args []string) {
+	fs := flag.NewFlagSet("approve-queue", flag.ExitOnError)
+	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
+	poll := fs.Duration("poll-interval", 3*time.Second, "poll interval")
+	defaultTTL := fs.Int("ttl", 5, "approval ttl override")
+	once := fs.Bool("once", false, "process one pass and exit")
+	fs.Parse(args)
+
+	for {
+		items, err := listPending(*broker)
+		if err != nil {
+			fatal(err)
+		}
+		for _, it := range items {
+			fmt.Printf("\nRequest %s | agent=%s task=%s ttl=%d\n", it.ID, it.AgentID, it.TaskID, it.TTLMinutes)
+			fmt.Printf("Reason: %s\n", it.Reason)
+			fmt.Printf("Secrets: %s\n", strings.Join(it.Secrets, ", "))
+			fmt.Print("Approve? [y]es / [n]o / [s]kip: ")
+			var ans string
+			_, _ = fmt.Fscanln(os.Stdin, &ans)
+			switch strings.ToLower(strings.TrimSpace(ans)) {
+			case "y", "yes":
+				_, err := approve(*broker, it.ID, *defaultTTL)
+				if err != nil {
+					fmt.Println("approve failed:", err)
+				} else {
+					fmt.Println("approved")
+				}
+			case "n", "no":
+				if err := deny(*broker, it.ID, "denied by operator"); err != nil {
+					fmt.Println("deny failed:", err)
+				} else {
+					fmt.Println("denied")
+				}
+			default:
+				fmt.Println("skipped")
+			}
+		}
+		if *once {
+			return
+		}
+		time.Sleep(*poll)
+	}
+}
+
+func listPending(broker string) ([]struct {
+	ID         string   `json:"ID"`
+	AgentID    string   `json:"AgentID"`
+	TaskID     string   `json:"TaskID"`
+	Reason     string   `json:"Reason"`
+	TTLMinutes int      `json:"TTLMinutes"`
+	Secrets    []string `json:"Secrets"`
+}, error) {
+	resp, err := http.Get(broker + "/v1/requests/pending")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("pending request failed: %s", resp.Status)
+	}
+	var out pendingResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Pending, nil
+}
+
+func deny(broker, requestID, reason string) error {
+	var out map[string]any
+	return postJSON(broker+"/v1/leases/deny?request_id="+requestID, map[string]string{"reason": reason}, &out)
 }
