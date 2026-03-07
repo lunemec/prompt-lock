@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added wrapper `--broker-exec` support to run through execute-with-secret flow.
 - Added execute-with-secret endpoint tests.
 - Added broker execution policy controls (allowlist/denylist, output cap, timeout bounds) with tests.
+- Added authz matrix tests (operator vs agent endpoint token separation).
+- Added ADR-0012 and hardened migration checklist to prefer broker-exec mode.
 - Wrapper execution docs and intent examples in config.
 
 ### Changed
