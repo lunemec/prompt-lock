@@ -10,5 +10,10 @@
   "secrets": [
     { "name": "github_token", "value": "REPLACE_ME" },
     { "name": "npm_token", "value": "REPLACE_ME" }
-  ]
+  ],
+  "intents": {
+    "run_tests": ["github_token"],
+    "publish_npm": ["npm_token"],
+    "run_e2e": ["github_token", "npm_token"]
+  }
 }

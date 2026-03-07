@@ -15,7 +15,10 @@ import (
 	"github.com/lunemec/promptlock/internal/config"
 )
 
-type server struct{ svc app.Service }
+type server struct {
+	svc     app.Service
+	intents map[string][]string
+}
 
 type leaseReq struct {
 	AgentID    string   `json:"agent_id"`
@@ -31,6 +34,10 @@ type approveReq struct {
 type accessReq struct {
 	LeaseToken string `json:"lease_token"`
 	Secret     string `json:"secret"`
+}
+
+type resolveIntentReq struct {
+	Intent string `json:"intent"`
 }
 
 func main() {
@@ -77,13 +84,51 @@ func main() {
 		NewLeaseTok:  newLease,
 	}
 
-	s := &server{svc: svc}
+	s := &server{svc: svc, intents: cfg.Intents}
+	http.HandleFunc("/v1/intents/resolve", s.handleResolveIntent)
+	http.HandleFunc("/v1/requests/status", s.handleRequestStatus)
 	http.HandleFunc("/v1/leases/request", s.handleRequest)
 	http.HandleFunc("/v1/leases/approve", s.handleApprove)
 	http.HandleFunc("/v1/leases/access", s.handleAccess)
 
 	log.Printf("promptlock listening on %s", cfg.Address)
 	log.Fatal(http.ListenAndServe(cfg.Address, nil))
+}
+
+func (s *server) handleResolveIntent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	var req resolveIntentReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	secrets, ok := s.intents[req.Intent]
+	if !ok || len(secrets) == 0 {
+		http.Error(w, "unknown intent", 404)
+		return
+	}
+	writeJSON(w, map[string]any{"intent": req.Intent, "secrets": secrets})
+}
+
+func (s *server) handleRequestStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	requestID := r.URL.Query().Get("request_id")
+	if requestID == "" {
+		http.Error(w, "request_id required", 400)
+		return
+	}
+	req, err := s.svc.Requests.GetRequest(requestID)
+	if err != nil {
+		http.Error(w, err.Error(), 404)
+		return
+	}
+	writeJSON(w, map[string]any{"request_id": req.ID, "status": req.Status})
 }
 
 func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {

@@ -32,7 +32,7 @@ See `docs/CONTRACT.md`.
 - `docs/decisions/` — ADRs for architecture and requirement changes
 - `docs/standards/` — engineering standards (Red-Green-Blue TDD, security reporting)
 - `docs/plans/` — active execution plan and gates
-- `docs/operations/` — runbooks and Dockerization notes
+- `docs/operations/` — runbooks, Dockerization, config, and wrapper execution notes
 - `docs/context/` — product context and trust boundaries
 - `scripts/mock-broker.py` — minimal local broker (demo)
 - `scripts/secretctl.sh` — agent-facing CLI wrapper
@@ -72,6 +72,15 @@ Start broker with host config:
 ```bash
 PROMPTLOCK_CONFIG=./examples/config.example.json go run ./cmd/promptlockd
 ```
+
+Run a command via PromptLock wrapper (prototype):
+
+```bash
+PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
+  go run ./cmd/promptlock exec --intent run_tests --ttl 5 --auto-approve -- env
+```
+
+(For local demo only: `--auto-approve` bypasses external human approval flow.)
 
 Agent requests secrets:
 

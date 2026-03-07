@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI compatibility matrix draft and integration discovery plan docs.
 - Host configuration docs and sample config file.
 - Secure execution flow and threat-model documentation.
+- `promptlock exec` prototype wrapper command for intent/secrets-driven execution.
+- Intent resolution endpoint and request status endpoint in Go broker.
+- Wrapper execution docs and intent examples in config.
 
 ### Changed
 - Project naming adopted: **PromptLock**.

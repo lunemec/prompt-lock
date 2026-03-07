@@ -12,6 +12,7 @@ type Config struct {
 	AuditPath string        `json:"audit_path"`
 	Policy    PolicyConfig  `json:"policy"`
 	Secrets   []SecretEntry `json:"secrets"`
+	Intents   IntentMap     `json:"intents"`
 }
 
 type PolicyConfig struct {
@@ -31,6 +32,7 @@ func Default() Config {
 	return Config{
 		Address:   ":8765",
 		AuditPath: "/tmp/promptlock-audit.jsonl",
+		Intents:   IntentMap{},
 		Policy: PolicyConfig{
 			DefaultTTLMinutes: p.DefaultTTLMinutes,
 			MinTTLMinutes:     p.MinTTLMinutes,

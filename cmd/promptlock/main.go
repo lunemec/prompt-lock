@@ -1,0 +1,184 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"net/http"
+	"os"
+	"os/exec"
+	"strings"
+)
+
+type requestBody struct {
+	AgentID    string   `json:"agent_id"`
+	TaskID     string   `json:"task_id"`
+	Reason     string   `json:"reason"`
+	TTLMinutes int      `json:"ttl_minutes"`
+	Secrets    []string `json:"secrets"`
+}
+
+func main() {
+	if len(os.Args) < 2 || os.Args[1] != "exec" {
+		fmt.Fprintln(os.Stderr, "usage: promptlock exec [flags] -- <command>")
+		os.Exit(2)
+	}
+
+	fs := flag.NewFlagSet("exec", flag.ExitOnError)
+	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
+	agent := fs.String("agent", "agent", "agent id")
+	task := fs.String("task", "task", "task id")
+	reason := fs.String("reason", "execute command", "reason")
+	ttl := fs.Int("ttl", 5, "ttl minutes")
+	intent := fs.String("intent", "", "intent name")
+	secretsCSV := fs.String("secrets", "", "comma-separated secret names")
+	autoApprove := fs.Bool("auto-approve", false, "approve immediately (demo only)")
+	fs.Parse(os.Args[2:])
+
+	cmdArgs := fs.Args()
+	sep := indexOf(cmdArgs, "--")
+	if sep >= 0 {
+		cmdArgs = cmdArgs[sep+1:]
+	}
+	if len(cmdArgs) == 0 {
+		fmt.Fprintln(os.Stderr, "missing command after --")
+		os.Exit(2)
+	}
+
+	secrets := []string{}
+	if *intent != "" {
+		resolved, err := resolveIntent(*broker, *intent)
+		if err != nil {
+			fatal(err)
+		}
+		secrets = resolved
+	} else if *secretsCSV != "" {
+		for _, s := range strings.Split(*secretsCSV, ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				secrets = append(secrets, s)
+			}
+		}
+	}
+	if len(secrets) == 0 {
+		fatal(fmt.Errorf("no secrets resolved; use --intent or --secrets"))
+	}
+
+	reqID, err := requestLease(*broker, requestBody{AgentID: *agent, TaskID: *task, Reason: *reason, TTLMinutes: *ttl, Secrets: secrets})
+	if err != nil {
+		fatal(err)
+	}
+
+	var lease string
+	if *autoApprove {
+		lease, err = approve(*broker, reqID, *ttl)
+		if err != nil {
+			fatal(err)
+		}
+	} else {
+		fatal(fmt.Errorf("lease request %s pending approval (rerun with --auto-approve for demo)", reqID))
+	}
+
+	env := os.Environ()
+	for _, s := range secrets {
+		v, err := accessSecret(*broker, lease, s)
+		if err != nil {
+			fatal(err)
+		}
+		envName := strings.ToUpper(s)
+		env = append(env, envName+"="+v)
+	}
+
+	c := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+	c.Env = env
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	if err := c.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			os.Exit(ee.ExitCode())
+		}
+		fatal(err)
+	}
+}
+
+func resolveIntent(broker, intent string) ([]string, error) {
+	var out struct {
+		Secrets []string `json:"secrets"`
+	}
+	if err := postJSON(broker+"/v1/intents/resolve", map[string]string{"intent": intent}, &out); err != nil {
+		return nil, err
+	}
+	return out.Secrets, nil
+}
+
+func requestLease(broker string, req requestBody) (string, error) {
+	var out struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := postJSON(broker+"/v1/leases/request", req, &out); err != nil {
+		return "", err
+	}
+	if out.RequestID == "" {
+		return "", fmt.Errorf("empty request_id")
+	}
+	return out.RequestID, nil
+}
+
+func approve(broker, requestID string, ttl int) (string, error) {
+	var out struct {
+		LeaseToken string `json:"lease_token"`
+	}
+	if err := postJSON(broker+"/v1/leases/approve?request_id="+requestID, map[string]int{"ttl_minutes": ttl}, &out); err != nil {
+		return "", err
+	}
+	if out.LeaseToken == "" {
+		return "", fmt.Errorf("empty lease_token")
+	}
+	return out.LeaseToken, nil
+}
+
+func accessSecret(broker, lease, secret string) (string, error) {
+	var out struct {
+		Value string `json:"value"`
+	}
+	if err := postJSON(broker+"/v1/leases/access", map[string]string{"lease_token": lease, "secret": secret}, &out); err != nil {
+		return "", err
+	}
+	return out.Value, nil
+}
+
+func postJSON(url string, in any, out any) error {
+	b, _ := json.Marshal(in)
+	resp, err := http.Post(url, "application/json", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("request failed: %s", resp.Status)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func fatal(err error) {
+	fmt.Fprintln(os.Stderr, "error:", err)
+	os.Exit(1)
+}
+
+func getenv(k, d string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return d
+}
+
+func indexOf(xs []string, v string) int {
+	for i, x := range xs {
+		if x == v {
+			return i
+		}
+	}
+	return -1
+}
