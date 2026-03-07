@@ -17,7 +17,14 @@ This reduces prompt-injection blast radius while keeping autonomous workflows pr
 See `docs/CONTRACT.md`.
 
 ## Repository contents
+- `AGENTS.md` — project map and non-negotiable engineering/security rules
 - `docs/CONTRACT.md` — API and security contract
+- `docs/NOTE-project-style-adoption.md` — reusable agent/docs style for other projects
+- `docs/architecture/` — architecture source of truth (hexagonal required)
+- `docs/standards/` — engineering standards (Red-Green-Blue TDD, security reporting)
+- `docs/plans/` — active execution plan and gates
+- `docs/operations/` — runbook
+- `docs/context/` — product context and trust boundaries
 - `scripts/mock-broker.py` — minimal local broker (demo)
 - `scripts/secretctl.sh` — agent-facing CLI wrapper
 - `scripts/human-approve.sh` — human approval helper
