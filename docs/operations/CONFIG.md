@@ -19,12 +19,24 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
     "max_ttl_minutes": 30,
     "max_secrets_per_request": 5
   },
+  "auth": {
+    "enable_auth": true,
+    "session_ttl_minutes": 10,
+    "grant_idle_timeout_minutes": 480,
+    "grant_absolute_max_minutes": 10080,
+    "bootstrap_token_ttl_seconds": 60
+  },
   "secrets": [
     { "name": "github_token", "value": "REPLACE_ME" },
     { "name": "npm_token", "value": "REPLACE_ME" }
   ]
 }
 ```
+
+## Auth notes
+- `enable_auth=true` enables pairing/session endpoints and is recommended for non-demo use.
+- `grant_absolute_max_minutes` supports very long runs (days) while still enforcing eventual re-pairing.
+- Keep session TTL short; use pairing grant for idle-resilient re-mint.
 
 ## Notes
 - Keep this file host-owned and permission-restricted.

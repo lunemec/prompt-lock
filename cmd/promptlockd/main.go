@@ -12,12 +12,18 @@ import (
 	"github.com/lunemec/promptlock/internal/adapters/audit"
 	"github.com/lunemec/promptlock/internal/adapters/memory"
 	"github.com/lunemec/promptlock/internal/app"
+	"github.com/lunemec/promptlock/internal/auth"
 	"github.com/lunemec/promptlock/internal/config"
 )
 
 type server struct {
-	svc     app.Service
-	intents map[string][]string
+	svc         app.Service
+	intents     map[string][]string
+	authEnabled bool
+	authCfg     config.AuthConfig
+	authStore   *auth.Store
+	seq         *uint64
+	now         func() time.Time
 }
 
 type leaseReq struct {
@@ -88,7 +94,8 @@ func main() {
 		NewLeaseTok:  newLease,
 	}
 
-	s := &server{svc: svc, intents: cfg.Intents}
+	authStore := auth.NewStore()
+	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, authStore: authStore, seq: &seq, now: func() time.Time { return time.Now().UTC() }}
 	http.HandleFunc("/v1/intents/resolve", s.handleResolveIntent)
 	http.HandleFunc("/v1/requests/status", s.handleRequestStatus)
 	http.HandleFunc("/v1/requests/pending", s.handlePendingRequests)
@@ -97,6 +104,10 @@ func main() {
 	http.HandleFunc("/v1/leases/deny", s.handleDeny)
 	http.HandleFunc("/v1/leases/by-request", s.handleLeaseByRequest)
 	http.HandleFunc("/v1/leases/access", s.handleAccess)
+	http.HandleFunc("/v1/auth/bootstrap/create", s.handleAuthBootstrapCreate)
+	http.HandleFunc("/v1/auth/pair/complete", s.handleAuthPairComplete)
+	http.HandleFunc("/v1/auth/session/mint", s.handleAuthSessionMint)
+	http.HandleFunc("/v1/auth/revoke", s.handleAuthRevoke)
 
 	log.Printf("promptlock listening on %s", cfg.Address)
 	log.Fatal(http.ListenAndServe(cfg.Address, nil))
@@ -208,5 +219,7 @@ func getenv(k, d string) string {
 	}
 	return d
 }
+
+func (s *server) nextSeq() uint64 { return atomic.AddUint64(s.seq, 1) }
 
 func itoa(n uint64) string { return strconv.FormatUint(n, 10) }
