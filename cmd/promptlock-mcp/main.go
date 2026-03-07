@@ -32,6 +32,12 @@ type callParams struct {
 	Arguments map[string]interface{} `json:"arguments"`
 }
 
+type execArgs struct {
+	Intent string
+	Cmd    []string
+	TTL    int
+}
+
 func main() {
 	s := bufio.NewScanner(os.Stdin)
 	for s.Scan() {
@@ -90,19 +96,13 @@ func executeWithIntent(args map[string]interface{}) (string, error) {
 	if session == "" {
 		return "", fmt.Errorf("PROMPTLOCK_SESSION_TOKEN is required")
 	}
-	intent, _ := args["intent"].(string)
-	if intent == "" {
-		return "", fmt.Errorf("intent is required")
+	validated, err := parseAndValidateExecArgs(args)
+	if err != nil {
+		return "", err
 	}
-	cmdAny, ok := args["command"].([]interface{})
-	if !ok || len(cmdAny) == 0 {
-		return "", fmt.Errorf("command array is required")
-	}
-	cmd := make([]string, 0, len(cmdAny))
-	for _, x := range cmdAny {
-		cmd = append(cmd, fmt.Sprint(x))
-	}
-	ttl := intFromArgs(args, "ttl_minutes", 5)
+	intent := validated.Intent
+	cmd := validated.Cmd
+	ttl := validated.TTL
 
 	// resolve intent
 	var resolved struct {
@@ -211,12 +211,40 @@ func envDefault(k, d string) string {
 	}
 	return d
 }
-func intFromArgs(m map[string]interface{}, k string, d int) int {
-	if v, ok := m[k].(float64); ok {
-		return int(v)
+
+func parseAndValidateExecArgs(m map[string]interface{}) (execArgs, error) {
+	intent, _ := m["intent"].(string)
+	intent = strings.TrimSpace(intent)
+	if intent == "" || len(intent) > 64 {
+		return execArgs{}, fmt.Errorf("intent is required (1..64 chars)")
 	}
-	return d
+	for _, r := range intent {
+		if !(r == '_' || r == '-' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			return execArgs{}, fmt.Errorf("intent contains invalid characters")
+		}
+	}
+	cmdAny, ok := m["command"].([]interface{})
+	if !ok || len(cmdAny) == 0 || len(cmdAny) > 32 {
+		return execArgs{}, fmt.Errorf("command array is required (1..32 parts)")
+	}
+	cmd := make([]string, 0, len(cmdAny))
+	for _, x := range cmdAny {
+		s := strings.TrimSpace(fmt.Sprint(x))
+		if s == "" || len(s) > 256 || strings.ContainsAny(s, "\r\n") {
+			return execArgs{}, fmt.Errorf("invalid command argument")
+		}
+		cmd = append(cmd, s)
+	}
+	ttl := 5
+	if v, ok := m["ttl_minutes"].(float64); ok {
+		ttl = int(v)
+	}
+	if ttl < 1 || ttl > 60 {
+		return execArgs{}, fmt.Errorf("ttl_minutes out of range (1..60)")
+	}
+	return execArgs{Intent: intent, Cmd: cmd, TTL: ttl}, nil
 }
+
 func cwd() string { wd, _ := os.Getwd(); return wd }
 func sha(parts []string) string {
 	s := strings.Join(parts, "\x00")
