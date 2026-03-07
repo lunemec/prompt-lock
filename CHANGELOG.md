@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added experimental MCP adapter scaffold (`cmd/promptlock-mcp`) with capability-first tool (`execute_with_intent`).
 - Added MCP adapter input validation and unit tests.
 - Added initial MCP RPC response-shape tests and MCP integration test roadmap.
+- Added MCP stdio harness test for initialize/tools/list roundtrip.
 - Wrapper execution docs and intent examples in config.
 
 ### Changed
