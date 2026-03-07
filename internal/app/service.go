@@ -1,0 +1,103 @@
+package app
+
+import (
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/lunemec/promptlock/internal/core/domain"
+	"github.com/lunemec/promptlock/internal/core/ports"
+)
+
+type Clock func() time.Time
+
+type Service struct {
+	Policy       domain.Policy
+	Requests     ports.RequestStore
+	Leases       ports.LeaseStore
+	Secrets      ports.SecretStore
+	Audit        ports.AuditSink
+	Now          Clock
+	NewRequestID func() string
+	NewLeaseTok  func() string
+}
+
+func (s Service) now() time.Time {
+	if s.Now == nil {
+		return time.Now().UTC()
+	}
+	return s.Now().UTC()
+}
+
+func (s Service) RequestLease(agentID, taskID, reason string, ttl int, secrets []string) (domain.LeaseRequest, error) {
+	if err := s.Policy.ValidateRequest(ttl, secrets); err != nil {
+		return domain.LeaseRequest{}, err
+	}
+	req := domain.LeaseRequest{
+		ID:         s.NewRequestID(),
+		AgentID:    agentID,
+		TaskID:     taskID,
+		Reason:     reason,
+		TTLMinutes: ttl,
+		Secrets:    append([]string{}, secrets...),
+		Status:     domain.RequestPending,
+		CreatedAt:  s.now(),
+	}
+	if err := s.Requests.SaveRequest(req); err != nil {
+		return domain.LeaseRequest{}, err
+	}
+	_ = s.Audit.Write(ports.AuditEvent{Event: "request_created", Timestamp: s.now(), AgentID: agentID, TaskID: taskID, RequestID: req.ID})
+	return req, nil
+}
+
+func (s Service) ApproveRequest(requestID string, ttlMinutes int) (domain.Lease, error) {
+	req, err := s.Requests.GetRequest(requestID)
+	if err != nil {
+		return domain.Lease{}, err
+	}
+	if req.Status != domain.RequestPending {
+		return domain.Lease{}, errors.New("request is not pending")
+	}
+	if ttlMinutes == 0 {
+		ttlMinutes = req.TTLMinutes
+	}
+	if err := s.Policy.ValidateRequest(ttlMinutes, req.Secrets); err != nil {
+		return domain.Lease{}, err
+	}
+	req.Status = domain.RequestApproved
+	if err := s.Requests.UpdateRequest(req); err != nil {
+		return domain.Lease{}, err
+	}
+	lease := domain.Lease{
+		Token:     s.NewLeaseTok(),
+		RequestID: req.ID,
+		AgentID:   req.AgentID,
+		TaskID:    req.TaskID,
+		Secrets:   append([]string{}, req.Secrets...),
+		ExpiresAt: s.now().Add(time.Duration(ttlMinutes) * time.Minute),
+	}
+	if err := s.Leases.SaveLease(lease); err != nil {
+		return domain.Lease{}, err
+	}
+	_ = s.Audit.Write(ports.AuditEvent{Event: "request_approved", Timestamp: s.now(), AgentID: req.AgentID, TaskID: req.TaskID, RequestID: req.ID, LeaseToken: lease.Token})
+	return lease, nil
+}
+
+func (s Service) AccessSecret(leaseToken, secretName string) (string, error) {
+	lease, err := s.Leases.GetLease(leaseToken)
+	if err != nil {
+		return "", err
+	}
+	if lease.IsExpired(s.now()) {
+		return "", errors.New("lease expired")
+	}
+	if !lease.Allows(secretName) {
+		return "", fmt.Errorf("secret %q not allowed for this lease", secretName)
+	}
+	val, err := s.Secrets.GetSecret(secretName)
+	if err != nil {
+		return "", err
+	}
+	_ = s.Audit.Write(ports.AuditEvent{Event: "secret_access", Timestamp: s.now(), AgentID: lease.AgentID, TaskID: lease.TaskID, RequestID: lease.RequestID, LeaseToken: lease.Token, Secret: secretName})
+	return val, nil
+}

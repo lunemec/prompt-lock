@@ -7,9 +7,8 @@ lint:
 	bash -n scripts/secretctl.sh scripts/human-approve.sh
 	python3 -m py_compile scripts/mock-broker.py
 
-# Placeholder for future unit/integration test suite
 test:
-	@echo "No formal test suite yet (TODO)."
+	go test ./...
 
 security:
 	python3 scripts/validate_security_basics.py
@@ -25,7 +24,7 @@ docs:
 validate-changelog:
 	python3 scripts/validate_changelog.py
 
-validate-final: lint security docs validate-changelog
+validate-final: lint security docs validate-changelog test
 	@echo "Final validation gate passed."
 
-ci: validate-final test
+ci: validate-final

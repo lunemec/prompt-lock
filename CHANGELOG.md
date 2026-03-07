@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AGENTS/docs harness structure and security-focused standards.
 - Final validation gate with changelog + security baseline checks.
 
+### Added
+- Initial Go implementation skeleton (`cmd/promptlockd`, core domain, ports/adapters, service layer).
+- Unit tests for policy and lease request/approve/access flow.
+- ADR-0003 documenting Codex token access and lease-renewal model.
+
 ### Changed
 - Project naming adopted: **PromptLock**.
 - Documentation updated to mark PromptLock as the primary product name/tagline.

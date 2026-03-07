@@ -54,10 +54,16 @@ Run final validation gate manually:
 make validate-final
 ```
 
-Start broker:
+Start broker (prototype Python mock):
 
 ```bash
 python3 scripts/mock-broker.py
+```
+
+Start broker (Go v1 skeleton):
+
+```bash
+go run ./cmd/promptlockd
 ```
 
 Agent requests secrets:
