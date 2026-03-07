@@ -23,6 +23,7 @@ Yes, dockerizing this tool makes sense.
 - no-new-privileges
 - constrained writable mounts
 - host-side protected audit mount
+- prefer unix socket exposure over broad TCP bind for broker API
 
 ## Future
 - Provide docker-compose example:

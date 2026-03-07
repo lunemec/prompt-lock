@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -64,6 +66,9 @@ func main() {
 	if v := os.Getenv("PROMPTLOCK_ADDR"); v != "" {
 		cfg.Address = v
 	}
+	if v := os.Getenv("PROMPTLOCK_UNIX_SOCKET"); v != "" {
+		cfg.UnixSocket = v
+	}
 	if v := os.Getenv("PROMPTLOCK_OPERATOR_TOKEN"); v != "" {
 		cfg.Auth.OperatorToken = v
 	}
@@ -101,6 +106,9 @@ func main() {
 	if cfg.Auth.EnableAuth && cfg.Auth.OperatorToken == "" {
 		log.Fatal("auth enabled but operator_token is empty")
 	}
+	if cfg.Auth.EnableAuth && cfg.UnixSocket == "" && !isLocalAddress(cfg.Address) && getenv("PROMPTLOCK_ALLOW_INSECURE_TCP", "") != "1" {
+		log.Fatal("auth enabled on non-local TCP without unix socket; set unix_socket or PROMPTLOCK_ALLOW_INSECURE_TCP=1")
+	}
 	authStore := auth.NewStore()
 	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, authStore: authStore, seq: &seq, now: func() time.Time { return time.Now().UTC() }}
 	http.HandleFunc("/v1/intents/resolve", s.handleResolveIntent)
@@ -115,6 +123,20 @@ func main() {
 	http.HandleFunc("/v1/auth/pair/complete", s.handleAuthPairComplete)
 	http.HandleFunc("/v1/auth/session/mint", s.handleAuthSessionMint)
 	http.HandleFunc("/v1/auth/revoke", s.handleAuthRevoke)
+
+	if cfg.UnixSocket != "" {
+		_ = os.Remove(cfg.UnixSocket)
+		ln, err := net.Listen("unix", cfg.UnixSocket)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := os.Chmod(cfg.UnixSocket, 0o600); err != nil {
+			log.Fatal(err)
+		}
+		defer func() { _ = os.Remove(cfg.UnixSocket) }()
+		log.Printf("promptlock listening on unix socket %s", cfg.UnixSocket)
+		log.Fatal(http.Serve(ln, nil))
+	}
 
 	log.Printf("promptlock listening on %s", cfg.Address)
 	log.Fatal(http.ListenAndServe(cfg.Address, nil))
@@ -257,3 +279,17 @@ func getenv(k, d string) string {
 func (s *server) nextSeq() uint64 { return atomic.AddUint64(s.seq, 1) }
 
 func itoa(n uint64) string { return strconv.FormatUint(n, 10) }
+
+func isLocalAddress(addr string) bool {
+	a := strings.TrimSpace(strings.ToLower(addr))
+	if a == "" {
+		return false
+	}
+	if strings.HasPrefix(a, "127.0.0.1:") || strings.HasPrefix(a, "localhost:") {
+		return true
+	}
+	if a == "127.0.0.1" || a == "localhost" {
+		return true
+	}
+	return false
+}

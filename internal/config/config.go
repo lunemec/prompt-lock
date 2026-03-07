@@ -8,12 +8,13 @@ import (
 )
 
 type Config struct {
-	Address   string        `json:"address"`
-	AuditPath string        `json:"audit_path"`
-	Policy    PolicyConfig  `json:"policy"`
-	Auth      AuthConfig    `json:"auth"`
-	Secrets   []SecretEntry `json:"secrets"`
-	Intents   IntentMap     `json:"intents"`
+	Address    string        `json:"address"`
+	UnixSocket string        `json:"unix_socket"`
+	AuditPath  string        `json:"audit_path"`
+	Policy     PolicyConfig  `json:"policy"`
+	Auth       AuthConfig    `json:"auth"`
+	Secrets    []SecretEntry `json:"secrets"`
+	Intents    IntentMap     `json:"intents"`
 }
 
 type PolicyConfig struct {
@@ -31,10 +32,11 @@ type SecretEntry struct {
 func Default() Config {
 	p := domain.DefaultPolicy()
 	return Config{
-		Address:   ":8765",
-		AuditPath: "/tmp/promptlock-audit.jsonl",
-		Intents:   IntentMap{},
-		Auth:      defaultAuthConfig(),
+		Address:    "127.0.0.1:8765",
+		UnixSocket: "",
+		AuditPath:  "/tmp/promptlock-audit.jsonl",
+		Intents:    IntentMap{},
+		Auth:       defaultAuthConfig(),
 		Policy: PolicyConfig{
 			DefaultTTLMinutes: p.DefaultTTLMinutes,
 			MinTTLMinutes:     p.MinTTLMinutes,

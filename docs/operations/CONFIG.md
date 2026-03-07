@@ -11,7 +11,8 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 
 ```json
 {
-  "address": ":8765",
+  "address": "127.0.0.1:8765",
+  "unix_socket": "/tmp/promptlock.sock",
   "audit_path": "/var/log/promptlock/audit.jsonl",
   "policy": {
     "default_ttl_minutes": 5,
@@ -37,6 +38,8 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 - `enable_auth=true` enables pairing/session endpoints and is recommended for non-demo use.
 - `grant_absolute_max_minutes` supports very long runs (days) while still enforcing eventual re-pairing.
 - Keep session TTL short; use pairing grant for idle-resilient re-mint.
+- For hardened local deployments, prefer `unix_socket` and keep TCP on localhost only.
+- If auth is enabled and TCP is non-local without unix socket, broker fails to start unless `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is set.
 
 ## Notes
 - Keep this file host-owned and permission-restricted.

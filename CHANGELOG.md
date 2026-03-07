@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added auth config block for long-running container support (idle + absolute grant TTL).
 - Added initial endpoint authz enforcement (operator token + agent session token) when auth is enabled.
 - Added actor attribution fields in audit events (`actor_type`, `actor_id`) and operator action audit records.
+- Added transport hardening defaults: localhost TCP default, optional unix socket listener, and non-local TCP guard when auth is enabled.
 - Wrapper execution docs and intent examples in config.
 
 ### Changed
