@@ -111,6 +111,9 @@ func main() {
 	}
 	authStore := auth.NewStore()
 	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, authStore: authStore, seq: &seq, now: func() time.Time { return time.Now().UTC() }}
+	if cfg.Auth.EnableAuth {
+		startAuthCleanupLoop(s)
+	}
 	http.HandleFunc("/v1/intents/resolve", s.handleResolveIntent)
 	http.HandleFunc("/v1/requests/status", s.handleRequestStatus)
 	http.HandleFunc("/v1/requests/pending", s.handlePendingRequests)

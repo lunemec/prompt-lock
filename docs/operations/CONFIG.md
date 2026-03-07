@@ -22,10 +22,12 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
   },
   "auth": {
     "enable_auth": true,
+    "operator_token": "CHANGE_ME_OPERATOR_TOKEN",
     "session_ttl_minutes": 10,
     "grant_idle_timeout_minutes": 480,
     "grant_absolute_max_minutes": 10080,
-    "bootstrap_token_ttl_seconds": 60
+    "bootstrap_token_ttl_seconds": 60,
+    "cleanup_interval_seconds": 60
   },
   "secrets": [
     { "name": "github_token", "value": "REPLACE_ME" },
@@ -38,6 +40,8 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 - `enable_auth=true` enables pairing/session endpoints and is recommended for non-demo use.
 - `grant_absolute_max_minutes` supports very long runs (days) while still enforcing eventual re-pairing.
 - Keep session TTL short; use pairing grant for idle-resilient re-mint.
+- `operator_token` is mandatory when auth is enabled.
+- `cleanup_interval_seconds` controls background auth garbage collection of expired/used records.
 - For hardened local deployments, prefer `unix_socket` and keep TCP on localhost only.
 - If auth is enabled and TCP is non-local without unix socket, broker fails to start unless `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is set.
 

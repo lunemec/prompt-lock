@@ -144,3 +144,32 @@ func (s *Store) ValidateSession(token string, now time.Time) (SessionToken, erro
 	}
 	return t, nil
 }
+
+func (s *Store) CleanupExpired(now time.Time) (removedBootstrap, removedSessions, revokedGrants int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for k, t := range s.bootstrap {
+		if t.Used || !now.Before(t.ExpiresAt) {
+			delete(s.bootstrap, k)
+			removedBootstrap++
+		}
+	}
+	for k, sess := range s.sessions {
+		if sess.Revoked || !now.Before(sess.ExpiresAt) {
+			delete(s.sessions, k)
+			removedSessions++
+		}
+	}
+	for k, g := range s.grants {
+		if g.Revoked {
+			continue
+		}
+		if !now.Before(g.IdleExpiresAt) || !now.Before(g.AbsoluteExpiresAt) {
+			g.Revoked = true
+			s.grants[k] = g
+			revokedGrants++
+		}
+	}
+	return
+}
