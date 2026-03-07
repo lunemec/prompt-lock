@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added auth cleanup loop for expired bootstrap/session records and stale grant revocation.
 - Added operator/session role auth headers wiring in CLI paths.
 - Added authz unit tests for operator and agent session checks.
+- Added policy gate to block plaintext secret-return endpoint when configured (`allow_plaintext_secret_return=false`).
 - Wrapper execution docs and intent examples in config.
 
 ### Changed

@@ -254,6 +254,12 @@ func (s *server) handleAccess(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", 405)
 		return
 	}
+	if s.authEnabled && !s.authCfg.AllowPlaintextSecretReturn {
+		at, aid := actorFromRequest(r)
+		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "plaintext_secret_access_blocked", Timestamp: s.now(), ActorType: at, ActorID: aid})
+		http.Error(w, "plaintext secret return disabled by policy", http.StatusForbidden)
+		return
+	}
 	var req accessReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), 400)

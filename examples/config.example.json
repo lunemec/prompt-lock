@@ -11,6 +11,7 @@
   "auth": {
     "enable_auth": true,
     "operator_token": "CHANGE_ME_OPERATOR_TOKEN",
+    "allow_plaintext_secret_return": false,
     "session_ttl_minutes": 10,
     "grant_idle_timeout_minutes": 480,
     "grant_absolute_max_minutes": 10080,

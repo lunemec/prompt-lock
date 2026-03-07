@@ -23,6 +23,7 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
   "auth": {
     "enable_auth": true,
     "operator_token": "CHANGE_ME_OPERATOR_TOKEN",
+    "allow_plaintext_secret_return": false,
     "session_ttl_minutes": 10,
     "grant_idle_timeout_minutes": 480,
     "grant_absolute_max_minutes": 10080,
@@ -41,6 +42,7 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 - `grant_absolute_max_minutes` supports very long runs (days) while still enforcing eventual re-pairing.
 - Keep session TTL short; use pairing grant for idle-resilient re-mint.
 - `operator_token` is mandatory when auth is enabled.
+- `allow_plaintext_secret_return=false` is recommended for hardened mode; plaintext secret API calls are blocked.
 - `cleanup_interval_seconds` controls background auth garbage collection of expired/used records.
 - For hardened local deployments, prefer `unix_socket` and keep TCP on localhost only.
 - If auth is enabled and TCP is non-local without unix socket, broker fails to start unless `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is set.
