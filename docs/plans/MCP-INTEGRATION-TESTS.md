@@ -13,7 +13,7 @@ Move MCP adapter from scaffold-level confidence to integration-level confidence 
    - spawn `promptlock-mcp`
    - send initialize/tools/list/tools/call lines over stdin
    - assert JSON-RPC outputs over stdout
-   - status: partially implemented (initialize + tools/list harness test added)
+   - status: implemented for initialize/tools/list and tools/call with mocked broker roundtrip
 3. End-to-end broker-backed test
    - start test broker with auth/session fixture
    - run MCP execute_with_intent flow
