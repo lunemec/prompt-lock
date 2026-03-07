@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unit tests for policy and lease request/approve/access flow.
 - ADR-0003 documenting Codex token access and lease-renewal model.
 - ADR-0004 documenting Codex CLI integration strategy.
+- ADR-0005 documenting multi-CLI auth integration model.
+- CLI compatibility matrix draft and integration discovery plan docs.
 - Host configuration docs and sample config file.
 
 ### Changed
