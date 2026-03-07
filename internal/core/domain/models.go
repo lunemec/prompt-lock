@@ -11,23 +11,25 @@ const (
 )
 
 type LeaseRequest struct {
-	ID         string
-	AgentID    string
-	TaskID     string
-	Reason     string
-	TTLMinutes int
-	Secrets    []string
-	Status     RequestStatus
-	CreatedAt  time.Time
+	ID                 string
+	AgentID            string
+	TaskID             string
+	Reason             string
+	TTLMinutes         int
+	Secrets            []string
+	CommandFingerprint string
+	Status             RequestStatus
+	CreatedAt          time.Time
 }
 
 type Lease struct {
-	Token     string
-	RequestID string
-	AgentID   string
-	TaskID    string
-	Secrets   []string
-	ExpiresAt time.Time
+	Token              string
+	RequestID          string
+	AgentID            string
+	TaskID             string
+	Secrets            []string
+	CommandFingerprint string
+	ExpiresAt          time.Time
 }
 
 func (l Lease) IsExpired(now time.Time) bool {

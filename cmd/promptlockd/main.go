@@ -21,19 +21,21 @@ type server struct {
 }
 
 type leaseReq struct {
-	AgentID    string   `json:"agent_id"`
-	TaskID     string   `json:"task_id"`
-	Reason     string   `json:"reason"`
-	TTLMinutes int      `json:"ttl_minutes"`
-	Secrets    []string `json:"secrets"`
+	AgentID            string   `json:"agent_id"`
+	TaskID             string   `json:"task_id"`
+	Reason             string   `json:"reason"`
+	TTLMinutes         int      `json:"ttl_minutes"`
+	Secrets            []string `json:"secrets"`
+	CommandFingerprint string   `json:"command_fingerprint"`
 }
 
 type approveReq struct {
 	TTLMinutes int `json:"ttl_minutes"`
 }
 type accessReq struct {
-	LeaseToken string `json:"lease_token"`
-	Secret     string `json:"secret"`
+	LeaseToken         string `json:"lease_token"`
+	Secret             string `json:"secret"`
+	CommandFingerprint string `json:"command_fingerprint"`
 }
 
 type resolveIntentReq struct {
@@ -146,7 +148,7 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	if req.TTLMinutes == 0 {
 		req.TTLMinutes = s.svc.Policy.DefaultTTLMinutes
 	}
-	created, err := s.svc.RequestLease(req.AgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets)
+	created, err := s.svc.RequestLease(req.AgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.CommandFingerprint)
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
@@ -184,7 +186,7 @@ func (s *server) handleAccess(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	v, err := s.svc.AccessSecret(req.LeaseToken, req.Secret)
+	v, err := s.svc.AccessSecret(req.LeaseToken, req.Secret, req.CommandFingerprint)
 	if err != nil {
 		http.Error(w, err.Error(), 403)
 		return

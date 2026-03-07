@@ -19,6 +19,7 @@ PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 ## Notes
 - `--intent` resolves secrets via broker intent map.
 - `--secrets` can be used explicitly instead of intent.
+- Wrapper computes a command fingerprint and includes it in lease/access calls.
 - Default mode waits for external human approval (`--wait-approve`, `--poll-interval`).
 - `--auto-approve` exists only for local prototyping and requires `PROMPTLOCK_DEV_MODE=1`.
 - Basic command policy blocks risky secret-dumping command patterns unless `--allow-risky-command` is explicitly set.

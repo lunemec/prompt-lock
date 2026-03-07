@@ -29,19 +29,20 @@ func (s Service) now() time.Time {
 	return s.Now().UTC()
 }
 
-func (s Service) RequestLease(agentID, taskID, reason string, ttl int, secrets []string) (domain.LeaseRequest, error) {
+func (s Service) RequestLease(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint string) (domain.LeaseRequest, error) {
 	if err := s.Policy.ValidateRequest(ttl, secrets); err != nil {
 		return domain.LeaseRequest{}, err
 	}
 	req := domain.LeaseRequest{
-		ID:         s.NewRequestID(),
-		AgentID:    agentID,
-		TaskID:     taskID,
-		Reason:     reason,
-		TTLMinutes: ttl,
-		Secrets:    append([]string{}, secrets...),
-		Status:     domain.RequestPending,
-		CreatedAt:  s.now(),
+		ID:                 s.NewRequestID(),
+		AgentID:            agentID,
+		TaskID:             taskID,
+		Reason:             reason,
+		TTLMinutes:         ttl,
+		Secrets:            append([]string{}, secrets...),
+		CommandFingerprint: commandFingerprint,
+		Status:             domain.RequestPending,
+		CreatedAt:          s.now(),
 	}
 	if err := s.Requests.SaveRequest(req); err != nil {
 		return domain.LeaseRequest{}, err
@@ -69,12 +70,13 @@ func (s Service) ApproveRequest(requestID string, ttlMinutes int) (domain.Lease,
 		return domain.Lease{}, err
 	}
 	lease := domain.Lease{
-		Token:     s.NewLeaseTok(),
-		RequestID: req.ID,
-		AgentID:   req.AgentID,
-		TaskID:    req.TaskID,
-		Secrets:   append([]string{}, req.Secrets...),
-		ExpiresAt: s.now().Add(time.Duration(ttlMinutes) * time.Minute),
+		Token:              s.NewLeaseTok(),
+		RequestID:          req.ID,
+		AgentID:            req.AgentID,
+		TaskID:             req.TaskID,
+		Secrets:            append([]string{}, req.Secrets...),
+		CommandFingerprint: req.CommandFingerprint,
+		ExpiresAt:          s.now().Add(time.Duration(ttlMinutes) * time.Minute),
 	}
 	if err := s.Leases.SaveLease(lease); err != nil {
 		return domain.Lease{}, err
@@ -83,7 +85,7 @@ func (s Service) ApproveRequest(requestID string, ttlMinutes int) (domain.Lease,
 	return lease, nil
 }
 
-func (s Service) AccessSecret(leaseToken, secretName string) (string, error) {
+func (s Service) AccessSecret(leaseToken, secretName, commandFingerprint string) (string, error) {
 	lease, err := s.Leases.GetLease(leaseToken)
 	if err != nil {
 		return "", err
@@ -93,6 +95,9 @@ func (s Service) AccessSecret(leaseToken, secretName string) (string, error) {
 	}
 	if !lease.Allows(secretName) {
 		return "", fmt.Errorf("secret %q not allowed for this lease", secretName)
+	}
+	if lease.CommandFingerprint != "" && lease.CommandFingerprint != commandFingerprint {
+		return "", errors.New("command fingerprint mismatch")
 	}
 	val, err := s.Secrets.GetSecret(secretName)
 	if err != nil {

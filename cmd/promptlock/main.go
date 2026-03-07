@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,11 +15,12 @@ import (
 )
 
 type requestBody struct {
-	AgentID    string   `json:"agent_id"`
-	TaskID     string   `json:"task_id"`
-	Reason     string   `json:"reason"`
-	TTLMinutes int      `json:"ttl_minutes"`
-	Secrets    []string `json:"secrets"`
+	AgentID            string   `json:"agent_id"`
+	TaskID             string   `json:"task_id"`
+	Reason             string   `json:"reason"`
+	TTLMinutes         int      `json:"ttl_minutes"`
+	Secrets            []string `json:"secrets"`
+	CommandFingerprint string   `json:"command_fingerprint"`
 }
 
 func main() {
@@ -74,7 +77,8 @@ func main() {
 		fatal(fmt.Errorf("no secrets resolved; use --intent or --secrets"))
 	}
 
-	reqID, err := requestLease(*broker, requestBody{AgentID: *agent, TaskID: *task, Reason: *reason, TTLMinutes: *ttl, Secrets: secrets})
+	fingerprint := commandFingerprint(cmdArgs)
+	reqID, err := requestLease(*broker, requestBody{AgentID: *agent, TaskID: *task, Reason: *reason, TTLMinutes: *ttl, Secrets: secrets, CommandFingerprint: fingerprint})
 	if err != nil {
 		fatal(err)
 	}
@@ -97,7 +101,7 @@ func main() {
 
 	env := os.Environ()
 	for _, s := range secrets {
-		v, err := accessSecret(*broker, lease, s)
+		v, err := accessSecret(*broker, lease, s, fingerprint)
 		if err != nil {
 			fatal(err)
 		}
@@ -154,11 +158,11 @@ func approve(broker, requestID string, ttl int) (string, error) {
 	return out.LeaseToken, nil
 }
 
-func accessSecret(broker, lease, secret string) (string, error) {
+func accessSecret(broker, lease, secret, fingerprint string) (string, error) {
 	var out struct {
 		Value string `json:"value"`
 	}
-	if err := postJSON(broker+"/v1/leases/access", map[string]string{"lease_token": lease, "secret": secret}, &out); err != nil {
+	if err := postJSON(broker+"/v1/leases/access", map[string]string{"lease_token": lease, "secret": secret, "command_fingerprint": fingerprint}, &out); err != nil {
 		return "", err
 	}
 	return out.Value, nil
@@ -196,6 +200,12 @@ func indexOf(xs []string, v string) int {
 		}
 	}
 	return -1
+}
+
+func commandFingerprint(cmd []string) string {
+	s := strings.Join(cmd, "\x00")
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
 }
 
 func detectRiskyCommand(cmd []string) string {

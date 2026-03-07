@@ -10,7 +10,8 @@ Payload:
   "task_id": "TASK-1001",
   "reason": "Run e2e verification",
   "ttl_minutes": 20,
-  "secrets": ["github_token", "npm_token"]
+  "secrets": ["github_token", "npm_token"],
+  "command_fingerprint": "sha256:..."
 }
 ```
 
@@ -60,7 +61,8 @@ Payload:
 ```json
 {
   "lease_token": "lease_...",
-  "secret": "github_token"
+  "secret": "github_token",
+  "command_fingerprint": "sha256:..."
 }
 ```
 
