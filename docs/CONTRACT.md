@@ -85,3 +85,15 @@ To avoid excessive prompts:
 - Max TTL: 30 min (override only with explicit human approval)
 - Max secrets per request: 5
 - High-risk secrets require re-approval regardless of existing lease
+
+## Later-stage feature: biometric human approval
+Planned for a later phase (not in MVP):
+
+- macOS approval via Apple biometrics (Touch ID / Face ID through platform auth APIs)
+- Windows approval via Windows Hello
+- Optional Linux desktop biometric providers where available
+
+Target behavior:
+- secret lease approval prompt can require biometric verification for high-risk secrets
+- policy can mark which secrets/actions require biometric confirmation vs standard approval
+- audit log records biometric-verified approval event (without storing biometric data)
