@@ -90,10 +90,16 @@ To avoid excessive prompts:
 - lease duration may be N minutes,
 - encourage minimal required scope (least privilege).
 
-## Suggested default limits
-- Max TTL: 30 min (override only with explicit human approval)
-- Max secrets per request: 5
-- High-risk secrets require re-approval regardless of existing lease
+## Suggested default limits (v1 baseline)
+- Default TTL: 5 min
+- TTL range: configurable by host operator in host-side config
+- Max secrets per request: 5 (recommended initial default)
+- High-risk secrets may require re-approval regardless of existing lease (policy extension)
+
+## v1 scope choices
+- Explicit secret names only (no wildcard/group requests)
+- Leases are reusable until expiry
+- Every access under a lease must be audit-logged
 
 ## Later-stage feature: biometric human approval
 Planned for a later phase (not in MVP):
