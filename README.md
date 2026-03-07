@@ -60,3 +60,5 @@ scripts/secretctl.sh access --lease <lease_token> --secret github_token
 This is a draft prototype for flow design and integration testing, not a production-grade secret manager.
 
 Production hardening should include mTLS, unix sockets, policy engine, encrypted at-rest storage, tamper-evident audit logs, and external secret backend integration (Vault/1Password/etc.).
+
+**Critical:** audit trail must be persisted on the host (outside agent-controlled workspace/container paths) so request/approval/access history cannot be silently altered by agent workloads.

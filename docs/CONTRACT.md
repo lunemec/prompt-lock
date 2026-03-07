@@ -75,6 +75,15 @@ Response:
 - `ttl_minutes` is capped by broker policy.
 - Access is audited (agent, task, secret, timestamp).
 
+## Critical requirement: host-side audit trail
+This is a critical requirement for production use.
+
+- Audit records must be written on the host (outside agent workspace/container writable paths).
+- Required events: request created, approved, denied, secret accessed, lease expired/revoked.
+- Records must include: timestamp, agent_id, task_id, requested secrets, decision actor, TTL, and outcome.
+- Audit storage should be append-only or tamper-evident.
+- Agent/container users must not be able to modify or delete historical audit logs.
+
 ## UX policy
 To avoid excessive prompts:
 - one request may include multiple secrets,
