@@ -28,6 +28,7 @@ See `docs/CONTRACT.md`.
 - `docs/CONTRACT.md` — API and security contract
 - `docs/NOTE-project-style-adoption.md` — reusable agent/docs style for other projects
 - `docs/architecture/` — architecture source of truth (hexagonal required)
+  - includes secure execution flow and threat-model notes (`SECURE-EXEC-FLOW.md`)
 - `docs/decisions/` — ADRs for architecture and requirement changes
 - `docs/standards/` — engineering standards (Red-Green-Blue TDD, security reporting)
 - `docs/plans/` — active execution plan and gates
