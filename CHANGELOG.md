@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added authz matrix tests (operator vs agent endpoint token separation).
 - Added ADR-0012 and hardened migration checklist to prefer broker-exec mode.
 - Added unix-socket client support in wrapper (`--broker-unix-socket`) and transport safety tests.
+- Added experimental MCP adapter scaffold (`cmd/promptlock-mcp`) with capability-first tool (`execute_with_intent`).
 - Wrapper execution docs and intent examples in config.
 
 ### Changed
