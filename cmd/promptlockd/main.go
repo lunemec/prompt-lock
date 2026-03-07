@@ -89,6 +89,8 @@ func main() {
 	http.HandleFunc("/v1/requests/status", s.handleRequestStatus)
 	http.HandleFunc("/v1/leases/request", s.handleRequest)
 	http.HandleFunc("/v1/leases/approve", s.handleApprove)
+	http.HandleFunc("/v1/leases/deny", s.handleDeny)
+	http.HandleFunc("/v1/leases/by-request", s.handleLeaseByRequest)
 	http.HandleFunc("/v1/leases/access", s.handleAccess)
 
 	log.Printf("promptlock listening on %s", cfg.Address)

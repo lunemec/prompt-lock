@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type requestBody struct {
@@ -33,7 +34,10 @@ func main() {
 	ttl := fs.Int("ttl", 5, "ttl minutes")
 	intent := fs.String("intent", "", "intent name")
 	secretsCSV := fs.String("secrets", "", "comma-separated secret names")
-	autoApprove := fs.Bool("auto-approve", false, "approve immediately (demo only)")
+	autoApprove := fs.Bool("auto-approve", false, "approve immediately (demo only; requires PROMPTLOCK_DEV_MODE=1)")
+	waitApprove := fs.Duration("wait-approve", 2*time.Minute, "max time to wait for external approval")
+	pollInterval := fs.Duration("poll-interval", 2*time.Second, "poll interval while waiting for approval")
+	allowRisky := fs.Bool("allow-risky-command", false, "allow risky commands (env/printenv/proc environ reads)")
 	fs.Parse(os.Args[2:])
 
 	cmdArgs := fs.Args()
@@ -44,6 +48,11 @@ func main() {
 	if len(cmdArgs) == 0 {
 		fmt.Fprintln(os.Stderr, "missing command after --")
 		os.Exit(2)
+	}
+	if !*allowRisky {
+		if riskyReason := detectRiskyCommand(cmdArgs); riskyReason != "" {
+			fatal(fmt.Errorf("blocked by command policy: %s (use --allow-risky-command to override)", riskyReason))
+		}
 	}
 
 	secrets := []string{}
@@ -72,12 +81,18 @@ func main() {
 
 	var lease string
 	if *autoApprove {
+		if getenv("PROMPTLOCK_DEV_MODE", "") != "1" {
+			fatal(fmt.Errorf("--auto-approve is disabled unless PROMPTLOCK_DEV_MODE=1"))
+		}
 		lease, err = approve(*broker, reqID, *ttl)
 		if err != nil {
 			fatal(err)
 		}
 	} else {
-		fatal(fmt.Errorf("lease request %s pending approval (rerun with --auto-approve for demo)", reqID))
+		lease, err = waitForApproval(*broker, reqID, *waitApprove, *pollInterval)
+		if err != nil {
+			fatal(err)
+		}
 	}
 
 	env := os.Environ()
@@ -181,4 +196,74 @@ func indexOf(xs []string, v string) int {
 		}
 	}
 	return -1
+}
+
+func detectRiskyCommand(cmd []string) string {
+	joined := strings.ToLower(strings.Join(cmd, " "))
+	risky := []string{"printenv", " env", "/proc/", "environ", "set "}
+	for _, r := range risky {
+		if strings.Contains(joined, r) {
+			return fmt.Sprintf("contains risky pattern %q", strings.TrimSpace(r))
+		}
+	}
+	return ""
+}
+
+func fetchLeaseByRequest(broker, requestID string) (string, error) {
+	resp, err := http.Get(broker + "/v1/leases/by-request?request_id=" + requestID)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return "", fmt.Errorf("fetch lease failed: %s", resp.Status)
+	}
+	var out struct {
+		LeaseToken string `json:"lease_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	if out.LeaseToken == "" {
+		return "", fmt.Errorf("empty lease token from approved request")
+	}
+	return out.LeaseToken, nil
+}
+
+func requestStatus(broker, requestID string) (string, error) {
+	resp, err := http.Get(broker + "/v1/requests/status?request_id=" + requestID)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return "", fmt.Errorf("status check failed: %s", resp.Status)
+	}
+	var out struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	return out.Status, nil
+}
+
+func waitForApproval(broker, requestID string, timeout, poll time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		status, err := requestStatus(broker, requestID)
+		if err != nil {
+			return "", err
+		}
+		switch status {
+		case "approved":
+			return fetchLeaseByRequest(broker, requestID)
+		case "denied":
+			return "", fmt.Errorf("request denied: %s", requestID)
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("approval timeout for request %s", requestID)
+		}
+		time.Sleep(poll)
+	}
 }

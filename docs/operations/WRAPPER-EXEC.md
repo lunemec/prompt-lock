@@ -19,7 +19,9 @@ PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 ## Notes
 - `--intent` resolves secrets via broker intent map.
 - `--secrets` can be used explicitly instead of intent.
-- `--auto-approve` exists only for local prototyping and should be disabled in production paths.
+- Default mode waits for external human approval (`--wait-approve`, `--poll-interval`).
+- `--auto-approve` exists only for local prototyping and requires `PROMPTLOCK_DEV_MODE=1`.
+- Basic command policy blocks risky secret-dumping command patterns unless `--allow-risky-command` is explicitly set.
 
 ## Security direction
 - Long-term default should require external human approval path.

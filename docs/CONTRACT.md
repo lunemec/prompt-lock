@@ -24,7 +24,7 @@ Response:
 
 ## 2) Human decision
 ### Approve
-`POST /v1/leases/{request_id}/approve`
+`POST /v1/leases/approve?request_id=<id>`
 
 Payload:
 ```json
@@ -42,14 +42,18 @@ Response:
 ```
 
 ### Deny
-`POST /v1/leases/{request_id}/deny`
+`POST /v1/leases/deny?request_id=<id>`
 
 Payload:
 ```json
 { "reason": "Scope too broad" }
 ```
 
-## 3) Access secret with lease
+## 3) Approval/status helpers
+- `GET /v1/requests/status?request_id=<id>`
+- `GET /v1/leases/by-request?request_id=<id>`
+
+## 4) Access secret with lease
 `POST /v1/leases/access`
 
 Payload:

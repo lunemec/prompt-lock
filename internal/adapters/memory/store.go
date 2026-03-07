@@ -63,6 +63,17 @@ func (s *Store) GetLease(token string) (domain.Lease, error) {
 	return l, nil
 }
 
+func (s *Store) GetLeaseByRequestID(requestID string) (domain.Lease, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, l := range s.leases {
+		if l.RequestID == requestID {
+			return l, nil
+		}
+	}
+	return domain.Lease{}, errors.New("lease not found for request")
+}
+
 func (s *Store) GetSecret(name string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

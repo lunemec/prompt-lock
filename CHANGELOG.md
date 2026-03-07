@@ -23,9 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secure execution flow and threat-model documentation.
 - `promptlock exec` prototype wrapper command for intent/secrets-driven execution.
 - Intent resolution endpoint and request status endpoint in Go broker.
+- Lease query by request endpoint to support external approval flow.
 - Wrapper execution docs and intent examples in config.
 
 ### Changed
+- Wrapper now waits for external approval by default, with polling/timeout controls.
+- `--auto-approve` is gated behind `PROMPTLOCK_DEV_MODE=1`.
+- Added basic risky-command policy gate in wrapper (override available for explicit use).
 - Project naming adopted: **PromptLock**.
 - Documentation updated to mark PromptLock as the primary product name/tagline.
 - Discovery finalized and v1 requirements captured in ADR-0002.

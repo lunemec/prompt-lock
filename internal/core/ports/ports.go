@@ -15,6 +15,7 @@ type RequestStore interface {
 type LeaseStore interface {
 	SaveLease(lease domain.Lease) error
 	GetLease(token string) (domain.Lease, error)
+	GetLeaseByRequestID(requestID string) (domain.Lease, error)
 }
 
 type SecretStore interface {
