@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--auto-approve` is gated behind `PROMPTLOCK_DEV_MODE=1`.
 - Added basic risky-command policy gate in wrapper (override available for explicit use).
 - Added command fingerprint binding between lease requests and secret access.
+- Added working-directory fingerprint binding between lease requests and secret access.
 - Project naming adopted: **PromptLock**.
 - Documentation updated to mark PromptLock as the primary product name/tagline.
 - Discovery finalized and v1 requirements captured in ADR-0002.

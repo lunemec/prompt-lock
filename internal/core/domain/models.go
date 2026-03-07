@@ -18,6 +18,7 @@ type LeaseRequest struct {
 	TTLMinutes         int
 	Secrets            []string
 	CommandFingerprint string
+	WorkdirFingerprint string
 	Status             RequestStatus
 	CreatedAt          time.Time
 }
@@ -29,6 +30,7 @@ type Lease struct {
 	TaskID             string
 	Secrets            []string
 	CommandFingerprint string
+	WorkdirFingerprint string
 	ExpiresAt          time.Time
 }
 

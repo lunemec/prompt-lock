@@ -29,7 +29,7 @@ func (s Service) now() time.Time {
 	return s.Now().UTC()
 }
 
-func (s Service) RequestLease(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint string) (domain.LeaseRequest, error) {
+func (s Service) RequestLease(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint, workdirFingerprint string) (domain.LeaseRequest, error) {
 	if err := s.Policy.ValidateRequest(ttl, secrets); err != nil {
 		return domain.LeaseRequest{}, err
 	}
@@ -41,6 +41,7 @@ func (s Service) RequestLease(agentID, taskID, reason string, ttl int, secrets [
 		TTLMinutes:         ttl,
 		Secrets:            append([]string{}, secrets...),
 		CommandFingerprint: commandFingerprint,
+		WorkdirFingerprint: workdirFingerprint,
 		Status:             domain.RequestPending,
 		CreatedAt:          s.now(),
 	}
@@ -76,6 +77,7 @@ func (s Service) ApproveRequest(requestID string, ttlMinutes int) (domain.Lease,
 		TaskID:             req.TaskID,
 		Secrets:            append([]string{}, req.Secrets...),
 		CommandFingerprint: req.CommandFingerprint,
+		WorkdirFingerprint: req.WorkdirFingerprint,
 		ExpiresAt:          s.now().Add(time.Duration(ttlMinutes) * time.Minute),
 	}
 	if err := s.Leases.SaveLease(lease); err != nil {
@@ -85,7 +87,7 @@ func (s Service) ApproveRequest(requestID string, ttlMinutes int) (domain.Lease,
 	return lease, nil
 }
 
-func (s Service) AccessSecret(leaseToken, secretName, commandFingerprint string) (string, error) {
+func (s Service) AccessSecret(leaseToken, secretName, commandFingerprint, workdirFingerprint string) (string, error) {
 	lease, err := s.Leases.GetLease(leaseToken)
 	if err != nil {
 		return "", err
@@ -98,6 +100,9 @@ func (s Service) AccessSecret(leaseToken, secretName, commandFingerprint string)
 	}
 	if lease.CommandFingerprint != "" && lease.CommandFingerprint != commandFingerprint {
 		return "", errors.New("command fingerprint mismatch")
+	}
+	if lease.WorkdirFingerprint != "" && lease.WorkdirFingerprint != workdirFingerprint {
+		return "", errors.New("workdir fingerprint mismatch")
 	}
 	val, err := s.Secrets.GetSecret(secretName)
 	if err != nil {

@@ -11,7 +11,8 @@ Payload:
   "reason": "Run e2e verification",
   "ttl_minutes": 20,
   "secrets": ["github_token", "npm_token"],
-  "command_fingerprint": "sha256:..."
+  "command_fingerprint": "sha256:...",
+  "workdir_fingerprint": "sha256:..."
 }
 ```
 
@@ -62,7 +63,8 @@ Payload:
 {
   "lease_token": "lease_...",
   "secret": "github_token",
-  "command_fingerprint": "sha256:..."
+  "command_fingerprint": "sha256:...",
+  "workdir_fingerprint": "sha256:..."
 }
 ```
 

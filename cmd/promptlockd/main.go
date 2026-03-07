@@ -27,6 +27,7 @@ type leaseReq struct {
 	TTLMinutes         int      `json:"ttl_minutes"`
 	Secrets            []string `json:"secrets"`
 	CommandFingerprint string   `json:"command_fingerprint"`
+	WorkdirFingerprint string   `json:"workdir_fingerprint"`
 }
 
 type approveReq struct {
@@ -36,6 +37,7 @@ type accessReq struct {
 	LeaseToken         string `json:"lease_token"`
 	Secret             string `json:"secret"`
 	CommandFingerprint string `json:"command_fingerprint"`
+	WorkdirFingerprint string `json:"workdir_fingerprint"`
 }
 
 type resolveIntentReq struct {
@@ -148,7 +150,7 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	if req.TTLMinutes == 0 {
 		req.TTLMinutes = s.svc.Policy.DefaultTTLMinutes
 	}
-	created, err := s.svc.RequestLease(req.AgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.CommandFingerprint)
+	created, err := s.svc.RequestLease(req.AgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint)
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
@@ -186,7 +188,7 @@ func (s *server) handleAccess(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	v, err := s.svc.AccessSecret(req.LeaseToken, req.Secret, req.CommandFingerprint)
+	v, err := s.svc.AccessSecret(req.LeaseToken, req.Secret, req.CommandFingerprint, req.WorkdirFingerprint)
 	if err != nil {
 		http.Error(w, err.Error(), 403)
 		return

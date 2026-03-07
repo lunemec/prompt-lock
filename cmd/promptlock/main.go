@@ -21,6 +21,7 @@ type requestBody struct {
 	TTLMinutes         int      `json:"ttl_minutes"`
 	Secrets            []string `json:"secrets"`
 	CommandFingerprint string   `json:"command_fingerprint"`
+	WorkdirFingerprint string   `json:"workdir_fingerprint"`
 }
 
 func main() {
@@ -78,7 +79,11 @@ func main() {
 	}
 
 	fingerprint := commandFingerprint(cmdArgs)
-	reqID, err := requestLease(*broker, requestBody{AgentID: *agent, TaskID: *task, Reason: *reason, TTLMinutes: *ttl, Secrets: secrets, CommandFingerprint: fingerprint})
+	wdfp, err := workdirFingerprint()
+	if err != nil {
+		fatal(err)
+	}
+	reqID, err := requestLease(*broker, requestBody{AgentID: *agent, TaskID: *task, Reason: *reason, TTLMinutes: *ttl, Secrets: secrets, CommandFingerprint: fingerprint, WorkdirFingerprint: wdfp})
 	if err != nil {
 		fatal(err)
 	}
@@ -101,7 +106,7 @@ func main() {
 
 	env := os.Environ()
 	for _, s := range secrets {
-		v, err := accessSecret(*broker, lease, s, fingerprint)
+		v, err := accessSecret(*broker, lease, s, fingerprint, wdfp)
 		if err != nil {
 			fatal(err)
 		}
@@ -158,11 +163,11 @@ func approve(broker, requestID string, ttl int) (string, error) {
 	return out.LeaseToken, nil
 }
 
-func accessSecret(broker, lease, secret, fingerprint string) (string, error) {
+func accessSecret(broker, lease, secret, fingerprint, workdirFP string) (string, error) {
 	var out struct {
 		Value string `json:"value"`
 	}
-	if err := postJSON(broker+"/v1/leases/access", map[string]string{"lease_token": lease, "secret": secret, "command_fingerprint": fingerprint}, &out); err != nil {
+	if err := postJSON(broker+"/v1/leases/access", map[string]string{"lease_token": lease, "secret": secret, "command_fingerprint": fingerprint, "workdir_fingerprint": workdirFP}, &out); err != nil {
 		return "", err
 	}
 	return out.Value, nil
@@ -206,6 +211,15 @@ func commandFingerprint(cmd []string) string {
 	s := strings.Join(cmd, "\x00")
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
+}
+
+func workdirFingerprint() (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256([]byte(wd))
+	return hex.EncodeToString(h[:]), nil
 }
 
 func detectRiskyCommand(cmd []string) string {

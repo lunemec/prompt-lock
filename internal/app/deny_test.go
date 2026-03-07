@@ -21,7 +21,7 @@ func TestDenyRequest(t *testing.T) {
 		NewRequestID: func() string { return "req_deny" },
 		NewLeaseTok:  func() string { return "lease_deny" },
 	}
-	_, err := svc.RequestLease("agent1", "task1", "test", 5, []string{"github_token"}, "fp-deny")
+	_, err := svc.RequestLease("agent1", "task1", "test", 5, []string{"github_token"}, "fp-deny", "wd-deny")
 	if err != nil {
 		t.Fatal(err)
 	}

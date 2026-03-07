@@ -36,7 +36,7 @@ func TestLeaseFlow(t *testing.T) {
 		NewLeaseTok: func() string { return "lease_test" },
 	}
 
-	req, err := svc.RequestLease("agent1", "task1", "test", 5, []string{"github_token"}, "fp1")
+	req, err := svc.RequestLease("agent1", "task1", "test", 5, []string{"github_token"}, "fp1", "wd1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestLeaseFlow(t *testing.T) {
 		t.Fatalf("expected lease token")
 	}
 
-	val, err := svc.AccessSecret(lease.Token, "github_token", "fp1")
+	val, err := svc.AccessSecret(lease.Token, "github_token", "fp1", "wd1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,10 @@ func TestLeaseFlow(t *testing.T) {
 		t.Fatalf("expected audit events")
 	}
 
-	if _, err := svc.AccessSecret(lease.Token, "github_token", "different-fp"); err == nil {
+	if _, err := svc.AccessSecret(lease.Token, "github_token", "different-fp", "wd1"); err == nil {
 		t.Fatalf("expected fingerprint mismatch error")
+	}
+	if _, err := svc.AccessSecret(lease.Token, "github_token", "fp1", "other-wd"); err == nil {
+		t.Fatalf("expected workdir mismatch error")
 	}
 }
