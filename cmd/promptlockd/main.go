@@ -24,6 +24,7 @@ type server struct {
 	intents              map[string][]string
 	authEnabled          bool
 	authCfg              config.AuthConfig
+	execPolicy           config.ExecutionPolicy
 	authStore            *auth.Store
 	unixSocketConfigured bool
 	seq                  *uint64
@@ -111,7 +112,7 @@ func main() {
 		log.Fatal("auth enabled on non-local TCP without unix socket; set unix_socket or PROMPTLOCK_ALLOW_INSECURE_TCP=1")
 	}
 	authStore := auth.NewStore()
-	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, authStore: authStore, unixSocketConfigured: cfg.UnixSocket != "", seq: &seq, now: func() time.Time { return time.Now().UTC() }}
+	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, authStore: authStore, unixSocketConfigured: cfg.UnixSocket != "", seq: &seq, now: func() time.Time { return time.Now().UTC() }}
 	if cfg.Auth.EnableAuth {
 		startAuthCleanupLoop(s)
 	}

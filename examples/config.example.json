@@ -18,6 +18,13 @@
     "bootstrap_token_ttl_seconds": 60,
     "cleanup_interval_seconds": 60
   },
+  "execution_policy": {
+    "allowlist_prefixes": ["bash", "sh", "npm", "node", "go", "python", "pytest", "make", "git"],
+    "denylist_substrings": ["printenv", "/proc/", "environ"],
+    "max_output_bytes": 65536,
+    "default_timeout_sec": 120,
+    "max_timeout_sec": 600
+  },
   "secrets": [
     { "name": "github_token", "value": "REPLACE_ME" },
     { "name": "npm_token", "value": "REPLACE_ME" }

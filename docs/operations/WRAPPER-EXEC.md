@@ -52,6 +52,7 @@ PROMPTLOCK_DEV_MODE=1 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 - Wrapper computes command and working-directory fingerprints and includes them in lease/access calls.
 - Wrapper checks broker capabilities and fails fast if hardened mode disables plaintext secret return unless `--broker-exec` is used.
 - `--broker-exec` uses `/v1/leases/execute` to avoid plaintext secret-return API dependency.
+- Broker-side execution policy can enforce command allowlist/denylist, output limits, and timeouts.
 - When auth is enabled, wrapper uses `--session-token` (or `PROMPTLOCK_SESSION_TOKEN`) for agent endpoints.
 - Default mode waits for external human approval (`--wait-approve`, `--poll-interval`).
 - `promptlock approve-queue` is a host-side watcher CLI for approving/denying pending requests.

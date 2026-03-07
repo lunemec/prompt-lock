@@ -34,6 +34,7 @@ func TestExecuteWithSecrets(t *testing.T) {
 		svc:         app.Service{Policy: domain.DefaultPolicy(), Requests: store, Leases: store, Secrets: store, Audit: testAudit{}, Now: func() time.Time { return now }, NewRequestID: func() string { return "r1" }, NewLeaseTok: func() string { return "l1" }},
 		authEnabled: true,
 		authCfg:     config.AuthConfig{EnableAuth: true, OperatorToken: "op", AllowPlaintextSecretReturn: false},
+		execPolicy:  config.ExecutionPolicy{AllowlistPrefixes: []string{"bash"}, DenylistSubstrings: []string{"printenv"}, MaxOutputBytes: 65536, DefaultTimeoutSec: 30, MaxTimeoutSec: 60},
 		authStore:   aStore,
 		now:         func() time.Time { return now },
 	}

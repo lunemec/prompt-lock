@@ -47,6 +47,12 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 - For hardened local deployments, prefer `unix_socket` and keep TCP on localhost only.
 - If auth is enabled and TCP is non-local without unix socket, broker fails to start unless `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is set.
 
+## Execution policy notes
+- `execution_policy.allowlist_prefixes` restricts executable entrypoints for broker-exec mode.
+- `execution_policy.denylist_substrings` blocks suspicious command patterns.
+- `max_output_bytes` limits output returned from broker execution.
+- `default_timeout_sec` and `max_timeout_sec` enforce execution time bounds.
+
 ## Notes
 - Keep this file host-owned and permission-restricted.
 - Do not place this config in agent-writable workspace mounts.
