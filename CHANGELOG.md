@@ -11,11 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent skill for requesting short-lived secret leases.
 - AGENTS/docs harness structure and security-focused standards.
 - Final validation gate with changelog + security baseline checks.
-
-### Added
 - Initial Go implementation skeleton (`cmd/promptlockd`, core domain, ports/adapters, service layer).
 - Unit tests for policy and lease request/approve/access flow.
 - ADR-0003 documenting Codex token access and lease-renewal model.
+- ADR-0004 documenting Codex CLI integration strategy.
+- Host configuration docs and sample config file.
 
 ### Changed
 - Project naming adopted: **PromptLock**.
@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Discovery finalized and v1 requirements captured in ADR-0002.
 - Contract docs aligned to v1 policy (default TTL 5m, explicit secrets, reusable-until-expiry leases).
 - README updated with agent-generated code note and codex-docker workflow alignment.
+- Go broker now supports host config file loading (`PROMPTLOCK_CONFIG`) for address/audit/policy/secrets.
+- Request TTL now defaults to policy default when omitted.
 
 ## [0.1.0] - 2026-03-07
 ### Added

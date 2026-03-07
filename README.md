@@ -66,6 +66,12 @@ Start broker (Go v1 skeleton):
 go run ./cmd/promptlockd
 ```
 
+Start broker with host config:
+
+```bash
+PROMPTLOCK_CONFIG=./examples/config.example.json go run ./cmd/promptlockd
+```
+
 Agent requests secrets:
 
 ```bash

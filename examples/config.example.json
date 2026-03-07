@@ -1,0 +1,14 @@
+{
+  "address": ":8765",
+  "audit_path": "/var/log/promptlock/audit.jsonl",
+  "policy": {
+    "default_ttl_minutes": 5,
+    "min_ttl_minutes": 1,
+    "max_ttl_minutes": 30,
+    "max_secrets_per_request": 5
+  },
+  "secrets": [
+    { "name": "github_token", "value": "REPLACE_ME" },
+    { "name": "npm_token", "value": "REPLACE_ME" }
+  ]
+}

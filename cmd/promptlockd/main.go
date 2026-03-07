@@ -12,7 +12,7 @@ import (
 	"github.com/lunemec/promptlock/internal/adapters/audit"
 	"github.com/lunemec/promptlock/internal/adapters/memory"
 	"github.com/lunemec/promptlock/internal/app"
-	"github.com/lunemec/promptlock/internal/core/domain"
+	"github.com/lunemec/promptlock/internal/config"
 )
 
 type server struct{ svc app.Service }
@@ -25,21 +25,38 @@ type leaseReq struct {
 	Secrets    []string `json:"secrets"`
 }
 
-type approveReq struct{ TTLMinutes int `json:"ttl_minutes"` }
+type approveReq struct {
+	TTLMinutes int `json:"ttl_minutes"`
+}
 type accessReq struct {
 	LeaseToken string `json:"lease_token"`
 	Secret     string `json:"secret"`
 }
 
 func main() {
-	auditPath := getenv("PROMPTLOCK_AUDIT_PATH", "/tmp/promptlock-audit.jsonl")
-	addr := getenv("PROMPTLOCK_ADDR", ":8765")
+	cfgPath := getenv("PROMPTLOCK_CONFIG", "/etc/promptlock/config.json")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if v := os.Getenv("PROMPTLOCK_AUDIT_PATH"); v != "" {
+		cfg.AuditPath = v
+	}
+	if v := os.Getenv("PROMPTLOCK_ADDR"); v != "" {
+		cfg.Address = v
+	}
 
 	store := memory.NewStore()
 	store.SetSecret("github_token", getenv("PROMPTLOCK_DEMO_GITHUB_TOKEN", "DEMO_GITHUB_TOKEN"))
 	store.SetSecret("npm_token", getenv("PROMPTLOCK_DEMO_NPM_TOKEN", "DEMO_NPM_TOKEN"))
+	for _, s := range cfg.Secrets {
+		if s.Name != "" {
+			store.SetSecret(s.Name, s.Value)
+		}
+	}
 
-	sink, err := audit.NewFileSink(auditPath)
+	sink, err := audit.NewFileSink(cfg.AuditPath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -50,7 +67,7 @@ func main() {
 	newLease := func() string { return "lease_" + itoa(atomic.AddUint64(&seq, 1)) }
 
 	svc := app.Service{
-		Policy:       domain.DefaultPolicy(),
+		Policy:       cfg.ToPolicy(),
 		Requests:     store,
 		Leases:       store,
 		Secrets:      store,
@@ -65,36 +82,66 @@ func main() {
 	http.HandleFunc("/v1/leases/approve", s.handleApprove)
 	http.HandleFunc("/v1/leases/access", s.handleAccess)
 
-	log.Printf("promptlock listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	log.Printf("promptlock listening on %s", cfg.Address)
+	log.Fatal(http.ListenAndServe(cfg.Address, nil))
 }
 
 func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost { http.Error(w, "method not allowed", 405); return }
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
 	var req leaseReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil { http.Error(w, err.Error(), 400); return }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if req.TTLMinutes == 0 {
+		req.TTLMinutes = s.svc.Policy.DefaultTTLMinutes
+	}
 	created, err := s.svc.RequestLease(req.AgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets)
-	if err != nil { http.Error(w, err.Error(), 400); return }
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
 	writeJSON(w, map[string]any{"request_id": created.ID, "status": created.Status})
 }
 
 func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost { http.Error(w, "method not allowed", 405); return }
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
 	requestID := r.URL.Query().Get("request_id")
-	if requestID == "" { http.Error(w, "request_id required", 400); return }
+	if requestID == "" {
+		http.Error(w, "request_id required", 400)
+		return
+	}
 	var req approveReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	lease, err := s.svc.ApproveRequest(requestID, req.TTLMinutes)
-	if err != nil { http.Error(w, err.Error(), 400); return }
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
 	writeJSON(w, map[string]any{"status": "approved", "lease_token": lease.Token, "expires_at": lease.ExpiresAt})
 }
 
 func (s *server) handleAccess(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost { http.Error(w, "method not allowed", 405); return }
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
 	var req accessReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil { http.Error(w, err.Error(), 400); return }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
 	v, err := s.svc.AccessSecret(req.LeaseToken, req.Secret)
-	if err != nil { http.Error(w, err.Error(), 403); return }
+	if err != nil {
+		http.Error(w, err.Error(), 403)
+		return
+	}
 	writeJSON(w, map[string]any{"secret": req.Secret, "value": v})
 }
 
@@ -104,7 +151,9 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 func getenv(k, d string) string {
-	if v := os.Getenv(k); v != "" { return v }
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
 	return d
 }
 

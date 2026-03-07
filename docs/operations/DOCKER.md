@@ -11,6 +11,7 @@ Yes, dockerizing this tool makes sense.
 1. **Broker container (trusted)**
    - holds policy + lease logic
    - writes audit trail to host-mounted protected path
+   - reads host config from mounted `/etc/promptlock/config.json`
 2. **Agent/workload container(s) (untrusted or mixed trust)**
    - do not hold raw secrets
    - request time-bound leases from broker
