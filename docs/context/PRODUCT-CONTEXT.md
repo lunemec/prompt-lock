@@ -1,10 +1,10 @@
-# PRODUCT CONTEXT
+# PRODUCT CONTEXT (PromptLock)
 
 ## Problem
 Agents need secrets for autonomous workflows, but direct secret mounts increase exfiltration risk under prompt injection.
 
 ## Product intent
-Provide human-approved, time-bound, least-privilege secret leases to keep workflows usable and safer.
+PromptLock provides human-approved, time-bound, least-privilege secret leases to keep workflows usable and safer.
 
 ## Primary users
 - Human operator approving/denying access

@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AGENTS/docs harness structure and security-focused standards.
 - Final validation gate with changelog + security baseline checks.
 
+### Changed
+- Project naming adopted: **PromptLock**.
+- Documentation updated to mark PromptLock as the primary product name/tagline.
+
 ## [0.1.0] - 2026-03-07
 ### Added
 - Draft repository structure and core documentation.

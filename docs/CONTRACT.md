@@ -1,4 +1,4 @@
-# Secret Lease Contract
+# PromptLock Secret Lease Contract
 
 ## 1) Request lease
 `POST /v1/leases/request`

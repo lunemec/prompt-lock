@@ -1,11 +1,16 @@
-# Secret Lease Broker (Draft)
+# PromptLock (Draft)
 
 ## Goal
-Build a human-approved secret access broker for coding agents.
+Build **PromptLock**: a human-approved secret access broker for coding agents.
 
 Instead of mounting raw long-lived secrets into agent containers, agents request a **time-bound lease** for one or more named secrets (e.g., `github_token`, `npm_token`) for **N minutes**. A human approves/denies the request. If approved, the agent can fetch only those secrets for the lease duration.
 
 This reduces prompt-injection blast radius while keeping autonomous workflows practical.
+
+## Name
+Project name: **PromptLock**
+
+Tagline: **Human-approved secret access for autonomous agents.**
 
 ## Core contract
 - Agent requests: `secrets[] + ttl_minutes + reason + task_id + agent_id`
