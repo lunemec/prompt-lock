@@ -76,6 +76,28 @@ Response:
 }
 ```
 
+## 5) Execute with lease-scoped secrets (preferred for hardened mode)
+`POST /v1/leases/execute`
+
+Payload:
+```json
+{
+  "lease_token": "lease_...",
+  "command": ["bash", "-lc", "npm test"],
+  "secrets": ["github_token", "npm_token"],
+  "command_fingerprint": "sha256:...",
+  "workdir_fingerprint": "sha256:..."
+}
+```
+
+Response:
+```json
+{
+  "exit_code": 0,
+  "stdout_stderr": "..."
+}
+```
+
 ## Enforcement rules
 - Default deny.
 - Lease must be unexpired.

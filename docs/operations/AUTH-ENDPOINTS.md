@@ -62,6 +62,7 @@ Examples:
 - `/v1/requests/status`
 - `/v1/leases/by-request`
 - `/v1/leases/access`
+- `/v1/leases/execute`
 
 Operator endpoints require operator token:
 - `/v1/requests/pending`

@@ -124,6 +124,7 @@ func main() {
 	http.HandleFunc("/v1/leases/deny", s.handleDeny)
 	http.HandleFunc("/v1/leases/by-request", s.handleLeaseByRequest)
 	http.HandleFunc("/v1/leases/access", s.handleAccess)
+	http.HandleFunc("/v1/leases/execute", s.handleExecute)
 	http.HandleFunc("/v1/auth/bootstrap/create", s.handleAuthBootstrapCreate)
 	http.HandleFunc("/v1/auth/pair/complete", s.handleAuthPairComplete)
 	http.HandleFunc("/v1/auth/session/mint", s.handleAuthSessionMint)

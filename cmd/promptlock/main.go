@@ -59,6 +59,7 @@ func runExec(args []string) {
 	waitApprove := fs.Duration("wait-approve", 2*time.Minute, "max time to wait for external approval")
 	pollInterval := fs.Duration("poll-interval", 2*time.Second, "poll interval while waiting for approval")
 	allowRisky := fs.Bool("allow-risky-command", false, "allow risky commands (env/printenv/proc environ reads)")
+	brokerExec := fs.Bool("broker-exec", false, "execute command via broker /v1/leases/execute")
 	fs.Parse(args)
 
 	cmdArgs := fs.Args()
@@ -100,8 +101,8 @@ func runExec(args []string) {
 		if caps.AuthEnabled && *sessionToken == "" {
 			fatal(fmt.Errorf("broker requires session token; provide --session-token or PROMPTLOCK_SESSION_TOKEN"))
 		}
-		if caps.AuthEnabled && !caps.AllowPlaintextSecretReturn {
-			fatal(fmt.Errorf("broker policy disables plaintext secret return; current wrapper mode is incompatible (next step: execute-with-secret mode)"))
+		if caps.AuthEnabled && !caps.AllowPlaintextSecretReturn && !*brokerExec {
+			fatal(fmt.Errorf("broker policy disables plaintext secret return; re-run with --broker-exec"))
 		}
 	}
 
@@ -129,6 +130,17 @@ func runExec(args []string) {
 		if err != nil {
 			fatal(err)
 		}
+	}
+
+	if *brokerExec {
+		exitCode, output, err := executeWithSecret(*broker, *sessionToken, lease, cmdArgs, secrets, fingerprint, wdfp)
+		if err != nil {
+			fatal(err)
+		}
+		if output != "" {
+			fmt.Print(output)
+		}
+		os.Exit(exitCode)
 	}
 
 	env := os.Environ()
@@ -501,4 +513,22 @@ func brokerCapabilities(broker string) (capabilities, error) {
 		return capabilities{}, err
 	}
 	return out, nil
+}
+
+func executeWithSecret(broker, sessionToken, lease string, command, secrets []string, fp, wdfp string) (int, string, error) {
+	var out struct {
+		ExitCode     int    `json:"exit_code"`
+		StdoutStderr string `json:"stdout_stderr"`
+	}
+	payload := map[string]any{
+		"lease_token":         lease,
+		"command":             command,
+		"secrets":             secrets,
+		"command_fingerprint": fp,
+		"workdir_fingerprint": wdfp,
+	}
+	if err := postJSONAuth(broker+"/v1/leases/execute", sessionToken, payload, &out); err != nil {
+		return 1, "", err
+	}
+	return out.ExitCode, out.StdoutStderr, nil
 }

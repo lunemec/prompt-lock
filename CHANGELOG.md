@@ -38,7 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added authz unit tests for operator and agent session checks.
 - Added policy gate to block plaintext secret-return endpoint when configured (`allow_plaintext_secret_return=false`).
 - Added `/v1/meta/capabilities` endpoint and wrapper capability pre-checks.
-- Added explicit next-step implementation plan for execute-with-secret mode.
+- Added `/v1/leases/execute` broker-side execution endpoint for hardened mode path.
+- Added wrapper `--broker-exec` support to run through execute-with-secret flow.
+- Added execute-with-secret endpoint tests.
 - Wrapper execution docs and intent examples in config.
 
 ### Changed
