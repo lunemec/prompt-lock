@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added tamper-evident audit hash-chain records in file sink.
 - Added auth cleanup loop for expired bootstrap/session records and stale grant revocation.
 - Added operator/session role auth headers wiring in CLI paths.
+- Added authz unit tests for operator and agent session checks.
 - Wrapper execution docs and intent examples in config.
 
 ### Changed
