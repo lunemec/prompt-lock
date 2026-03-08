@@ -39,8 +39,11 @@ type execArgs struct {
 	TTL    int
 }
 
+const maxRPCLineBytes = 1 << 20 // 1 MiB
+
 func main() {
 	s := bufio.NewScanner(os.Stdin)
+	s.Buffer(make([]byte, 0, 64*1024), maxRPCLineBytes)
 	for s.Scan() {
 		line := strings.TrimSpace(s.Text())
 		if line == "" {
@@ -52,6 +55,9 @@ func main() {
 			continue
 		}
 		handle(req)
+	}
+	if err := s.Err(); err != nil {
+		emit(rpcResp{JSONRPC: "2.0", Error: map[string]any{"code": -32001, "message": "stdin scanner error: " + err.Error()}})
 	}
 }
 

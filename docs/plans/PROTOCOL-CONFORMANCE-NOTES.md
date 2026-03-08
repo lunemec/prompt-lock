@@ -16,6 +16,10 @@
 - batch request handling not implemented
 - output mapping is minimal text content structure
 
+## Hardening implemented
+- stdio scanner input line cap (1 MiB) to reduce oversized input abuse risk
+- parser and argument validation negative-path tests
+
 ## Next conformance tasks
 1. Validate against target MCP client(s) used in deployment.
 2. Add tests for invalid method shapes and batch/edge-case handling.

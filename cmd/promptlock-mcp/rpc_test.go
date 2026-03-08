@@ -37,3 +37,9 @@ func TestUnknownMethodResponseShape(t *testing.T) {
 		t.Fatalf("expected non-empty error response")
 	}
 }
+
+func TestMaxRPCLineConstant(t *testing.T) {
+	if maxRPCLineBytes < 1024 {
+		t.Fatalf("maxRPCLineBytes too small: %d", maxRPCLineBytes)
+	}
+}
