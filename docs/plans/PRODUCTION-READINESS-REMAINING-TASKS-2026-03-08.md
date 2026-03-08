@@ -111,12 +111,13 @@ Status: In progress (all P0 blockers complete; remaining P1/P2 hardening tasks o
 
 ## P2-01 — Production runbook quality gate
 - **Area:** Usability / operations
+- **Status:** ✅ Completed (2026-03-08)
 - **Scope:**
   - Add “first 30 minutes” deployment checklist and incident quick-reference.
   - Add rollback playbook for TLS/auth/backend config failures.
 - **Strict gates:**
-  - [ ] New operator can deploy hardened profile from docs only.
-  - [ ] Incident checklist includes verification commands + expected outputs.
+  - [x] New operator can deploy hardened profile from docs only.
+  - [x] Incident checklist includes verification commands + expected outputs.
 
 ## P2-02 — Release readiness scoreboard
 - **Area:** Delivery governance

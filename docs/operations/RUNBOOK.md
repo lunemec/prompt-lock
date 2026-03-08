@@ -27,6 +27,32 @@
   2. Compare with last checkpoint window.
   3. If mismatch, trigger incident flow below.
 
+## First 30 minutes checklist (hardened deployment)
+1. Validate config parse + profile:
+   - `go run ./cmd/promptlock-readiness-check --file docs/plans/PRODUCTION-READINESS-STATUS.json --require-p0`
+2. Run baseline CI gate:
+   - `make validate-final`
+3. Run hardened smoke suite:
+   - `make hardened-smoke`
+4. Confirm live red-team hardened report exists:
+   - `cat reports/redteam-live-hardened.json`
+5. Verify audit chain immediately after startup:
+   - `go run ./cmd/promptlock audit-verify --file /var/log/promptlock/audit.jsonl`
+
+## Incident quick-reference
+- **Transport/TLS startup failure**
+  - Check cert/key/CA paths and permissions.
+  - Re-run: `go test ./cmd/promptlockd -run 'TestValidateTLSConfig|TestMTLSRejectsClientWithoutCertificate'`
+- **Auth/session anomalies**
+  - Inspect recent audit events for `auth_*` and `secret_backend_error`.
+  - If using persisted auth store, verify `auth.store_file` integrity/permissions.
+- **Secret backend failures**
+  - Validate `secret_source.type` and provider-specific settings (`env_prefix` / `file_path`).
+  - Expect deterministic client error: `secret backend unavailable`.
+- **Rollback quick path**
+  - Revert to last known-good config and restart broker.
+  - Re-run `make hardened-smoke` + audit verify before reopening traffic.
+
 ### Incident response for audit integrity failures
 - If verification fails, immediately:
   1. Freeze broker writes (stop service or switch to read-only mode).
