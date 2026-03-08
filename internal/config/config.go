@@ -8,16 +8,17 @@ import (
 )
 
 type Config struct {
-	SecurityProfile string          `json:"security_profile"`
-	Address         string          `json:"address"`
-	UnixSocket      string          `json:"unix_socket"`
-	AuditPath       string          `json:"audit_path"`
-	Policy          PolicyConfig    `json:"policy"`
-	Auth            AuthConfig      `json:"auth"`
-	ExecutionPolicy ExecutionPolicy `json:"execution_policy"`
-	HostOpsPolicy   HostOpsPolicy   `json:"host_ops_policy"`
-	Secrets         []SecretEntry   `json:"secrets"`
-	Intents         IntentMap       `json:"intents"`
+	SecurityProfile     string              `json:"security_profile"`
+	Address             string              `json:"address"`
+	UnixSocket          string              `json:"unix_socket"`
+	AuditPath           string              `json:"audit_path"`
+	Policy              PolicyConfig        `json:"policy"`
+	Auth                AuthConfig          `json:"auth"`
+	ExecutionPolicy     ExecutionPolicy     `json:"execution_policy"`
+	HostOpsPolicy       HostOpsPolicy       `json:"host_ops_policy"`
+	NetworkEgressPolicy NetworkEgressPolicy `json:"network_egress_policy"`
+	Secrets             []SecretEntry       `json:"secrets"`
+	Intents             IntentMap           `json:"intents"`
 }
 
 type PolicyConfig struct {
@@ -72,7 +73,19 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	cfg.applyProfile()
+	cfg.normalize()
 	return cfg, nil
+}
+
+func (c *Config) normalize() {
+	switch c.ExecutionPolicy.OutputSecurityMode {
+	case "", "redacted", "raw", "none":
+		if c.ExecutionPolicy.OutputSecurityMode == "" {
+			c.ExecutionPolicy.OutputSecurityMode = "redacted"
+		}
+	default:
+		c.ExecutionPolicy.OutputSecurityMode = "redacted"
+	}
 }
 
 func (c *Config) applyProfile() {
@@ -88,6 +101,7 @@ func (c *Config) applyProfile() {
 		if c.ExecutionPolicy.DefaultTimeoutSec > 60 {
 			c.ExecutionPolicy.DefaultTimeoutSec = 60
 		}
+		c.ExecutionPolicy.OutputSecurityMode = "none"
 		if c.ExecutionPolicy.MaxOutputBytes > 32768 {
 			c.ExecutionPolicy.MaxOutputBytes = 32768
 		}

@@ -26,6 +26,8 @@ type server struct {
 	authEnabled          bool
 	authCfg              config.AuthConfig
 	execPolicy           config.ExecutionPolicy
+	hostOpsPolicy        config.HostOpsPolicy
+	networkEgressPolicy  config.NetworkEgressPolicy
 	authStore            *auth.Store
 	unixSocketConfigured bool
 	seq                  *uint64
@@ -113,7 +115,7 @@ func main() {
 		log.Fatal(err)
 	}
 	authStore := auth.NewStore()
-	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, authStore: authStore, unixSocketConfigured: cfg.UnixSocket != "", seq: &seq, now: func() time.Time { return time.Now().UTC() }}
+	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, authStore: authStore, unixSocketConfigured: cfg.UnixSocket != "", seq: &seq, now: func() time.Time { return time.Now().UTC() }}
 	if cfg.Auth.EnableAuth {
 		startAuthCleanupLoop(s)
 	}
@@ -131,6 +133,7 @@ func main() {
 	http.HandleFunc("/v1/auth/pair/complete", s.handleAuthPairComplete)
 	http.HandleFunc("/v1/auth/session/mint", s.handleAuthSessionMint)
 	http.HandleFunc("/v1/auth/revoke", s.handleAuthRevoke)
+	http.HandleFunc("/v1/host/docker/execute", s.handleHostDockerExecute)
 
 	if cfg.UnixSocket != "" {
 		_ = os.Remove(cfg.UnixSocket)

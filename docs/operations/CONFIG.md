@@ -55,7 +55,8 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 ## Execution policy notes
 - `execution_policy.allowlist_prefixes` restricts executable entrypoints for broker-exec mode.
 - `execution_policy.denylist_substrings` blocks suspicious command patterns.
-- `max_output_bytes` limits output returned from broker execution.
+- `output_security_mode` controls broker-exec output exposure: `none` (suppress), `redacted` (default), or `raw`.
+- `max_output_bytes` limits output returned from broker execution (applied after output mode processing).
 - `default_timeout_sec` and `max_timeout_sec` enforce execution time bounds.
 
 ## Host Docker mediation policy notes

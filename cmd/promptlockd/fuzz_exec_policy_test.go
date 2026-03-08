@@ -9,7 +9,7 @@ import (
 
 func FuzzValidateExecuteCommand(f *testing.F) {
 	s := &server{execPolicy: config.ExecutionPolicy{
-		AllowlistPrefixes: []string{"bash", "sh", "go", "python"},
+		AllowlistPrefixes:  []string{"bash", "sh", "go", "python"},
 		DenylistSubstrings: []string{"printenv", "/proc/", "environ"},
 	}}
 	f.Add("bash -lc echo ok")

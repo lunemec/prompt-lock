@@ -87,7 +87,7 @@ func (s *server) handleExecute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	outStr := redactOutput(string(out))
+	outStr := applyOutputSecurity(s.execPolicy.OutputSecurityMode, string(out))
 	if max := s.execPolicy.MaxOutputBytes; max > 0 && len(outStr) > max {
 		outStr = outStr[:max]
 	}

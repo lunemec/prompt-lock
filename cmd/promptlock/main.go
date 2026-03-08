@@ -140,7 +140,7 @@ func runExec(args []string) {
 	}
 
 	if *brokerExec {
-		exitCode, output, err := executeWithSecret(*broker, *brokerUnix, *sessionToken, lease, cmdArgs, secrets, fingerprint, wdfp)
+		exitCode, output, err := executeWithSecret(*broker, *brokerUnix, *sessionToken, lease, *intent, cmdArgs, secrets, fingerprint, wdfp)
 		if err != nil {
 			fatal(err)
 		}

@@ -18,3 +18,16 @@ func TestValidateExecuteCommand(t *testing.T) {
 		t.Fatalf("expected denylist rejection")
 	}
 }
+
+func TestApplyOutputSecurity(t *testing.T) {
+	in := "secret=abc"
+	if got := applyOutputSecurity("none", in); got != "" {
+		t.Fatalf("expected none mode to suppress output")
+	}
+	if got := applyOutputSecurity("raw", in); got != in {
+		t.Fatalf("expected raw mode passthrough")
+	}
+	if got := applyOutputSecurity("redacted", in); got == in {
+		t.Fatalf("expected redacted mode to modify sensitive markers")
+	}
+}

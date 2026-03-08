@@ -14,6 +14,7 @@
   "execution_policy": {
     "allowlist_prefixes": ["bash"],
     "denylist_substrings": ["printenv", "/proc/", "environ"],
+    "output_security_mode": "redacted",
     "max_output_bytes": 65536,
     "default_timeout_sec": 30,
     "max_timeout_sec": 60

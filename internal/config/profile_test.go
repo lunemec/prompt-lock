@@ -2,6 +2,15 @@ package config
 
 import "testing"
 
+func TestNormalizeOutputSecurityMode(t *testing.T) {
+	cfg := Default()
+	cfg.ExecutionPolicy.OutputSecurityMode = "weird"
+	cfg.normalize()
+	if cfg.ExecutionPolicy.OutputSecurityMode != "redacted" {
+		t.Fatalf("expected fallback to redacted, got %q", cfg.ExecutionPolicy.OutputSecurityMode)
+	}
+}
+
 func TestApplyHardenedProfile(t *testing.T) {
 	cfg := Default()
 	cfg.SecurityProfile = "hardened"
@@ -21,6 +30,9 @@ func TestApplyHardenedProfile(t *testing.T) {
 	}
 	if cfg.ExecutionPolicy.MaxOutputBytes > 32768 {
 		t.Fatalf("expected max output tightened")
+	}
+	if cfg.ExecutionPolicy.OutputSecurityMode != "none" {
+		t.Fatalf("expected hardened profile output mode none, got %q", cfg.ExecutionPolicy.OutputSecurityMode)
 	}
 	if cfg.UnixSocket == "" {
 		t.Fatalf("expected unix socket default in hardened profile")

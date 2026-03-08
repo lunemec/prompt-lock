@@ -32,6 +32,19 @@ func (s *server) validateExecuteCommand(cmd []string) error {
 	return nil
 }
 
+func applyOutputSecurity(mode, in string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "none":
+		return ""
+	case "raw":
+		return in
+	case "redacted", "":
+		return redactOutput(in)
+	default:
+		return redactOutput(in)
+	}
+}
+
 func redactOutput(in string) string {
 	s := in
 	replacements := []string{
