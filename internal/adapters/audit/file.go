@@ -63,6 +63,7 @@ func (s *FileSink) Write(event ports.AuditEvent) error {
 func (s *FileSink) Close() error { return s.f.Close() }
 
 var tokenLikeRe = regexp.MustCompile(`(?i)\b(boot|grant|sess|lease)_[a-f0-9]{16,}\b`)
+var secretKVRe = regexp.MustCompile(`(?i)\b(api[_-]?key|secret|token)\s*[:=]\s*([^\s,;]+)`) 
 
 func sanitizeAuditEvent(e ports.AuditEvent) ports.AuditEvent {
 	if e.LeaseToken != "" {
@@ -96,6 +97,7 @@ func sanitizeText(in string) string {
 		}
 		return "[REDACTED]"
 	}
+	s = secretKVRe.ReplaceAllString(s, "$1=[REDACTED]")
 	return s
 }
 

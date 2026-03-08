@@ -87,13 +87,14 @@ Status: In progress (all P0 blockers complete; remaining P1/P2 hardening tasks o
 
 ## P1-03 — Secret leakage regression suite
 - **Area:** Security
+- **Status:** ✅ Completed (2026-03-08)
 - **Problem:** Baseline checks exist, but production requires richer leakage regression cases.
 - **Scope:**
   - Add tests for token/secret material across audit logs, error paths, and command output handling.
   - Add negative fixtures and grep-based guardrails in CI.
 - **Strict gates:**
-  - [ ] No raw secret/token patterns in logs/audit fixtures.
-  - [ ] Redaction behavior validated under error and success paths.
+  - [x] No raw secret/token patterns in logs/audit fixtures.
+  - [x] Redaction behavior validated under error and success paths.
 
 ## P1-04 — Go-first tooling migration
 - **Area:** Developer UX / delivery

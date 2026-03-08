@@ -6,7 +6,7 @@
     {"id": "P0-03", "title": "MCP protocol conformance hardening", "priority": "P0", "status": "done", "blocking": true},
     {"id": "P1-01", "title": "Extract auth business logic to app layer", "priority": "P1", "status": "open", "blocking": false},
     {"id": "P1-02", "title": "Hardened deployment smoke suite", "priority": "P1", "status": "open", "blocking": false},
-    {"id": "P1-03", "title": "Secret leakage regression suite", "priority": "P1", "status": "open", "blocking": false},
+    {"id": "P1-03", "title": "Secret leakage regression suite", "priority": "P1", "status": "done", "blocking": false},
     {"id": "P1-04", "title": "Go-first tooling migration", "priority": "P1", "status": "open", "blocking": false},
     {"id": "P2-01", "title": "Production runbook quality gate", "priority": "P2", "status": "open", "blocking": false},
     {"id": "P2-02", "title": "Release readiness scoreboard", "priority": "P2", "status": "done", "blocking": false}

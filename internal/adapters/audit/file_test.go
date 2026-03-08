@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,5 +93,27 @@ func TestAuditSanitizesTokenFields(t *testing.T) {
 	}
 	if got := r.Event.Metadata["note"]; got == "Bearer sess_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" || got == "" {
 		t.Fatalf("expected metadata note sanitized, got %q", got)
+	}
+}
+
+func TestAuditSanitizesSecretKeyValuePatterns(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "audit.jsonl")
+	s, err := NewFileSink(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	e := ports.AuditEvent{Event: "x", Timestamp: time.Now().UTC(), Metadata: map[string]string{"k": "api_key=abc123 token:xyz secret=zzz"}}
+	if err := s.Write(e); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	if strings.Contains(src, "abc123") || strings.Contains(src, "xyz") || strings.Contains(src, "zzz") {
+		t.Fatalf("expected secret key/value patterns to be redacted, got %s", src)
 	}
 }
