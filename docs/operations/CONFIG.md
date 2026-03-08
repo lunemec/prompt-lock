@@ -61,7 +61,8 @@ Startup guardrails:
 
 ## Execution policy notes
 - `execution_policy.allowlist_prefixes` restricts executable entrypoints for broker-exec mode.
-- In `security_profile: hardened`, broker-exec additionally requires `intent` and rejects raw shell wrappers (`bash`/`sh`/`zsh`).
+- In `security_profile: hardened`, broker-exec additionally requires `intent`, rejects raw shell wrappers (`bash`/`sh`/`zsh`), and tightens allowlist defaults to non-shell tool entrypoints (`npm`, `node`, `go`, `python`, `pytest`, `make`, `git`).
+- In hardened mode, command-smuggling markers (`&&`, `||`, `;`, `$(`, backticks) are denied by default.
 - `execution_policy.denylist_substrings` blocks suspicious command patterns.
 - `output_security_mode` controls broker-exec output exposure: `none` (suppress), `redacted` (default), or `raw`.
 - `max_output_bytes` limits output returned from broker execution (applied after output mode processing).
@@ -70,6 +71,7 @@ Startup guardrails:
 ## Host Docker mediation policy notes
 - `host_ops_policy.docker_allow_subcommands` allowlists Docker subcommands for host execution.
 - `host_ops_policy.docker_compose_allow_verbs` allowlists compose verbs.
+- In `security_profile: hardened`, compose verbs are reduced to read-only flow (`config`, `ps`).
 - `host_ops_policy.docker_ps_allowed_flags` and `docker_images_allowed_flags` restrict accepted flags.
 - `host_ops_policy.docker_deny_substrings` blocks dangerous argument patterns.
 - `host_ops_policy.docker_timeout_sec` limits host Docker command runtime.

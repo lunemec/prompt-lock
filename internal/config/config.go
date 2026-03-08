@@ -105,6 +105,12 @@ func (c *Config) applyProfile() {
 		if c.ExecutionPolicy.MaxOutputBytes > 32768 {
 			c.ExecutionPolicy.MaxOutputBytes = 32768
 		}
+		c.ExecutionPolicy.AllowlistPrefixes = []string{"npm", "node", "go", "python", "pytest", "make", "git"}
+		c.ExecutionPolicy.DenylistSubstrings = append(c.ExecutionPolicy.DenylistSubstrings,
+			"&&", "||", ";", "$(", "`")
+		c.HostOpsPolicy.DockerComposeAllowVerbs = []string{"config", "ps"}
+		c.HostOpsPolicy.DockerDenySubstrings = append(c.HostOpsPolicy.DockerDenySubstrings,
+			"&&", "||", ";", "$(", "`")
 		if c.UnixSocket == "" {
 			c.UnixSocket = "/tmp/promptlock.sock"
 		}

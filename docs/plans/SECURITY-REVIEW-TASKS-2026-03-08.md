@@ -60,10 +60,11 @@ Status: Open.
 - **Priority:** P1
 - **Task:** Review command policy defaults for `leases/execute` and host docker mediation to reduce accidental over-permissioning.
 - **Why:** Execution primitives are highest-risk surfaces.
+- **Status:** ✅ Completed (2026-03-08)
 - **Done when:**
-  - [ ] Hardened profile default allowlists minimized.
-  - [ ] New negative tests for shell-wrapper abuse and argument smuggling.
-  - [ ] Release notes call out behavior changes.
+  - [x] Hardened profile default allowlists minimized.
+  - [x] New negative tests for shell-wrapper abuse and argument smuggling.
+  - [x] Release notes call out behavior changes.
 
 ## S-008 — Strengthen audit-chain operational controls
 - **Priority:** P2

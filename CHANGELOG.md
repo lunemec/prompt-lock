@@ -69,6 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Wrapper execution docs and intent examples in config.
 
 ### Changed
+- Hardened profile now tightens broker-exec defaults by removing shell wrappers from execution allowlist and adding command-smuggling deny markers (`&&`, `||`, `;`, `$(`, backticks).
+- Hardened profile now restricts host Docker compose mediation verbs to read-only `config` and `ps`.
 - Wrapper now waits for external approval by default, with polling/timeout controls.
 - `--auto-approve` is gated behind `PROMPTLOCK_DEV_MODE=1`.
 - Added basic risky-command policy gate in wrapper (override available for explicit use).

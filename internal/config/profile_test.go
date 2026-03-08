@@ -34,6 +34,26 @@ func TestApplyHardenedProfile(t *testing.T) {
 	if cfg.ExecutionPolicy.OutputSecurityMode != "none" {
 		t.Fatalf("expected hardened profile output mode none, got %q", cfg.ExecutionPolicy.OutputSecurityMode)
 	}
+	for _, disallowed := range []string{"bash", "sh", "zsh"} {
+		for _, allowed := range cfg.ExecutionPolicy.AllowlistPrefixes {
+			if allowed == disallowed {
+				t.Fatalf("did not expect %q in hardened allowlist", disallowed)
+			}
+		}
+	}
+	if len(cfg.HostOpsPolicy.DockerComposeAllowVerbs) != 2 || cfg.HostOpsPolicy.DockerComposeAllowVerbs[0] != "config" || cfg.HostOpsPolicy.DockerComposeAllowVerbs[1] != "ps" {
+		t.Fatalf("expected hardened compose verbs to be [config ps], got %#v", cfg.HostOpsPolicy.DockerComposeAllowVerbs)
+	}
+	foundSmuggleGuard := false
+	for _, d := range cfg.ExecutionPolicy.DenylistSubstrings {
+		if d == "&&" {
+			foundSmuggleGuard = true
+			break
+		}
+	}
+	if !foundSmuggleGuard {
+		t.Fatalf("expected hardened denylist to include command-smuggling guards")
+	}
 	if cfg.UnixSocket == "" {
 		t.Fatalf("expected unix socket default in hardened profile")
 	}

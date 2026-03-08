@@ -12,7 +12,7 @@ func TestValidateHostDockerCommand(t *testing.T) {
 		DockerComposeAllowVerbs:  []string{"config", "ps", "ls", "images"},
 		DockerPSAllowedFlags:     []string{"-a", "--all", "-q", "--quiet", "--format", "-f", "--filter", "--no-trunc", "-n", "--last"},
 		DockerImagesAllowedFlags: []string{"-q", "--quiet", "--format", "--no-trunc", "--digests", "--filter"},
-		DockerDenySubstrings:     []string{"--privileged", "--pid=host", "docker.sock", "--mount"},
+		DockerDenySubstrings:     []string{"--privileged", "--pid=host", "docker.sock", "--mount", ";"},
 	}}
 	if err := s.validateHostDockerCommand([]string{"docker", "ps", "-a"}); err != nil {
 		t.Fatalf("expected allow: %v", err)
@@ -28,5 +28,8 @@ func TestValidateHostDockerCommand(t *testing.T) {
 	}
 	if err := s.validateHostDockerCommand([]string{"docker", "compose", "ps", "--project-name", "x"}); err != nil {
 		t.Fatalf("expected allowed compose command: %v", err)
+	}
+	if err := s.validateHostDockerCommand([]string{"docker", "compose", "ps", "--project-name", "x;rm"}); err == nil {
+		t.Fatalf("expected smuggling/substring rejection")
 	}
 }

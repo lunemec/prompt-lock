@@ -17,6 +17,10 @@ func TestValidateExecuteCommand(t *testing.T) {
 	if err := s.validateExecuteCommand([]string{"bash", "-lc", "printenv"}); err == nil {
 		t.Fatalf("expected denylist rejection")
 	}
+	sSmuggle := &server{execPolicy: config.ExecutionPolicy{AllowlistPrefixes: []string{"go"}, DenylistSubstrings: []string{"&&"}}}
+	if err := sSmuggle.validateExecuteCommand([]string{"go", "test", "&&", "curl"}); err == nil {
+		t.Fatalf("expected smuggling token rejection")
+	}
 }
 
 func TestApplyOutputSecurity(t *testing.T) {
