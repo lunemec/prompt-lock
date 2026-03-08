@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expanded MCP conformance-related harness tests (malformed JSON, unknown tool, validation errors).
 - Added MCP stdin scanner size cap (1 MiB) and related protocol-hardening notes/tests.
 - Added MCP conformance tests for batch-request rejection and invalid-request rejection.
+- Added MCP response-schema conformance tests for initialize/tools/list/unknown-method paths.
 - Added threat-model document and key rotation/revocation operations runbook.
 - Added MCP protocol conformance notes document.
 - Added release packaging script, release workflow, and versioned deployment guide.

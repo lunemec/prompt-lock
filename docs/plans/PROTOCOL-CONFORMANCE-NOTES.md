@@ -18,6 +18,7 @@
 ## Protocol behavior currently enforced
 - batch requests are explicitly rejected (`-32600`)
 - invalid request shape/version is rejected (`-32600`)
+- response schema tests assert stable JSON-RPC envelope (`jsonrpc`, `id`, exactly one of `result/error`)
 
 ## Hardening implemented
 - stdio scanner input line cap (1 MiB) to reduce oversized input abuse risk
