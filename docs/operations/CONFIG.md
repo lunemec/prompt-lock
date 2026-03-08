@@ -49,8 +49,13 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 - If auth is enabled and TCP is non-local without unix socket, broker fails to start unless `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is set.
 
 ## Profile presets
-- `security_profile: dev` keeps compatibility-oriented defaults.
+- `security_profile: dev` keeps compatibility-oriented defaults (**insecure for production**).
 - `security_profile: hardened` tightens execution limits and disables plaintext secret return by default.
+- `security_profile: insecure` is only allowed with explicit runtime opt-in: `PROMPTLOCK_ALLOW_INSECURE_PROFILE=1`.
+
+Startup guardrails:
+- Any non-dev profile requires `auth.enable_auth=true`.
+- `security_profile=insecure` fails fast unless `PROMPTLOCK_ALLOW_INSECURE_PROFILE=1` is set.
 
 ## Execution policy notes
 - `execution_policy.allowlist_prefixes` restricts executable entrypoints for broker-exec mode.

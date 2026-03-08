@@ -105,6 +105,9 @@ func main() {
 		NewLeaseTok:  newLease,
 	}
 
+	if err := validateSecurityProfile(cfg, getenv("PROMPTLOCK_ALLOW_INSECURE_PROFILE", "")); err != nil {
+		log.Fatal(err)
+	}
 	if cfg.Auth.EnableAuth && cfg.Auth.OperatorToken == "" {
 		log.Fatal("auth enabled but operator_token is empty")
 	}
@@ -309,6 +312,23 @@ func isLocalAddress(addr string) bool {
 func validateTransportSafety(cfg config.Config, allowInsecure string) error {
 	if cfg.Auth.EnableAuth && cfg.UnixSocket == "" && !isLocalAddress(cfg.Address) && allowInsecure != "1" {
 		return fmt.Errorf("auth enabled on non-local TCP without unix socket; set unix_socket or PROMPTLOCK_ALLOW_INSECURE_TCP=1")
+	}
+	return nil
+}
+
+func validateSecurityProfile(cfg config.Config, allowInsecureProfile string) error {
+	profile := strings.TrimSpace(strings.ToLower(cfg.SecurityProfile))
+	if profile == "" {
+		profile = "dev"
+	}
+	if profile == "dev" {
+		return nil
+	}
+	if profile == "insecure" && allowInsecureProfile != "1" {
+		return fmt.Errorf("security_profile=insecure requires explicit opt-in: set PROMPTLOCK_ALLOW_INSECURE_PROFILE=1")
+	}
+	if profile != "dev" && !cfg.Auth.EnableAuth {
+		return fmt.Errorf("security_profile=%s requires auth.enable_auth=true", profile)
 	}
 	return nil
 }

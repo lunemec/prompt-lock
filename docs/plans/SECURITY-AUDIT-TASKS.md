@@ -55,6 +55,8 @@ Pairing flow accepts caller-supplied container identity without strict bind veri
 
 ## SEC-003: Harden defaults for non-dev deployments
 
+Status: ✅ Completed (2026-03-08)
+
 ### Problem
 Current defaults allow insecure operation (auth disabled and plaintext return allowed) unless operator hardens manually.
 
@@ -66,10 +68,10 @@ Current defaults allow insecure operation (auth disabled and plaintext return al
 - Clarify profile behavior in docs and examples.
 
 ### Success gates
-- [ ] Starting in non-dev profile with auth disabled fails fast with actionable error.
-- [ ] Plaintext secret return is off by default in hardened profile.
-- [ ] Example config and operations docs match runtime behavior.
-- [ ] Backward-compatible dev mode remains available and explicitly labeled insecure.
+- [x] Starting in non-dev profile with auth disabled fails fast with actionable error.
+- [x] Plaintext secret return is off by default in hardened profile.
+- [x] Example config and operations docs match runtime behavior.
+- [x] Backward-compatible dev mode remains available and explicitly labeled insecure.
 
 ---
 

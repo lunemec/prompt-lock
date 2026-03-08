@@ -1,4 +1,5 @@
 {
+  "security_profile": "hardened",
   "address": "127.0.0.1:8765",
   "unix_socket": "/tmp/promptlock.sock",
   "audit_path": "/var/log/promptlock/audit.jsonl",
