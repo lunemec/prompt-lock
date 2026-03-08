@@ -24,8 +24,12 @@ func (s *server) requireOperator(w http.ResponseWriter, r *http.Request) (*http.
 	if !s.authEnabled {
 		return withActor(r, "operator", "local-operator"), true
 	}
+	if !s.enforceAuthRateLimit(w, r, "operator") {
+		return r, false
+	}
 	tok := bearerToken(r)
 	if tok == "" || tok != s.authCfg.OperatorToken {
+		s.recordAuthFailure(r, "operator", "invalid_operator_token")
 		http.Error(w, "operator auth required", http.StatusUnauthorized)
 		return r, false
 	}
@@ -36,22 +40,29 @@ func (s *server) requireAgentSession(w http.ResponseWriter, r *http.Request) (*h
 	if !s.authEnabled {
 		return withActor(r, "agent", "unauth-agent"), true
 	}
+	if !s.enforceAuthRateLimit(w, r, "agent") {
+		return r, false
+	}
 	tok := bearerToken(r)
 	if tok == "" {
+		s.recordAuthFailure(r, "agent", "missing_session_token")
 		http.Error(w, "agent session token required", http.StatusUnauthorized)
 		return r, false
 	}
 	sess, err := s.authStore.ValidateSession(tok, s.now())
 	if err != nil {
+		s.recordAuthFailure(r, "agent", "invalid_session_token")
 		http.Error(w, "invalid session", http.StatusUnauthorized)
 		return r, false
 	}
 	g, err := s.authStore.GetGrant(sess.GrantID)
 	if err != nil {
+		s.recordAuthFailure(r, "agent", "invalid_grant")
 		http.Error(w, "invalid grant", http.StatusUnauthorized)
 		return r, false
 	}
 	if err := s.validateGrantActive(g); err != nil {
+		s.recordAuthFailure(r, "agent", "inactive_grant")
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return r, false
 	}

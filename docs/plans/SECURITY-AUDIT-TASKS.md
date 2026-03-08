@@ -136,6 +136,8 @@ Current URL/domain extraction is partial and can be bypassed by non-URL forms.
 
 ## SEC-007: Add auth abuse protections (rate limits + lockout signals)
 
+Status: ✅ Completed (2026-03-08)
+
 ### Problem
 Auth and pairing endpoints currently lack brute-force and abuse throttling controls.
 
@@ -148,9 +150,9 @@ Auth and pairing endpoints currently lack brute-force and abuse throttling contr
 - Emit audit events for threshold breaches.
 
 ### Success gates
-- [ ] Repeated invalid auth attempts are throttled.
-- [ ] Throttling policy is configurable and documented.
-- [ ] Tests verify limit behavior and recovery windows.
+- [x] Repeated invalid auth attempts are throttled.
+- [x] Throttling policy is configurable and documented.
+- [x] Tests verify limit behavior and recovery windows.
 
 ---
 

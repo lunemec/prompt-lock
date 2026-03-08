@@ -9,6 +9,8 @@ type AuthConfig struct {
 	GrantAbsoluteMaxMinutes    int    `json:"grant_absolute_max_minutes"`
 	BootstrapTokenTTLSeconds   int    `json:"bootstrap_token_ttl_seconds"`
 	CleanupIntervalSeconds     int    `json:"cleanup_interval_seconds"`
+	RateLimitWindowSeconds     int    `json:"rate_limit_window_seconds"`
+	RateLimitMaxAttempts       int    `json:"rate_limit_max_attempts"`
 }
 
 func defaultAuthConfig() AuthConfig {
@@ -21,5 +23,7 @@ func defaultAuthConfig() AuthConfig {
 		GrantAbsoluteMaxMinutes:    10080,
 		BootstrapTokenTTLSeconds:   60,
 		CleanupIntervalSeconds:     60,
+		RateLimitWindowSeconds:     60,
+		RateLimitMaxAttempts:       20,
 	}
 }

@@ -39,6 +39,7 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 
 ## Auth notes
 - `enable_auth=true` enables pairing/session endpoints and is recommended for non-demo use.
+- `rate_limit_window_seconds` and `rate_limit_max_attempts` control auth endpoint throttling and abuse protection.
 - `grant_absolute_max_minutes` supports very long runs (days) while still enforcing eventual re-pairing.
 - Keep session TTL short; use pairing grant for idle-resilient re-mint.
 - `operator_token` is mandatory when auth is enabled.

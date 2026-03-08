@@ -17,7 +17,9 @@
     "grant_idle_timeout_minutes": 480,
     "grant_absolute_max_minutes": 10080,
     "bootstrap_token_ttl_seconds": 60,
-    "cleanup_interval_seconds": 60
+    "cleanup_interval_seconds": 60,
+    "rate_limit_window_seconds": 60,
+    "rate_limit_max_attempts": 20
   },
   "execution_policy": {
     "allowlist_prefixes": ["bash", "sh", "npm", "node", "go", "python", "pytest", "make", "git"],
