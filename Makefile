@@ -1,7 +1,7 @@
-.PHONY: help lint test fuzz security security-redteam docs validate-changelog hygiene validate-final ci e2e-compose release-package
+.PHONY: help lint test fuzz security security-redteam arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose release-package
 
 help:
-	@echo "Targets: lint test fuzz security security-redteam docs validate-changelog validate-final ci e2e-compose release-package"
+	@echo "Targets: lint test fuzz security security-redteam arch-conformance docs validate-changelog validate-final ci e2e-compose release-package"
 
 lint:
 	bash -n scripts/secretctl.sh scripts/human-approve.sh
@@ -20,10 +20,14 @@ security:
 security-redteam:
 	bash scripts/run_redteam_e2e.sh
 
+arch-conformance:
+	bash scripts/verify_architecture_conformance.sh
+
 docs:
 	@test -f AGENTS.md
 	@test -f docs/CONTRACT.md
 	@test -f docs/architecture/ARCHITECTURE.md
+	@test -f docs/architecture/CONFORMANCE.md
 	@test -f docs/standards/ENGINEERING-STANDARDS.md
 	@test -f docs/decisions/README.md
 	@test -f CHANGELOG.md
@@ -34,7 +38,7 @@ validate-changelog:
 hygiene:
 	bash scripts/validate_repo_hygiene.sh
 
-validate-final: lint security security-redteam docs validate-changelog hygiene test
+validate-final: lint security security-redteam arch-conformance docs validate-changelog hygiene test
 	@echo "Final validation gate passed."
 
 ci: validate-final

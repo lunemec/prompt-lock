@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- App-layer control-plane policy service (`internal/app.ControlPlanePolicy`) for execute, network-egress, and host-docker policy evaluation.
+- Explicit route registration by bounded context (`meta`, `lease`, `auth`, `host-ops`) with route registration test coverage.
+- Shared inbound HTTP error taxonomy helper and status mapping tests.
+- Architecture conformance gate (`make arch-conformance`) and supporting docs.
+- ADR-0016 documenting execution-surface policy boundary ownership.
 - Initial PromptLock prototype with request/approve/access flow.
 - Agent skill for requesting short-lived secret leases.
 - AGENTS/docs harness structure and security-focused standards.
@@ -69,6 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Wrapper execution docs and intent examples in config.
 
 ### Changed
+- Execute and host-docker handlers now delegate policy decisions to app-layer policy services, reducing transport-layer policy duplication.
+- Security and architecture review task plans are now fully remediated and marked complete.
 - Hardened profile now tightens broker-exec defaults by removing shell wrappers from execution allowlist and adding command-smuggling deny markers (`&&`, `||`, `;`, `$(`, backticks).
 - Hardened profile now restricts host Docker compose mediation verbs to read-only `config` and `ps`.
 - Wrapper now waits for external approval by default, with polling/timeout controls.

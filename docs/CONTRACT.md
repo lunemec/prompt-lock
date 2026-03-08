@@ -131,6 +131,13 @@ To avoid excessive prompts:
 - Leases are reusable until expiry
 - Every access under a lease must be audit-logged
 
+## Error contract summary
+- `400` bad request: malformed JSON, missing required fields, invalid method for endpoint.
+- `401` unauthorized: missing/invalid auth token or inactive/revoked session.
+- `403` forbidden: policy-denied operations (execution policy, egress policy, host-ops policy, lease/secret scope mismatch).
+- `404` not found: unknown request/lease/intent identifiers.
+- `500` internal error: unexpected execution/runtime failures.
+
 ## Later-stage feature: biometric human approval
 Planned for a later phase (not in MVP):
 

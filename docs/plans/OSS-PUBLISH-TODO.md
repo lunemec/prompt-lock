@@ -1,6 +1,6 @@
 # OSS Publish TODO (Security + Architecture)
 
-Status: Wave 0 completed, Wave 1 in-progress (2026-03-08)
+Status: Review remediation complete (security + architecture), post-launch nice-to-haves remain (2026-03-08)
 
 ## MUST before broader OSS launch
 - [x] Add `LICENSE` file.
@@ -12,9 +12,9 @@ Status: Wave 0 completed, Wave 1 in-progress (2026-03-08)
 - [x] Add red-team style e2e suite (auth bypass, replay, egress bypass, policy bypass attempts).
 
 ## SHOULD before v1.0
-- [ ] Move more auth/policy/exec enforcement from handlers into app/domain services.
-- [ ] Split growing `promptlockd` handler surface into bounded contexts.
-- [ ] Strengthen audit anchoring guidance + verification workflow docs.
+- [x] Move more auth/policy/exec enforcement from handlers into app/domain services.
+- [x] Split growing `promptlockd` handler surface into bounded contexts.
+- [x] Strengthen audit anchoring guidance + verification workflow docs.
 
 ## NICE post-launch
 - [ ] mTLS transport profile.

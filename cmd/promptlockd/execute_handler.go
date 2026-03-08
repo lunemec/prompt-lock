@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lunemec/promptlock/internal/app"
 	"github.com/lunemec/promptlock/internal/core/ports"
 )
 
@@ -29,27 +30,27 @@ func (s *server) handleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
+		writeMappedError(w, ErrBadRequest, "method not allowed")
 		return
 	}
 	var req executeReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), 400)
+		writeMappedError(w, ErrBadRequest, err.Error())
 		return
 	}
 	if len(req.Command) == 0 {
-		http.Error(w, "command is required", 400)
+		writeMappedError(w, ErrBadRequest, "command is required")
 		return
 	}
-	if err := s.validateExecuteRequest(req); err != nil {
-		http.Error(w, err.Error(), 403)
+	if err := s.controlPolicy().ValidateExecuteRequest(s.securityProfile, app.ExecuteRequest{Intent: req.Intent, Command: req.Command}); err != nil {
+		writeMappedError(w, ErrForbidden, err.Error())
 		return
 	}
 	if len(req.Secrets) == 0 {
-		http.Error(w, "secrets are required", 400)
+		writeMappedError(w, ErrBadRequest, "secrets are required")
 		return
 	}
-	if err := s.validateNetworkEgress(req.Command, req.Intent); err != nil {
+	if err := s.controlPolicy().ValidateNetworkEgress(req.Command, req.Intent); err != nil {
 		at, aid := actorFromRequest(r)
 		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "network_egress_blocked", Timestamp: s.now(), ActorType: at, ActorID: aid, Metadata: map[string]string{"reason": err.Error(), "command": strings.Join(req.Command, " ")}})
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -60,19 +61,13 @@ func (s *server) handleExecute(w http.ResponseWriter, r *http.Request) {
 	for _, sec := range req.Secrets {
 		v, err := s.svc.AccessSecret(req.LeaseToken, sec, req.CommandFingerprint, req.WorkdirFingerprint)
 		if err != nil {
-			http.Error(w, err.Error(), 403)
+			writeMappedError(w, ErrForbidden, err.Error())
 			return
 		}
 		env = append(env, strings.ToUpper(sec)+"="+v)
 	}
 
-	timeoutSec := req.TimeoutSec
-	if timeoutSec <= 0 {
-		timeoutSec = s.execPolicy.DefaultTimeoutSec
-	}
-	if timeoutSec > s.execPolicy.MaxTimeoutSec {
-		timeoutSec = s.execPolicy.MaxTimeoutSec
-	}
+	timeoutSec := s.controlPolicy().ClampTimeout(req.TimeoutSec)
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, req.Command[0], req.Command[1:]...)
@@ -83,11 +78,11 @@ func (s *server) handleExecute(w http.ResponseWriter, r *http.Request) {
 		if ee, ok := err.(*exec.ExitError); ok {
 			code = ee.ExitCode()
 		} else {
-			http.Error(w, err.Error(), 500)
+			writeMappedError(w, ErrInternal, err.Error())
 			return
 		}
 	}
-	outStr := applyOutputSecurity(s.execPolicy.OutputSecurityMode, string(out))
+	outStr := s.controlPolicy().ApplyOutputSecurity(string(out))
 	if max := s.execPolicy.MaxOutputBytes; max > 0 && len(outStr) > max {
 		outStr = outStr[:max]
 	}

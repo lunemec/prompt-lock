@@ -30,6 +30,7 @@ type server struct {
 	securityProfile      string
 	authStore            *auth.Store
 	authLimiter          *authRateLimiter
+	policyEngine         app.ControlPlanePolicy
 	unixSocketConfigured bool
 	now                  func() time.Time
 }
@@ -122,28 +123,15 @@ func main() {
 		log.Printf("WARNING: insecure TCP override enabled (PROMPTLOCK_ALLOW_INSECURE_TCP=1) on %s", cfg.Address)
 	}
 	authStore := auth.NewStore()
-	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, securityProfile: strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)), authStore: authStore, authLimiter: newAuthRateLimiter(cfg.Auth), unixSocketConfigured: cfg.UnixSocket != "", now: func() time.Time { return time.Now().UTC() }}
+	policyEngine := app.NewDefaultControlPlanePolicy(cfg.ExecutionPolicy, cfg.HostOpsPolicy, cfg.NetworkEgressPolicy)
+	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, securityProfile: strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)), authStore: authStore, authLimiter: newAuthRateLimiter(cfg.Auth), policyEngine: policyEngine, unixSocketConfigured: cfg.UnixSocket != "", now: func() time.Time { return time.Now().UTC() }}
 	if insecureTCPOverride {
 		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "startup_insecure_tcp_override", Timestamp: s.now(), ActorType: "system", ActorID: "promptlockd", Metadata: map[string]string{"address": cfg.Address}})
 	}
 	if cfg.Auth.EnableAuth {
 		startAuthCleanupLoop(s)
 	}
-	http.HandleFunc("/v1/meta/capabilities", s.handleMetaCapabilities)
-	http.HandleFunc("/v1/intents/resolve", s.handleResolveIntent)
-	http.HandleFunc("/v1/requests/status", s.handleRequestStatus)
-	http.HandleFunc("/v1/requests/pending", s.handlePendingRequests)
-	http.HandleFunc("/v1/leases/request", s.handleRequest)
-	http.HandleFunc("/v1/leases/approve", s.handleApprove)
-	http.HandleFunc("/v1/leases/deny", s.handleDeny)
-	http.HandleFunc("/v1/leases/by-request", s.handleLeaseByRequest)
-	http.HandleFunc("/v1/leases/access", s.handleAccess)
-	http.HandleFunc("/v1/leases/execute", s.handleExecute)
-	http.HandleFunc("/v1/auth/bootstrap/create", s.handleAuthBootstrapCreate)
-	http.HandleFunc("/v1/auth/pair/complete", s.handleAuthPairComplete)
-	http.HandleFunc("/v1/auth/session/mint", s.handleAuthSessionMint)
-	http.HandleFunc("/v1/auth/revoke", s.handleAuthRevoke)
-	http.HandleFunc("/v1/host/docker/execute", s.handleHostDockerExecute)
+	s.registerRoutes()
 
 	if cfg.UnixSocket != "" {
 		_ = os.Remove(cfg.UnixSocket)
