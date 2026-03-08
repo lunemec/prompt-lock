@@ -93,6 +93,16 @@ Status: Open.
   - [ ] No raw secret/token patterns in logs/audit fixtures.
   - [ ] Redaction behavior validated under error and success paths.
 
+## P1-04 — Go-first tooling migration
+- **Area:** Developer UX / delivery
+- **Problem:** Mixed toolchains increase contributor friction and setup burden.
+- **Scope:**
+  - Execute `docs/plans/GO-FIRST-TOOLING-MIGRATION-2026-03-08.md`.
+  - Replace Python CI/security helpers with Go equivalents where practical.
+- **Strict gates:**
+  - [ ] Core CI/security automation runnable with Go + shell only.
+  - [ ] No new secondary runtime tooling without explicit approval note.
+
 ---
 
 ## P2-01 — Production runbook quality gate
