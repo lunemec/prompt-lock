@@ -47,7 +47,11 @@ func (s *server) handleAuthBootstrapCreate(w http.ResponseWriter, r *http.Reques
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	t := auth.BootstrapToken{Token: mustSecureToken("boot_"), AgentID: req.AgentID, CreatedAt: s.now(), ExpiresAt: s.now().Add(time.Duration(s.authCfg.BootstrapTokenTTLSeconds) * time.Second)}
+	if req.AgentID == "" || req.ContainerID == "" {
+		http.Error(w, "agent_id and container_id are required", 400)
+		return
+	}
+	t := auth.BootstrapToken{Token: mustSecureToken("boot_"), AgentID: req.AgentID, ContainerID: req.ContainerID, CreatedAt: s.now(), ExpiresAt: s.now().Add(time.Duration(s.authCfg.BootstrapTokenTTLSeconds) * time.Second)}
 	s.authStore.SaveBootstrap(t)
 	at, aid := actorFromRequest(r)
 	_ = s.svc.Audit.Write(ports.AuditEvent{Event: "auth_bootstrap_created", Timestamp: s.now(), ActorType: at, ActorID: aid, AgentID: req.AgentID, Metadata: map[string]string{"container_id": req.ContainerID}})
@@ -68,8 +72,13 @@ func (s *server) handleAuthPairComplete(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	bt, err := s.authStore.ConsumeBootstrap(req.Token, s.now())
+	if req.Token == "" || req.ContainerID == "" {
+		http.Error(w, "token and container_id are required", 400)
+		return
+	}
+	bt, err := s.authStore.ConsumeBootstrap(req.Token, req.ContainerID, s.now())
 	if err != nil {
+		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "auth_pair_denied", Timestamp: s.now(), ActorType: "agent", ActorID: "unknown", Metadata: map[string]string{"reason": err.Error(), "container_id": req.ContainerID}})
 		http.Error(w, err.Error(), 403)
 		return
 	}

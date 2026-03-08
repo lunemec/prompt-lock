@@ -8,12 +8,21 @@ import (
 func TestConsumeBootstrapOnce(t *testing.T) {
 	s := NewStore()
 	now := time.Now().UTC()
-	s.SaveBootstrap(BootstrapToken{Token: "b1", AgentID: "a1", CreatedAt: now, ExpiresAt: now.Add(1 * time.Minute)})
-	if _, err := s.ConsumeBootstrap("b1", now); err != nil {
+	s.SaveBootstrap(BootstrapToken{Token: "b1", AgentID: "a1", ContainerID: "c1", CreatedAt: now, ExpiresAt: now.Add(1 * time.Minute)})
+	if _, err := s.ConsumeBootstrap("b1", "c1", now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ConsumeBootstrap("b1", now); err == nil {
+	if _, err := s.ConsumeBootstrap("b1", "c1", now); err == nil {
 		t.Fatalf("expected second consume to fail")
+	}
+}
+
+func TestConsumeBootstrapContainerMismatch(t *testing.T) {
+	s := NewStore()
+	now := time.Now().UTC()
+	s.SaveBootstrap(BootstrapToken{Token: "b2", AgentID: "a1", ContainerID: "expected-c", CreatedAt: now, ExpiresAt: now.Add(1 * time.Minute)})
+	if _, err := s.ConsumeBootstrap("b2", "wrong-c", now); err == nil {
+		t.Fatalf("expected container mismatch to fail")
 	}
 }
 

@@ -34,6 +34,8 @@ Bootstrap/grant/session/lease tokens are currently sequence-derived and guessabl
 
 ## SEC-002: Bind bootstrap token to container identity and enforce match
 
+Status: ✅ Completed (2026-03-08)
+
 ### Problem
 Pairing flow accepts caller-supplied container identity without strict bind verification against bootstrap issuance.
 
@@ -44,10 +46,10 @@ Pairing flow accepts caller-supplied container identity without strict bind veri
 - Keep one-time-use + short TTL behavior.
 
 ### Success gates
-- [ ] Pairing with mismatched container identity returns 403.
-- [ ] Pairing with matching identity succeeds.
-- [ ] Replay of consumed bootstrap token fails deterministically.
-- [ ] Audit event clearly records mismatch denials (without secret/token disclosure).
+- [x] Pairing with mismatched container identity returns 403.
+- [x] Pairing with matching identity succeeds.
+- [x] Replay of consumed bootstrap token fails deterministically.
+- [x] Audit event clearly records mismatch denials (without secret/token disclosure).
 
 ---
 

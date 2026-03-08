@@ -7,11 +7,12 @@ import (
 )
 
 type BootstrapToken struct {
-	Token     string
-	AgentID   string
-	CreatedAt time.Time
-	ExpiresAt time.Time
-	Used      bool
+	Token       string
+	AgentID     string
+	ContainerID string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	Used        bool
 }
 
 type PairingGrant struct {
@@ -55,7 +56,7 @@ func (s *Store) SaveBootstrap(t BootstrapToken) {
 	s.bootstrap[t.Token] = t
 }
 
-func (s *Store) ConsumeBootstrap(token string, now time.Time) (BootstrapToken, error) {
+func (s *Store) ConsumeBootstrap(token string, containerID string, now time.Time) (BootstrapToken, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t, ok := s.bootstrap[token]
@@ -64,6 +65,9 @@ func (s *Store) ConsumeBootstrap(token string, now time.Time) (BootstrapToken, e
 	}
 	if t.Used {
 		return BootstrapToken{}, errors.New("bootstrap token already used")
+	}
+	if t.ContainerID != "" && containerID != t.ContainerID {
+		return BootstrapToken{}, errors.New("bootstrap token container mismatch")
 	}
 	if !now.Before(t.ExpiresAt) {
 		return BootstrapToken{}, errors.New("bootstrap token expired")
