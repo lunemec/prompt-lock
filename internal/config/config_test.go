@@ -34,3 +34,18 @@ func TestLoadFromFile(t *testing.T) {
 		t.Fatalf("tls values not loaded correctly: %+v", cfg.TLS)
 	}
 }
+
+func TestSecretSourceDefaultsNormalize(t *testing.T) {
+	cfg := Default()
+	cfg.SecretSource = SecretSourceConfig{}
+	cfg.normalize()
+	if cfg.SecretSource.Type != "in_memory" {
+		t.Fatalf("expected in_memory default, got %q", cfg.SecretSource.Type)
+	}
+	if cfg.SecretSource.EnvPrefix == "" {
+		t.Fatalf("expected default env prefix")
+	}
+	if cfg.SecretSource.InMemoryHardened != "warn" {
+		t.Fatalf("expected warn default, got %q", cfg.SecretSource.InMemoryHardened)
+	}
+}

@@ -55,6 +55,11 @@
     "client_ca_file": "/etc/promptlock/tls/clients-ca.crt",
     "require_client_cert": false
   },
+  "secret_source": {
+    "type": "in_memory",
+    "env_prefix": "PROMPTLOCK_SECRET_",
+    "in_memory_hardened": "warn"
+  },
   "secrets": [
     { "name": "github_token", "value": "REPLACE_ME" },
     { "name": "npm_token", "value": "REPLACE_ME" }

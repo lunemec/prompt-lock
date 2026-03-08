@@ -102,6 +102,15 @@ Example hardened allowlist snippet:
 - `network_egress_policy.deny_substrings` blocks dangerous target patterns (metadata endpoints, local pivots, etc.).
 - Denials are audit-logged as `network_egress_blocked`.
 
+## Secret source settings
+- `secret_source.type` supports:
+  - `in_memory` (default; uses values from `secrets[]` and demo env fallbacks)
+  - `env` (reads from environment as `<env_prefix><UPPER_SECRET_NAME>`)
+- `secret_source.env_prefix` defaults to `PROMPTLOCK_SECRET_`.
+- `secret_source.in_memory_hardened` controls hardened behavior when using in-memory secrets:
+  - `warn` (default): startup warning + audit event
+  - `fail`: startup is blocked
+
 ## Notes
 - Keep this file host-owned and permission-restricted.
 - Do not place this config in agent-writable workspace mounts.

@@ -57,6 +57,24 @@ func TestValidateTransportSafetyWithTLS(t *testing.T) {
 	}
 }
 
+func TestValidateSecretSourceSafety(t *testing.T) {
+	cfg := config.Default()
+	cfg.SecurityProfile = "hardened"
+	cfg.SecretSource.Type = "in_memory"
+	cfg.SecretSource.InMemoryHardened = "warn"
+	if err := validateSecretSourceSafety(cfg); err != nil {
+		t.Fatalf("expected warn mode to pass, got %v", err)
+	}
+	cfg.SecretSource.InMemoryHardened = "fail"
+	if err := validateSecretSourceSafety(cfg); err == nil {
+		t.Fatalf("expected fail mode to reject in_memory source in hardened")
+	}
+	cfg.SecretSource.Type = "env"
+	if err := validateSecretSourceSafety(cfg); err != nil {
+		t.Fatalf("expected env source to pass in hardened, got %v", err)
+	}
+}
+
 func TestValidateTLSConfig(t *testing.T) {
 	cfg := config.Default()
 	cfg.TLS.Enable = true

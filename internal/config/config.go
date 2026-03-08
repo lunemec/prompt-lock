@@ -18,6 +18,7 @@ type Config struct {
 	HostOpsPolicy       HostOpsPolicy       `json:"host_ops_policy"`
 	NetworkEgressPolicy NetworkEgressPolicy `json:"network_egress_policy"`
 	TLS                 TLSConfig           `json:"tls"`
+	SecretSource        SecretSourceConfig  `json:"secret_source"`
 	Secrets             []SecretEntry       `json:"secrets"`
 	Intents             IntentMap           `json:"intents"`
 }
@@ -47,6 +48,7 @@ func Default() Config {
 		HostOpsPolicy:       defaultHostOpsPolicy(),
 		NetworkEgressPolicy: defaultNetworkEgressPolicy(),
 		TLS:                 defaultTLSConfig(),
+		SecretSource:        defaultSecretSourceConfig(),
 		Policy: PolicyConfig{
 			DefaultTTLMinutes: p.DefaultTTLMinutes,
 			MinTTLMinutes:     p.MinTTLMinutes,
@@ -87,6 +89,20 @@ func (c *Config) normalize() {
 		}
 	default:
 		c.ExecutionPolicy.OutputSecurityMode = "redacted"
+	}
+	if c.SecretSource.Type == "" {
+		c.SecretSource.Type = "in_memory"
+	}
+	if c.SecretSource.EnvPrefix == "" {
+		c.SecretSource.EnvPrefix = "PROMPTLOCK_SECRET_"
+	}
+	switch c.SecretSource.InMemoryHardened {
+	case "", "warn", "fail":
+		if c.SecretSource.InMemoryHardened == "" {
+			c.SecretSource.InMemoryHardened = "warn"
+		}
+	default:
+		c.SecretSource.InMemoryHardened = "warn"
 	}
 }
 

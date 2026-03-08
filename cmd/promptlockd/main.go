@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/lunemec/promptlock/internal/adapters/audit"
+	"github.com/lunemec/promptlock/internal/adapters/envsecret"
 	"github.com/lunemec/promptlock/internal/adapters/memory"
 	"github.com/lunemec/promptlock/internal/app"
 	"github.com/lunemec/promptlock/internal/auth"
@@ -83,11 +84,16 @@ func main() {
 	}
 
 	store := memory.NewStore()
-	store.SetSecret("github_token", getenv("PROMPTLOCK_DEMO_GITHUB_TOKEN", "DEMO_GITHUB_TOKEN"))
-	store.SetSecret("npm_token", getenv("PROMPTLOCK_DEMO_NPM_TOKEN", "DEMO_NPM_TOKEN"))
-	for _, s := range cfg.Secrets {
-		if s.Name != "" {
-			store.SetSecret(s.Name, s.Value)
+	secretStore := any(store).(ports.SecretStore)
+	if strings.EqualFold(strings.TrimSpace(cfg.SecretSource.Type), "env") {
+		secretStore = envsecret.New(cfg.SecretSource.EnvPrefix)
+	} else {
+		store.SetSecret("github_token", getenv("PROMPTLOCK_DEMO_GITHUB_TOKEN", "DEMO_GITHUB_TOKEN"))
+		store.SetSecret("npm_token", getenv("PROMPTLOCK_DEMO_NPM_TOKEN", "DEMO_NPM_TOKEN"))
+		for _, s := range cfg.Secrets {
+			if s.Name != "" {
+				store.SetSecret(s.Name, s.Value)
+			}
 		}
 	}
 
@@ -104,7 +110,7 @@ func main() {
 		Policy:       cfg.ToPolicy(),
 		Requests:     store,
 		Leases:       store,
-		Secrets:      store,
+		Secrets:      secretStore,
 		Audit:        sink,
 		Now:          func() time.Time { return time.Now().UTC() },
 		NewRequestID: newReq,
@@ -116,6 +122,9 @@ func main() {
 	}
 	if cfg.Auth.EnableAuth && cfg.Auth.OperatorToken == "" {
 		log.Fatal("auth enabled but operator_token is empty")
+	}
+	if err := validateSecretSourceSafety(cfg); err != nil {
+		log.Fatal(err)
 	}
 	allowInsecureTCP := getenv("PROMPTLOCK_ALLOW_INSECURE_TCP", "")
 	if err := validateTransportSafety(cfg, allowInsecureTCP); err != nil {
@@ -133,6 +142,10 @@ func main() {
 	}
 	policyEngine := app.NewDefaultControlPlanePolicy(cfg.ExecutionPolicy, cfg.HostOpsPolicy, cfg.NetworkEgressPolicy)
 	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, securityProfile: strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)), authStore: authStore, authStoreFile: cfg.Auth.StoreFile, authLimiter: newAuthRateLimiter(cfg.Auth), policyEngine: policyEngine, unixSocketConfigured: cfg.UnixSocket != "", now: func() time.Time { return time.Now().UTC() }}
+	if strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)) == "hardened" && strings.EqualFold(strings.TrimSpace(cfg.SecretSource.Type), "in_memory") {
+		log.Printf("WARNING: hardened profile using in_memory secret source (set secret_source.type=env or external backend)")
+		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "startup_inmemory_secret_source_warning", Timestamp: s.now(), ActorType: "system", ActorID: "promptlockd"})
+	}
 	if insecureTCPOverride {
 		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "startup_insecure_tcp_override", Timestamp: s.now(), ActorType: "system", ActorID: "promptlockd", Metadata: map[string]string{"address": cfg.Address}})
 	}
@@ -195,6 +208,23 @@ func isLocalAddress(addr string) bool {
 		return true
 	}
 	return false
+}
+
+func validateSecretSourceSafety(cfg config.Config) error {
+	src := strings.ToLower(strings.TrimSpace(cfg.SecretSource.Type))
+	if src == "" {
+		src = "in_memory"
+	}
+	if src != "in_memory" && src != "env" {
+		return fmt.Errorf("unsupported secret_source.type %q (supported: in_memory, env)", cfg.SecretSource.Type)
+	}
+	if strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)) == "hardened" && src == "in_memory" {
+		mode := strings.ToLower(strings.TrimSpace(cfg.SecretSource.InMemoryHardened))
+		if mode == "fail" {
+			return fmt.Errorf("hardened profile with in_memory secret_source is disallowed (secret_source.in_memory_hardened=fail)")
+		}
+	}
+	return nil
 }
 
 func validateTransportSafety(cfg config.Config, allowInsecure string) error {

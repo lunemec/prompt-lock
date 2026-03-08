@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- Configurable secret source settings (`secret_source`) with `env` adapter support for host-provided secrets.
 - Live black-box red-team harness (`scripts/run_redteam_live.py`) with machine-readable report output (`reports/redteam-live.json`).
 - Optional durable auth persistence (`auth.store_file`) for bootstrap/grant/session state with reload support.
 - Native TLS/mTLS transport config scaffolding (`tls.enable`, cert/key, optional client CA and client-cert requirement) with startup validation and tests.
@@ -86,6 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened profile no longer forces unix-socket mode when TLS is explicitly enabled.
 - Added canonical hardened mTLS setup runbook and aligned planning docs to phase-1/phase-2 mTLS status.
 - Live red-team harness now supports profile selection and CI runs both `dev` and `hardened` live scenarios.
+- Hardened profile now supports configurable in-memory secret-source policy (`warn`/`fail`) and warns/audits when running hardened with in-memory source.
 - Hardened profile now tightens broker-exec defaults by removing shell wrappers from execution allowlist and adding command-smuggling deny markers (`&&`, `||`, `;`, `$(`, backticks).
 - Hardened profile now restricts host Docker compose mediation verbs to read-only `config` and `ps`.
 - Wrapper now waits for external approval by default, with polling/timeout controls.

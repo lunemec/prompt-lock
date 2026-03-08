@@ -30,6 +30,7 @@ Status: Open.
 
 ## P0-02 — Durable external secret backend integration (not only in-memory)
 - **Area:** Security / resilience
+- **Status:** 🚧 In progress (phase-1 env-backed source + hardened in-memory policy controls, 2026-03-08)
 - **Problem:** Auth persistence improved, but secret backend remains in-memory/demo-oriented.
 - **Scope:**
   - Introduce secret backend interface contract + at least one production adapter path (Vault/1Password/KMS shim).
