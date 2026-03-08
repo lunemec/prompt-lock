@@ -80,6 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Execute and host-docker handlers now delegate policy decisions to app-layer policy services, reducing transport-layer policy duplication.
 - Security and architecture review task plans are now fully remediated and marked complete.
 - HTTP method mismatch and status mapping semantics are now standardized through shared inbound error taxonomy across handlers.
+- Remaining lease/intent handler logic was moved out of `main.go` into dedicated inbound handler files.
+- Policy-denied responses now include actionable remediation hints for common deny reasons.
 - Hardened profile now tightens broker-exec defaults by removing shell wrappers from execution allowlist and adding command-smuggling deny markers (`&&`, `||`, `;`, `$(`, backticks).
 - Hardened profile now restricts host Docker compose mediation verbs to read-only `config` and `ps`.
 - Wrapper now waits for external approval by default, with polling/timeout controls.

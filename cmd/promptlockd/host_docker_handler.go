@@ -31,7 +31,7 @@ func (s *server) handleHostDockerExecute(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := s.controlPolicy().ValidateHostDockerCommand(req.Command); err != nil {
-		writeMappedError(w, ErrForbidden, err.Error())
+		writeMappedError(w, ErrForbidden, withPolicyHint(err.Error()))
 		return
 	}
 	timeout := s.hostOpsPolicy.DockerTimeoutSec

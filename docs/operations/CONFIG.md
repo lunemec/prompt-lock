@@ -71,6 +71,7 @@ Startup guardrails:
 - In `security_profile: hardened`, broker-exec additionally requires `intent`, rejects raw shell wrappers (`bash`/`sh`/`zsh`), and tightens allowlist defaults to non-shell tool entrypoints (`npm`, `node`, `go`, `python`, `pytest`, `make`, `git`).
 - In hardened mode, command-smuggling markers (`&&`, `||`, `;`, `$(`, backticks) are denied by default.
 - `execution_policy.denylist_substrings` blocks suspicious command patterns.
+- Policy-denied responses include remediation hints (e.g., remove shell wrapper, add intent-specific domain, use allowlisted flags).
 - `output_security_mode` controls broker-exec output exposure: `none` (suppress), `redacted` (default), or `raw`.
 - `max_output_bytes` limits output returned from broker execution (applied after output mode processing).
 - `default_timeout_sec` and `max_timeout_sec` enforce execution time bounds.
@@ -82,6 +83,14 @@ Startup guardrails:
 - `host_ops_policy.docker_ps_allowed_flags` and `docker_images_allowed_flags` restrict accepted flags.
 - `host_ops_policy.docker_deny_substrings` blocks dangerous argument patterns.
 - `host_ops_policy.docker_timeout_sec` limits host Docker command runtime.
+
+Example hardened allowlist snippet:
+```json
+"host_ops_policy": {
+  "docker_allow_subcommands": ["version", "ps", "images", "compose"],
+  "docker_compose_allow_verbs": ["config", "ps"]
+}
+```
 
 ## Network egress policy notes
 - `network_egress_policy.enabled` toggles domain checks for broker-exec commands.

@@ -1,7 +1,7 @@
 # Strict Re-Review Remediation Tasks (2026-03-08)
 
 Source: strict re-review focused on security, architecture, and usability.
-Status: In progress.
+Status: ✅ Completed (remaining long-term hardening tracked separately).
 
 ## Priority model
 - **P0** = blocking for hardened beta credibility
@@ -73,10 +73,11 @@ Status: In progress.
 
 ## P1-02 — Finish transport-thin handlers migration
 - **Area:** Architecture
+- **Status:** ✅ Completed (2026-03-08)
 - **Scope:** move remaining policy-like decisions out of `main.go`/handlers into app services.
 - **Strict gates:**
-  - [ ] Handler files only decode/auth/map/respond.
-  - [ ] Business logic fully in app/domain with tests.
+  - [x] Handler files only decode/auth/map/respond.
+  - [x] Business logic fully in app/domain with tests.
 
 ## P1-03 — Standardize error mapping across all handlers
 - **Area:** Usability + architecture
@@ -90,7 +91,8 @@ Status: In progress.
 
 ## P2-01 — Operator guidance quality pass
 - **Area:** Usability
+- **Status:** ✅ Completed (2026-03-08)
 - **Scope:** add “denial remediation hints” to policy errors and docs.
 - **Strict gates:**
-  - [ ] Every common deny path has actionable next-step guidance.
-  - [ ] Docs include concrete allowlist/policy examples.
+  - [x] Every common deny path has actionable next-step guidance.
+  - [x] Docs include concrete allowlist/policy examples.
