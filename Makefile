@@ -1,7 +1,7 @@
-.PHONY: help lint test fuzz security security-redteam security-redteam-live ci-redteam-full arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose release-package
+.PHONY: help lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened ci-redteam-full arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose release-package
 
 help:
-	@echo "Targets: lint test fuzz security security-redteam security-redteam-live ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose release-package"
+	@echo "Targets: lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose release-package"
 
 lint:
 	bash -n scripts/secretctl.sh scripts/human-approve.sh
@@ -22,9 +22,13 @@ security-redteam:
 
 security-redteam-live:
 	mkdir -p reports
-	python3 scripts/run_redteam_live.py reports/redteam-live.json
+	python3 scripts/run_redteam_live.py reports/redteam-live.json dev
 
-ci-redteam-full: validate-final security-redteam-live
+security-redteam-live-hardened:
+	mkdir -p reports
+	python3 scripts/run_redteam_live.py reports/redteam-live-hardened.json hardened
+
+ci-redteam-full: validate-final security-redteam-live security-redteam-live-hardened
 	@echo "Full red-team CI profile passed."
 
 arch-conformance:

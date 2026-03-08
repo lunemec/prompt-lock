@@ -13,15 +13,16 @@ Status: Open.
 
 ## P0-01 — Close mTLS phase-2 and align docs/tasks
 - **Area:** Security / transport
+- **Status:** ✅ Completed (2026-03-08)
 - **Problem:** mTLS phase-1 exists, but TODO/docs status is inconsistent and hardening boundaries are unclear.
 - **Scope:**
   - Define explicit mTLS phase-2 acceptance (cipher/TLS minimums, cert reload behavior, profile interactions).
   - Update all plan files (`OSS-PUBLISH-TODO`, strict plan, ops docs) to same status model.
   - Add hardened-profile live harness run that validates mTLS behavior in expected deployment mode.
 - **Strict gates:**
-  - [ ] Single source-of-truth task status for mTLS in all planning docs.
-  - [ ] Hardened + mTLS startup and rejection paths covered by automated tests.
-  - [ ] Operator docs have one canonical mTLS setup flow.
+  - [x] Single source-of-truth task status for mTLS in all planning docs.
+  - [x] Hardened + mTLS startup and rejection paths covered by automated tests.
+  - [x] Operator docs have one canonical mTLS setup flow.
 - **Test scenarios:**
   1. Hardened profile + mTLS enabled + valid CA/client cert => success.
   2. Hardened profile + mTLS enabled + missing client cert => denied.

@@ -2,6 +2,7 @@
 import json
 import os
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,9 @@ def pick_port():
     return port
 
 
+SSL_CTX = None
+
+
 def http_json(method, url, body=None, headers=None, timeout=5):
     data = None
     if body is not None:
@@ -27,7 +31,7 @@ def http_json(method, url, body=None, headers=None, timeout=5):
         h.update(headers)
     req = urllib.request.Request(url, data=data, headers=h, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=SSL_CTX) as resp:
             raw = resp.read().decode("utf-8")
             parsed = json.loads(raw) if raw else {}
             return resp.status, parsed, raw
@@ -50,10 +54,13 @@ def wait_for_up(base_url, timeout=45):
 
 def main():
     out_path = sys.argv[1] if len(sys.argv) > 1 else ""
+    profile = sys.argv[2] if len(sys.argv) > 2 else "dev"
+    global SSL_CTX
+    SSL_CTX = None
     port = pick_port()
     operator_token = "op_test_token"
     cfg = {
-        "security_profile": "dev",
+        "security_profile": profile,
         "address": f"127.0.0.1:{port}",
         "audit_path": os.path.join(tempfile.gettempdir(), f"promptlock-redteam-{port}.jsonl"),
         "policy": {
@@ -94,6 +101,23 @@ def main():
     }
 
     with tempfile.TemporaryDirectory(prefix="promptlock-redteam-") as td:
+        base = f"http://127.0.0.1:{port}"
+        if profile == "hardened":
+            cert_path = os.path.join(td, "server.crt")
+            key_path = os.path.join(td, "server.key")
+            subprocess.run([
+                "openssl", "req", "-x509", "-newkey", "rsa:2048", "-sha256", "-nodes",
+                "-keyout", key_path, "-out", cert_path, "-subj", "/CN=127.0.0.1", "-days", "1"
+            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            cfg["tls"] = {
+                "enable": True,
+                "cert_file": cert_path,
+                "key_file": key_path,
+                "require_client_cert": False
+            }
+            base = f"https://127.0.0.1:{port}"
+            SSL_CTX = ssl._create_unverified_context()
+
         cfg_path = os.path.join(td, "config.json")
         with open(cfg_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f)
@@ -116,7 +140,6 @@ def main():
         proc = subprocess.Popen([bin_path], cwd=repo, env=env, stdout=logf, stderr=logf)
 
         results = []
-        base = f"http://127.0.0.1:{port}"
         try:
             if not wait_for_up(base):
                 logf.flush()

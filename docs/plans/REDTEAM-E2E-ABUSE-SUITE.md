@@ -45,7 +45,7 @@ make security-redteam-live
 
 ## CI integration
 - `make ci` includes `security-redteam` on every validation pass.
-- `make ci-redteam-full` runs `validate-final` plus the live black-box harness and writes `reports/redteam-live.json`.
+- `make ci-redteam-full` runs `validate-final` plus live black-box harnesses for both `dev` and `hardened` profiles and writes `reports/redteam-live.json` + `reports/redteam-live-hardened.json`.
 
 ## Next hardening phase
 - Add dedicated replay tests for grant/session re-use after revocation.
