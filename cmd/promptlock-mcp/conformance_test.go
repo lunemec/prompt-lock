@@ -77,3 +77,36 @@ func TestInvalidRequestRejected(t *testing.T) {
 		t.Fatalf("expected -32600 for invalid request, got %+v", errObj)
 	}
 }
+
+func TestNotificationNoResponse(t *testing.T) {
+	cmd := exec.Command("go", "run", ".")
+	cmd.Dir = "."
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill() }()
+
+	_, _ = stdin.Write([]byte(`{"jsonrpc":"2.0","method":"initialize","params":{}}` + "\n"))
+	r := bufio.NewReader(stdout)
+	ch := make(chan string, 1)
+	go func() {
+		line, _ := r.ReadString('\n')
+		ch <- line
+	}()
+	select {
+	case got := <-ch:
+		if strings.TrimSpace(got) != "" {
+			t.Fatalf("expected no notification response, got %q", got)
+		}
+	case <-time.After(500 * time.Millisecond):
+		// expected: no response emitted
+	}
+}

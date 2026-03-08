@@ -2,7 +2,7 @@
 
 Decision: **do not ship yet** until production-readiness gates are met.
 
-Status: Open.
+Status: In progress (all P0 blockers complete; remaining P1/P2 hardening tasks open).
 
 ## Priority model
 - **P0** = production blockers
@@ -47,15 +47,16 @@ Status: Open.
 
 ## P0-03 — Complete MCP protocol conformance hardening
 - **Area:** Security / compatibility
+- **Status:** ✅ Completed (2026-03-08)
 - **Problem:** Good MCP coverage exists, but production claim needs stronger interoperability confidence.
 - **Scope:**
   - Expand MCP conformance matrix against target clients.
   - Add strict request/response schema validation for edge/error cases.
   - Add compatibility report artifact in CI.
 - **Strict gates:**
-  - [ ] Conformance suite includes target MCP client behaviors.
-  - [ ] Known edge/error cases have stable expected outputs.
-  - [ ] CI publishes conformance summary artifact.
+  - [x] Conformance suite includes target MCP client behaviors.
+  - [x] Known edge/error cases have stable expected outputs.
+  - [x] CI publishes conformance summary artifact.
 - **Test scenarios:**
   1. Invalid/malformed RPC messages return compliant error shape.
   2. Tool call validation failures preserve protocol semantics.

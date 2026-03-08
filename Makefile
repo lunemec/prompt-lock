@@ -1,7 +1,7 @@
-.PHONY: help lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened ci-redteam-full arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose release-package
+.PHONY: help lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened mcp-conformance-report ci-redteam-full arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose release-package
 
 help:
-	@echo "Targets: lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose release-package"
+	@echo "Targets: lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened mcp-conformance-report ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose release-package"
 
 lint:
 	bash -n scripts/secretctl.sh scripts/human-approve.sh
@@ -28,7 +28,10 @@ security-redteam-live-hardened:
 	mkdir -p reports
 	python3 scripts/run_redteam_live.py reports/redteam-live-hardened.json hardened
 
-ci-redteam-full: validate-final security-redteam-live security-redteam-live-hardened
+mcp-conformance-report:
+	bash scripts/mcp_conformance_report.sh
+
+ci-redteam-full: validate-final security-redteam-live security-redteam-live-hardened mcp-conformance-report
 	@echo "Full red-team CI profile passed."
 
 arch-conformance:
@@ -41,6 +44,7 @@ docs:
 	@test -f docs/architecture/CONFORMANCE.md
 	@test -f docs/standards/ENGINEERING-STANDARDS.md
 	@test -f docs/operations/MTLS-HARDENED.md
+	@test -f docs/compatibility/MCP-CONFORMANCE-MATRIX.md
 	@test -f docs/decisions/README.md
 	@test -f CHANGELOG.md
 

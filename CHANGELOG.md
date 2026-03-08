@@ -90,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened profile now supports configurable in-memory secret-source policy (`warn`/`fail`) and warns/audits when running hardened with in-memory source.
 - File-based secret source now requires explicit `secret_source.file_path` and fails fast on invalid source config.
 - Secret backend retrieval failures now return deterministic `secret backend unavailable` and emit audited `secret_backend_error` events with reason metadata.
+- MCP conformance hardening now includes notification no-response behavior, documented compatibility matrix, and CI artifact output (`reports/mcp-conformance.json`).
 - Hardened profile now tightens broker-exec defaults by removing shell wrappers from execution allowlist and adding command-smuggling deny markers (`&&`, `||`, `;`, `$(`, backticks).
 - Hardened profile now restricts host Docker compose mediation verbs to read-only `config` and `ps`.
 - Wrapper now waits for external approval by default, with polling/timeout controls.

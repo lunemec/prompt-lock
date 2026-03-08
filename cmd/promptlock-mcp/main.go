@@ -70,33 +70,48 @@ func main() {
 }
 
 func handle(req rpcReq) {
+	notify := req.ID == nil
 	switch req.Method {
 	case "initialize":
-		emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"serverInfo": map[string]string{"name": "promptlock-mcp", "version": "0.1.0"}}})
+		if !notify {
+			emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"serverInfo": map[string]string{"name": "promptlock-mcp", "version": "0.1.0"}}})
+		}
 	case "tools/list":
-		emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": []map[string]any{{
-			"name":        "execute_with_intent",
-			"description": "Request lease by intent and execute command via broker-exec path.",
-			"inputSchema": map[string]any{"type": "object"},
-		}}}})
+		if !notify {
+			emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": []map[string]any{{
+				"name":        "execute_with_intent",
+				"description": "Request lease by intent and execute command via broker-exec path.",
+				"inputSchema": map[string]any{"type": "object"},
+			}}}})
+		}
 	case "tools/call":
 		var p callParams
 		if err := json.Unmarshal(req.Params, &p); err != nil {
-			emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Error: map[string]any{"code": -32602, "message": err.Error()}})
+			if !notify {
+				emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Error: map[string]any{"code": -32602, "message": err.Error()}})
+			}
 			return
 		}
 		if p.Name != "execute_with_intent" {
-			emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Error: map[string]any{"code": -32601, "message": "unknown tool"}})
+			if !notify {
+				emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Error: map[string]any{"code": -32601, "message": "unknown tool"}})
+			}
 			return
 		}
 		out, err := executeWithIntent(p.Arguments)
 		if err != nil {
-			emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Error: map[string]any{"code": -32000, "message": err.Error()}})
+			if !notify {
+				emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Error: map[string]any{"code": -32000, "message": err.Error()}})
+			}
 			return
 		}
-		emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"content": []map[string]string{{"type": "text", "text": out}}}})
+		if !notify {
+			emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"content": []map[string]string{{"type": "text", "text": out}}}})
+		}
 	default:
-		emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Error: map[string]any{"code": -32601, "message": "method not found"}})
+		if !notify {
+			emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Error: map[string]any{"code": -32601, "message": "method not found"}})
+		}
 	}
 }
 
