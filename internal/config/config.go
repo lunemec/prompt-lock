@@ -35,14 +35,15 @@ type SecretEntry struct {
 func Default() Config {
 	p := domain.DefaultPolicy()
 	return Config{
-		SecurityProfile: "dev",
-		Address:         "127.0.0.1:8765",
-		UnixSocket:      "",
-		AuditPath:       "/tmp/promptlock-audit.jsonl",
-		Intents:         IntentMap{},
-		Auth:            defaultAuthConfig(),
-		ExecutionPolicy: defaultExecutionPolicy(),
-		HostOpsPolicy:   defaultHostOpsPolicy(),
+		SecurityProfile:     "dev",
+		Address:             "127.0.0.1:8765",
+		UnixSocket:          "",
+		AuditPath:           "/tmp/promptlock-audit.jsonl",
+		Intents:             IntentMap{},
+		Auth:                defaultAuthConfig(),
+		ExecutionPolicy:     defaultExecutionPolicy(),
+		HostOpsPolicy:       defaultHostOpsPolicy(),
+		NetworkEgressPolicy: defaultNetworkEgressPolicy(),
 		Policy: PolicyConfig{
 			DefaultTTLMinutes: p.DefaultTTLMinutes,
 			MinTTLMinutes:     p.MinTTLMinutes,

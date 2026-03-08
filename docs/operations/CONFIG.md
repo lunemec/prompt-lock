@@ -63,6 +63,12 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 - `host_ops_policy.docker_deny_substrings` blocks dangerous argument patterns.
 - `host_ops_policy.docker_timeout_sec` limits host Docker command runtime.
 
+## Network egress policy notes
+- `network_egress_policy.enabled` toggles domain checks for broker-exec commands.
+- `network_egress_policy.allow_domains` defines allowed destination domains.
+- `network_egress_policy.deny_substrings` blocks dangerous target patterns (metadata endpoints, local pivots, etc.).
+- Denials are audit-logged as `network_egress_blocked`.
+
 ## Notes
 - Keep this file host-owned and permission-restricted.
 - Do not place this config in agent-writable workspace mounts.

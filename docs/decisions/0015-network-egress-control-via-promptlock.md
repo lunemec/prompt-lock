@@ -17,6 +17,7 @@ Prompt injection and autonomous agents can exfiltrate data via outbound network 
 - Per-intent egress policy metadata.
 - Operator override flow for exceptional network access.
 - Audit records for policy denials and granted exceptions.
+- Baseline implementation includes command-domain allowlist and deny-substring checks in broker-exec path.
 
 ## Consequences
 - Better containment of data exfiltration attempts.
