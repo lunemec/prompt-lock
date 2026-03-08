@@ -60,6 +60,8 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 
 ## Host Docker mediation policy notes
 - `host_ops_policy.docker_allow_subcommands` allowlists Docker subcommands for host execution.
+- `host_ops_policy.docker_compose_allow_verbs` allowlists compose verbs.
+- `host_ops_policy.docker_ps_allowed_flags` and `docker_images_allowed_flags` restrict accepted flags.
 - `host_ops_policy.docker_deny_substrings` blocks dangerous argument patterns.
 - `host_ops_policy.docker_timeout_sec` limits host Docker command runtime.
 
