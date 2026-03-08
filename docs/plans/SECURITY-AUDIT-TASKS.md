@@ -177,6 +177,8 @@ Localhost checks exist, but expanded deployments need stronger mandatory transpo
 
 ## SEC-009: Strengthen tamper resistance for audit chain anchoring
 
+Status: ✅ Completed (2026-03-08)
+
 ### Problem
 Hash-chain audit is tamper-evident but can still be reset without external anchoring.
 
@@ -185,9 +187,9 @@ Hash-chain audit is tamper-evident but can still be reset without external ancho
 - Provide verification tooling for chain integrity from genesis/checkpoint.
 
 ### Success gates
-- [ ] Verification command can detect truncation/rewrite.
-- [ ] Optional anchor/checkpoint mode documented and test-covered.
-- [ ] Runbook includes incident steps for audit integrity failures.
+- [x] Verification command can detect truncation/rewrite.
+- [x] Optional anchor/checkpoint mode documented and test-covered.
+- [x] Runbook includes incident steps for audit integrity failures.
 
 ---
 

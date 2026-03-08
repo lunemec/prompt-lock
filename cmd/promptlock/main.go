@@ -14,6 +14,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/lunemec/promptlock/internal/adapters/audit"
 )
 
 type requestBody struct {
@@ -33,7 +35,7 @@ type capabilities struct {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|approve-queue> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|approve-queue|audit-verify> [flags]")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -41,8 +43,10 @@ func main() {
 		runExec(os.Args[2:])
 	case "approve-queue":
 		runApproveQueue(os.Args[2:])
+	case "audit-verify":
+		runAuditVerify(os.Args[2:])
 	default:
-		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|approve-queue> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|approve-queue|audit-verify> [flags]")
 		os.Exit(2)
 	}
 }
@@ -562,4 +566,30 @@ func executeWithSecret(broker, brokerUnix, sessionToken, lease, intent string, c
 		return 1, "", err
 	}
 	return out.ExitCode, out.StdoutStderr, nil
+}
+
+func runAuditVerify(args []string) {
+	fs := flag.NewFlagSet("audit-verify", flag.ExitOnError)
+	auditPath := fs.String("file", "", "path to audit jsonl file")
+	checkpoint := fs.String("checkpoint", "", "optional checkpoint file path")
+	writeCheckpoint := fs.Bool("write-checkpoint", false, "write/refresh checkpoint with latest verified hash")
+	fs.Parse(args)
+	if strings.TrimSpace(*auditPath) == "" {
+		fatal(fmt.Errorf("--file is required"))
+	}
+	last, count, err := audit.VerifyFile(*auditPath)
+	if err != nil {
+		fatal(err)
+	}
+	if *checkpoint != "" {
+		if prev, err := audit.ReadCheckpoint(*checkpoint); err == nil && strings.TrimSpace(prev) != "" && prev != last {
+			fatal(fmt.Errorf("checkpoint mismatch: expected %s got %s", prev, last))
+		}
+		if *writeCheckpoint {
+			if err := audit.WriteCheckpoint(*checkpoint, last); err != nil {
+				fatal(err)
+			}
+		}
+	}
+	fmt.Printf("audit verify ok: records=%d last_hash=%s\n", count, last)
 }
