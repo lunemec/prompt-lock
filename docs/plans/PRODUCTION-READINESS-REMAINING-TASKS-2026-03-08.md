@@ -30,15 +30,15 @@ Status: Open.
 
 ## P0-02 — Durable external secret backend integration (not only in-memory)
 - **Area:** Security / resilience
-- **Status:** 🚧 In progress (phase-1 env-backed source + hardened in-memory policy controls, 2026-03-08)
+- **Status:** 🚧 In progress (phase-1 env/file-backed source + hardened in-memory policy controls, 2026-03-08)
 - **Problem:** Auth persistence improved, but secret backend remains in-memory/demo-oriented.
 - **Scope:**
   - Introduce secret backend interface contract + at least one production adapter path (Vault/1Password/KMS shim).
   - Keep in-memory backend as explicit dev-only adapter.
   - Add startup guard/warning when hardened profile runs with in-memory secrets backend.
 - **Strict gates:**
-  - [ ] Secret retrieval works via external backend adapter.
-  - [ ] Hardened profile clearly warns/fails for in-memory secret backend (configurable policy).
+  - [x] Secret retrieval works via external backend adapter (`env` and `file` sources).
+  - [x] Hardened profile clearly warns/fails for in-memory secret backend (configurable policy).
   - [ ] Failure modes (backend unavailable, timeout, auth failure) are deterministic and audited.
 - **Test scenarios:**
   1. External backend success path for configured secret names.

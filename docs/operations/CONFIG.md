@@ -106,7 +106,9 @@ Example hardened allowlist snippet:
 - `secret_source.type` supports:
   - `in_memory` (default; uses values from `secrets[]` and demo env fallbacks)
   - `env` (reads from environment as `<env_prefix><UPPER_SECRET_NAME>`)
+  - `file` (reads from JSON object at `secret_source.file_path`)
 - `secret_source.env_prefix` defaults to `PROMPTLOCK_SECRET_`.
+- `secret_source.file_path` defaults to `/etc/promptlock/secrets.json` when type is `file`.
 - `secret_source.in_memory_hardened` controls hardened behavior when using in-memory secrets:
   - `warn` (default): startup warning + audit event
   - `fail`: startup is blocked

@@ -58,6 +58,7 @@
   "secret_source": {
     "type": "in_memory",
     "env_prefix": "PROMPTLOCK_SECRET_",
+    "file_path": "/etc/promptlock/secrets.json",
     "in_memory_hardened": "warn"
   },
   "secrets": [

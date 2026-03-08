@@ -73,6 +73,15 @@ func TestValidateSecretSourceSafety(t *testing.T) {
 	if err := validateSecretSourceSafety(cfg); err != nil {
 		t.Fatalf("expected env source to pass in hardened, got %v", err)
 	}
+	cfg.SecretSource.Type = "file"
+	cfg.SecretSource.FilePath = ""
+	if err := validateSecretSourceSafety(cfg); err == nil {
+		t.Fatalf("expected file source without path to fail")
+	}
+	cfg.SecretSource.FilePath = "/tmp/secrets.json"
+	if err := validateSecretSourceSafety(cfg); err != nil {
+		t.Fatalf("expected file source with path to pass, got %v", err)
+	}
 }
 
 func TestValidateTLSConfig(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/lunemec/promptlock/internal/adapters/audit"
 	"github.com/lunemec/promptlock/internal/adapters/envsecret"
+	"github.com/lunemec/promptlock/internal/adapters/filesecret"
 	"github.com/lunemec/promptlock/internal/adapters/memory"
 	"github.com/lunemec/promptlock/internal/app"
 	"github.com/lunemec/promptlock/internal/auth"
@@ -85,9 +86,17 @@ func main() {
 
 	store := memory.NewStore()
 	secretStore := any(store).(ports.SecretStore)
-	if strings.EqualFold(strings.TrimSpace(cfg.SecretSource.Type), "env") {
+	sourceType := strings.ToLower(strings.TrimSpace(cfg.SecretSource.Type))
+	switch sourceType {
+	case "env":
 		secretStore = envsecret.New(cfg.SecretSource.EnvPrefix)
-	} else {
+	case "file":
+		fs, err := filesecret.New(cfg.SecretSource.FilePath)
+		if err != nil {
+			log.Fatalf("init file secret source: %v", err)
+		}
+		secretStore = fs
+	default:
 		store.SetSecret("github_token", getenv("PROMPTLOCK_DEMO_GITHUB_TOKEN", "DEMO_GITHUB_TOKEN"))
 		store.SetSecret("npm_token", getenv("PROMPTLOCK_DEMO_NPM_TOKEN", "DEMO_NPM_TOKEN"))
 		for _, s := range cfg.Secrets {
@@ -215,8 +224,11 @@ func validateSecretSourceSafety(cfg config.Config) error {
 	if src == "" {
 		src = "in_memory"
 	}
-	if src != "in_memory" && src != "env" {
-		return fmt.Errorf("unsupported secret_source.type %q (supported: in_memory, env)", cfg.SecretSource.Type)
+	if src != "in_memory" && src != "env" && src != "file" {
+		return fmt.Errorf("unsupported secret_source.type %q (supported: in_memory, env, file)", cfg.SecretSource.Type)
+	}
+	if src == "file" && strings.TrimSpace(cfg.SecretSource.FilePath) == "" {
+		return fmt.Errorf("secret_source.type=file requires secret_source.file_path")
 	}
 	if strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)) == "hardened" && src == "in_memory" {
 		mode := strings.ToLower(strings.TrimSpace(cfg.SecretSource.InMemoryHardened))

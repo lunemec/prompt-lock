@@ -96,6 +96,9 @@ func (c *Config) normalize() {
 	if c.SecretSource.EnvPrefix == "" {
 		c.SecretSource.EnvPrefix = "PROMPTLOCK_SECRET_"
 	}
+	if c.SecretSource.Type == "file" && c.SecretSource.FilePath == "" {
+		c.SecretSource.FilePath = "/etc/promptlock/secrets.json"
+	}
 	switch c.SecretSource.InMemoryHardened {
 	case "", "warn", "fail":
 		if c.SecretSource.InMemoryHardened == "" {
