@@ -96,6 +96,8 @@ Audit/log records may expose lease/session identifiers and high-risk command det
 
 ## SEC-005: Strengthen execution policy beyond command[0] allowlisting
 
+Status: ✅ Completed (2026-03-08)
+
 ### Problem
 Allowlisting only the executable prefix (e.g., `bash`) is too permissive and allows policy bypass via shell payloads.
 
@@ -106,9 +108,9 @@ Allowlisting only the executable prefix (e.g., `bash`) is too permissive and all
 - Keep compatibility mode for development with explicit warning.
 
 ### Success gates
-- [ ] Hardened profile rejects raw shell wrappers that do not match policy.
-- [ ] Intent-bound allowed command patterns are enforced server-side.
-- [ ] Policy rejection reasons are explicit and test-covered.
+- [x] Hardened profile rejects raw shell wrappers that do not match policy.
+- [x] Intent-bound allowed command patterns are enforced server-side.
+- [x] Policy rejection reasons are explicit and test-covered.
 
 ---
 

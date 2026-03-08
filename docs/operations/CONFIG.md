@@ -59,6 +59,7 @@ Startup guardrails:
 
 ## Execution policy notes
 - `execution_policy.allowlist_prefixes` restricts executable entrypoints for broker-exec mode.
+- In `security_profile: hardened`, broker-exec additionally requires `intent` and rejects raw shell wrappers (`bash`/`sh`/`zsh`).
 - `execution_policy.denylist_substrings` blocks suspicious command patterns.
 - `output_security_mode` controls broker-exec output exposure: `none` (suppress), `redacted` (default), or `raw`.
 - `max_output_bytes` limits output returned from broker execution (applied after output mode processing).

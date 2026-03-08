@@ -27,6 +27,7 @@ type server struct {
 	execPolicy           config.ExecutionPolicy
 	hostOpsPolicy        config.HostOpsPolicy
 	networkEgressPolicy  config.NetworkEgressPolicy
+	securityProfile      string
 	authStore            *auth.Store
 	unixSocketConfigured bool
 	now                  func() time.Time
@@ -115,7 +116,7 @@ func main() {
 		log.Fatal(err)
 	}
 	authStore := auth.NewStore()
-	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, authStore: authStore, unixSocketConfigured: cfg.UnixSocket != "", now: func() time.Time { return time.Now().UTC() }}
+	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, securityProfile: strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)), authStore: authStore, unixSocketConfigured: cfg.UnixSocket != "", now: func() time.Time { return time.Now().UTC() }}
 	if cfg.Auth.EnableAuth {
 		startAuthCleanupLoop(s)
 	}

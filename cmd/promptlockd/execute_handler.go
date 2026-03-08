@@ -41,7 +41,7 @@ func (s *server) handleExecute(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "command is required", 400)
 		return
 	}
-	if err := s.validateExecuteCommand(req.Command); err != nil {
+	if err := s.validateExecuteRequest(req); err != nil {
 		http.Error(w, err.Error(), 403)
 		return
 	}

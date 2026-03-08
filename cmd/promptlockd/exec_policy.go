@@ -5,6 +5,21 @@ import (
 	"strings"
 )
 
+func (s *server) validateExecuteRequest(req executeReq) error {
+	if s.securityProfile == "hardened" {
+		if strings.TrimSpace(req.Intent) == "" {
+			return fmt.Errorf("intent is required in hardened profile")
+		}
+		if len(req.Command) > 0 {
+			cmd0 := strings.ToLower(strings.TrimSpace(req.Command[0]))
+			if cmd0 == "bash" || cmd0 == "sh" || cmd0 == "zsh" {
+				return fmt.Errorf("raw shell wrappers are not allowed in hardened profile")
+			}
+		}
+	}
+	return s.validateExecuteCommand(req.Command)
+}
+
 func (s *server) validateExecuteCommand(cmd []string) error {
 	if len(cmd) == 0 {
 		return fmt.Errorf("empty command")
