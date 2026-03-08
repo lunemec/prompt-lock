@@ -113,7 +113,7 @@ func (c *Config) applyProfile() {
 		c.HostOpsPolicy.DockerComposeAllowVerbs = []string{"config", "ps"}
 		c.HostOpsPolicy.DockerDenySubstrings = append(c.HostOpsPolicy.DockerDenySubstrings,
 			"&&", "||", ";", "$(", "`")
-		if c.UnixSocket == "" {
+		if c.UnixSocket == "" && !c.TLS.Enable {
 			c.UnixSocket = "/tmp/promptlock.sock"
 		}
 	default:

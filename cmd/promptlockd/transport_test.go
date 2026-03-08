@@ -44,6 +44,19 @@ func TestValidateTransportSafety(t *testing.T) {
 	}
 }
 
+func TestValidateTransportSafetyWithTLS(t *testing.T) {
+	cfg := config.Default()
+	cfg.Auth.EnableAuth = true
+	cfg.Address = "0.0.0.0:8765"
+	cfg.UnixSocket = ""
+	cfg.TLS.Enable = true
+	cfg.TLS.CertFile = "/tmp/cert.pem"
+	cfg.TLS.KeyFile = "/tmp/key.pem"
+	if err := validateTransportSafety(cfg, ""); err != nil {
+		t.Fatalf("expected tls transport safety success, got %v", err)
+	}
+}
+
 func TestValidateTLSConfig(t *testing.T) {
 	cfg := config.Default()
 	cfg.TLS.Enable = true

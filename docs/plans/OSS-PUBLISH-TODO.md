@@ -17,6 +17,6 @@ Status: Review remediation complete (security + architecture), post-launch nice-
 - [x] Strengthen audit anchoring guidance + verification workflow docs.
 
 ## NICE post-launch
-- [ ] mTLS transport profile.
+- [ ] mTLS phase-2 hardening (canonical hardened flow + live hardened mTLS harness coverage).
 - [ ] Durable secret/auth backends (Vault/1Password/KMS adapters).
 - [ ] Additional protocol conformance tests for MCP clients.

@@ -36,6 +36,7 @@ docs:
 	@test -f docs/architecture/ARCHITECTURE.md
 	@test -f docs/architecture/CONFORMANCE.md
 	@test -f docs/standards/ENGINEERING-STANDARDS.md
+	@test -f docs/operations/MTLS-HARDENED.md
 	@test -f docs/decisions/README.md
 	@test -f CHANGELOG.md
 

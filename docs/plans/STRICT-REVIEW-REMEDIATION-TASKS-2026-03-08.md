@@ -28,7 +28,7 @@ Status: ✅ Completed (remaining long-term hardening tracked separately).
   3. malformed JSON on valid POST => `400`
 
 ## P0-02 — Native TLS/mTLS transport profile (deferred but tracked)
-- **Status:** ✅ Completed (phase 1, 2026-03-08)
+- **Status:** ✅ Completed (phase 1, 2026-03-08). Phase-2 tracked in `PRODUCTION-READINESS-REMAINING-TASKS-2026-03-08.md`.
 - **Area:** Security
 - **Problem:** No native TLS/mTLS server mode in broker transport path.
 - **Scope (phase 1):**

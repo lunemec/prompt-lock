@@ -58,3 +58,18 @@ func TestApplyHardenedProfile(t *testing.T) {
 		t.Fatalf("expected unix socket default in hardened profile")
 	}
 }
+
+func TestApplyHardenedProfileWithTLSEnabledDoesNotForceUnixSocket(t *testing.T) {
+	cfg := Default()
+	cfg.SecurityProfile = "hardened"
+	cfg.TLS.Enable = true
+	cfg.TLS.CertFile = "/tmp/cert.pem"
+	cfg.TLS.KeyFile = "/tmp/key.pem"
+	cfg.UnixSocket = ""
+
+	cfg.applyProfile()
+
+	if cfg.UnixSocket != "" {
+		t.Fatalf("expected unix socket to remain empty when tls is enabled, got %q", cfg.UnixSocket)
+	}
+}
