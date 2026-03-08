@@ -25,6 +25,11 @@ Yes, dockerizing this tool makes sense.
 - host-side protected audit mount
 - prefer unix socket exposure over broad TCP bind for broker API
 
+## Secure transport recipes
+- Preferred: expose PromptLock via unix socket (`unix_socket`) and keep TCP local-only.
+- If TCP is required: keep `address` on localhost or put behind authenticated mTLS reverse proxy.
+- `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is an explicit emergency override; use only for controlled testing and rotate credentials afterward.
+
 ## Future
 - Provide docker-compose example:
   - broker service

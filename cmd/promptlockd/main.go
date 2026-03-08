@@ -29,6 +29,7 @@ type server struct {
 	networkEgressPolicy  config.NetworkEgressPolicy
 	securityProfile      string
 	authStore            *auth.Store
+	authLimiter          *authRateLimiter
 	unixSocketConfigured bool
 	now                  func() time.Time
 }
@@ -112,11 +113,19 @@ func main() {
 	if cfg.Auth.EnableAuth && cfg.Auth.OperatorToken == "" {
 		log.Fatal("auth enabled but operator_token is empty")
 	}
-	if err := validateTransportSafety(cfg, getenv("PROMPTLOCK_ALLOW_INSECURE_TCP", "")); err != nil {
+	allowInsecureTCP := getenv("PROMPTLOCK_ALLOW_INSECURE_TCP", "")
+	if err := validateTransportSafety(cfg, allowInsecureTCP); err != nil {
 		log.Fatal(err)
 	}
+	insecureTCPOverride := cfg.Auth.EnableAuth && cfg.UnixSocket == "" && !isLocalAddress(cfg.Address) && allowInsecureTCP == "1"
+	if insecureTCPOverride {
+		log.Printf("WARNING: insecure TCP override enabled (PROMPTLOCK_ALLOW_INSECURE_TCP=1) on %s", cfg.Address)
+	}
 	authStore := auth.NewStore()
-	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, securityProfile: strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)), authStore: authStore, unixSocketConfigured: cfg.UnixSocket != "", now: func() time.Time { return time.Now().UTC() }}
+	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, securityProfile: strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)), authStore: authStore, authLimiter: newAuthRateLimiter(cfg.Auth), unixSocketConfigured: cfg.UnixSocket != "", now: func() time.Time { return time.Now().UTC() }}
+	if insecureTCPOverride {
+		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "startup_insecure_tcp_override", Timestamp: s.now(), ActorType: "system", ActorID: "promptlockd", Metadata: map[string]string{"address": cfg.Address}})
+	}
 	if cfg.Auth.EnableAuth {
 		startAuthCleanupLoop(s)
 	}

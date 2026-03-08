@@ -158,6 +158,8 @@ Auth and pairing endpoints currently lack brute-force and abuse throttling contr
 
 ## SEC-008: Improve transport hardening defaults
 
+Status: ✅ Completed (2026-03-08)
+
 ### Problem
 Localhost checks exist, but expanded deployments need stronger mandatory transport controls.
 
@@ -167,9 +169,9 @@ Localhost checks exist, but expanded deployments need stronger mandatory transpo
 - Tighten docs around secure deployment modes.
 
 ### Success gates
-- [ ] Non-local auth-enabled startup fails unless secure transport requirements are met.
-- [ ] Insecure override path is explicit and audit-logged at startup.
-- [ ] Operations docs include clear secure deployment recipes.
+- [x] Non-local auth-enabled startup fails unless secure transport requirements are met.
+- [x] Insecure override path is explicit and audit-logged at startup.
+- [x] Operations docs include clear secure deployment recipes.
 
 ---
 
