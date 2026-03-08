@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/lunemec/promptlock/internal/core/domain"
@@ -106,7 +107,12 @@ func (s Service) AccessSecret(leaseToken, secretName, commandFingerprint, workdi
 	}
 	val, err := s.Secrets.GetSecret(secretName)
 	if err != nil {
-		return "", err
+		reason := strings.TrimSpace(err.Error())
+		if reason == "" {
+			reason = "unknown_secret_backend_error"
+		}
+		_ = s.Audit.Write(ports.AuditEvent{Event: "secret_backend_error", Timestamp: s.now(), AgentID: lease.AgentID, TaskID: lease.TaskID, RequestID: lease.RequestID, LeaseToken: lease.Token, Secret: secretName, Metadata: map[string]string{"reason": reason}})
+		return "", errors.New("secret backend unavailable")
 	}
 	_ = s.Audit.Write(ports.AuditEvent{Event: "secret_access", Timestamp: s.now(), AgentID: lease.AgentID, TaskID: lease.TaskID, RequestID: lease.RequestID, LeaseToken: lease.Token, Secret: secretName})
 	return val, nil

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -10,6 +11,10 @@ import (
 )
 
 type auditBuf struct{ events []ports.AuditEvent }
+
+type failingSecretStore struct{}
+
+func (failingSecretStore) GetSecret(string) (string, error) { return "", errors.New("backend timeout") }
 
 func (a *auditBuf) Write(e ports.AuditEvent) error {
 	a.events = append(a.events, e)
@@ -69,5 +74,42 @@ func TestLeaseFlow(t *testing.T) {
 	}
 	if _, err := svc.AccessSecret(lease.Token, "github_token", "fp1", "other-wd"); err == nil {
 		t.Fatalf("expected workdir mismatch error")
+	}
+}
+
+func TestAccessSecretBackendFailureIsAuditedAndDeterministic(t *testing.T) {
+	store := memory.NewStore()
+	a := &auditBuf{}
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      failingSecretStore{},
+		Audit:        a,
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_test" },
+		NewLeaseTok:  func() string { return "lease_test" },
+	}
+
+	_ = store.SaveRequest(domain.LeaseRequest{ID: "req_test", AgentID: "agent1", TaskID: "task1", TTLMinutes: 5, Secrets: []string{"github_token"}, CommandFingerprint: "fp1", WorkdirFingerprint: "wd1", Status: domain.RequestApproved, CreatedAt: now})
+	_ = store.SaveLease(domain.Lease{Token: "lease_test", RequestID: "req_test", AgentID: "agent1", TaskID: "task1", Secrets: []string{"github_token"}, CommandFingerprint: "fp1", WorkdirFingerprint: "wd1", ExpiresAt: now.Add(5 * time.Minute)})
+
+	_, err := svc.AccessSecret("lease_test", "github_token", "fp1", "wd1")
+	if err == nil || err.Error() != "secret backend unavailable" {
+		t.Fatalf("expected deterministic backend error, got %v", err)
+	}
+
+	found := false
+	for _, ev := range a.events {
+		if ev.Event == "secret_backend_error" {
+			found = true
+			if ev.Metadata["reason"] == "" {
+				t.Fatalf("expected backend error reason metadata")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected secret_backend_error audit event")
 	}
 }
