@@ -13,8 +13,11 @@
 
 ## Known limitations
 - no formal external MCP conformance suite integration yet
-- batch request handling not implemented
 - output mapping is minimal text content structure
+
+## Protocol behavior currently enforced
+- batch requests are explicitly rejected (`-32600`)
+- invalid request shape/version is rejected (`-32600`)
 
 ## Hardening implemented
 - stdio scanner input line cap (1 MiB) to reduce oversized input abuse risk

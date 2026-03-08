@@ -49,9 +49,17 @@ func main() {
 		if line == "" {
 			continue
 		}
+		if strings.HasPrefix(line, "[") {
+			emit(rpcResp{JSONRPC: "2.0", Error: map[string]any{"code": -32600, "message": "batch requests are not supported"}})
+			continue
+		}
 		var req rpcReq
 		if err := json.Unmarshal([]byte(line), &req); err != nil {
 			emit(rpcResp{JSONRPC: "2.0", Error: map[string]any{"code": -32700, "message": err.Error()}})
+			continue
+		}
+		if req.JSONRPC != "2.0" || req.Method == "" {
+			emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Error: map[string]any{"code": -32600, "message": "invalid request"}})
 			continue
 		}
 		handle(req)
