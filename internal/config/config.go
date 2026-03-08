@@ -8,6 +8,7 @@ import (
 )
 
 type Config struct {
+	SecurityProfile string          `json:"security_profile"`
 	Address         string          `json:"address"`
 	UnixSocket      string          `json:"unix_socket"`
 	AuditPath       string          `json:"audit_path"`
@@ -33,6 +34,7 @@ type SecretEntry struct {
 func Default() Config {
 	p := domain.DefaultPolicy()
 	return Config{
+		SecurityProfile: "dev",
 		Address:         "127.0.0.1:8765",
 		UnixSocket:      "",
 		AuditPath:       "/tmp/promptlock-audit.jsonl",
@@ -66,7 +68,31 @@ func Load(path string) (Config, error) {
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return Config{}, err
 	}
+	cfg.applyProfile()
 	return cfg, nil
+}
+
+func (c *Config) applyProfile() {
+	switch c.SecurityProfile {
+	case "", "dev":
+		return
+	case "hardened":
+		c.Auth.AllowPlaintextSecretReturn = false
+		if c.ExecutionPolicy.MaxTimeoutSec > 120 {
+			c.ExecutionPolicy.MaxTimeoutSec = 120
+		}
+		if c.ExecutionPolicy.DefaultTimeoutSec > 60 {
+			c.ExecutionPolicy.DefaultTimeoutSec = 60
+		}
+		if c.ExecutionPolicy.MaxOutputBytes > 32768 {
+			c.ExecutionPolicy.MaxOutputBytes = 32768
+		}
+		if c.UnixSocket == "" {
+			c.UnixSocket = "/tmp/promptlock.sock"
+		}
+	default:
+		return
+	}
 }
 
 func (c Config) ToPolicy() domain.Policy {

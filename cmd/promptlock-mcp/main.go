@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -132,7 +133,11 @@ func executeWithIntent(args map[string]interface{}) (string, error) {
 	}
 
 	// wait approval
-	deadline := time.Now().Add(2 * time.Minute)
+	approvalTimeoutSec := envIntDefault("PROMPTLOCK_APPROVAL_TIMEOUT_SEC", 120)
+	if approvalTimeoutSec < 1 {
+		approvalTimeoutSec = 1
+	}
+	deadline := time.Now().Add(time.Duration(approvalTimeoutSec) * time.Second)
 	for {
 		var st struct {
 			Status string `json:"status"`
@@ -210,6 +215,18 @@ func envDefault(k, d string) string {
 		return v
 	}
 	return d
+}
+
+func envIntDefault(k string, d int) int {
+	v := strings.TrimSpace(os.Getenv(k))
+	if v == "" {
+		return d
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return d
+	}
+	return n
 }
 
 func parseAndValidateExecArgs(m map[string]interface{}) (execArgs, error) {

@@ -14,4 +14,5 @@ PromptLock now includes an experimental MCP stdio adapter:
 - This is an early adapter scaffold for interoperability testing.
 - Keep hardened broker config enabled (`allow_plaintext_secret_return=false` and broker-exec path).
 - Adapter now includes baseline input validation for intent, command, and TTL bounds.
+- Harness now covers positive and selected negative paths (deny/timeout/missing session token).
 - Production hardening for MCP should still include deeper protocol-conformance tests against target MCP clients.

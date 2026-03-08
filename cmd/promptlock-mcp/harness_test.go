@@ -239,6 +239,65 @@ func freeAddr(t *testing.T) string {
 	return addr
 }
 
+func TestMCPToolsCallDeniedPath(t *testing.T) {
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/intents/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{"secrets": []string{"github_token"}})
+		case "/v1/leases/request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"request_id": "r-deny"})
+		case "/v1/requests/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "denied"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer broker.Close()
+
+	_, writeLine, readJSON := launchMCP(t, map[string]string{"PROMPTLOCK_BROKER_URL": broker.URL, "PROMPTLOCK_SESSION_TOKEN": "s1"})
+	writeLine(`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}`)
+	msg := readJSON()
+	if msg["error"] == nil {
+		t.Fatalf("expected denied error, got %+v", msg)
+	}
+}
+
+func TestMCPToolsCallTimeoutPath(t *testing.T) {
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/intents/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{"secrets": []string{"github_token"}})
+		case "/v1/leases/request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"request_id": "r-wait"})
+		case "/v1/requests/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "pending"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer broker.Close()
+
+	_, writeLine, readJSON := launchMCP(t, map[string]string{
+		"PROMPTLOCK_BROKER_URL":           broker.URL,
+		"PROMPTLOCK_SESSION_TOKEN":        "s1",
+		"PROMPTLOCK_APPROVAL_TIMEOUT_SEC": "1",
+	})
+	writeLine(`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}`)
+	msg := readJSON()
+	if msg["error"] == nil {
+		t.Fatalf("expected timeout error, got %+v", msg)
+	}
+}
+
+func TestMCPToolsCallMissingSessionToken(t *testing.T) {
+	_, writeLine, readJSON := launchMCP(t, map[string]string{})
+	writeLine(`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}`)
+	msg := readJSON()
+	if msg["error"] == nil {
+		t.Fatalf("expected missing session token error")
+	}
+}
+
 func waitBroker(t *testing.T, base string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)

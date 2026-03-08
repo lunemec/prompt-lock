@@ -48,6 +48,10 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 - CLI clients can target unix socket with `--broker-unix-socket` / `PROMPTLOCK_BROKER_UNIX_SOCKET`.
 - If auth is enabled and TCP is non-local without unix socket, broker fails to start unless `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is set.
 
+## Profile presets
+- `security_profile: dev` keeps compatibility-oriented defaults.
+- `security_profile: hardened` tightens execution limits and disables plaintext secret return by default.
+
 ## Execution policy notes
 - `execution_policy.allowlist_prefixes` restricts executable entrypoints for broker-exec mode.
 - `execution_policy.denylist_substrings` blocks suspicious command patterns.
