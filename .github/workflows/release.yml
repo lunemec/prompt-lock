@@ -18,7 +18,9 @@ jobs:
           go-version: '1.22'
 
       - name: Validate
-        run: make validate-final
+        run: |
+          make validate-final
+          make production-readiness-gate
 
       - name: Build artifacts
         run: |

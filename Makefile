@@ -1,7 +1,7 @@
-.PHONY: help lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened mcp-conformance-report ci-redteam-full arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose release-package
+.PHONY: help lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened mcp-conformance-report production-readiness-gate ci-redteam-full arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose release-package
 
 help:
-	@echo "Targets: lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened mcp-conformance-report ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose release-package"
+	@echo "Targets: lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened mcp-conformance-report production-readiness-gate ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose release-package"
 
 lint:
 	bash -n scripts/secretctl.sh scripts/human-approve.sh
@@ -30,6 +30,9 @@ security-redteam-live-hardened:
 
 mcp-conformance-report:
 	bash scripts/mcp_conformance_report.sh
+
+production-readiness-gate:
+	go run ./cmd/promptlock-readiness-check --file docs/plans/PRODUCTION-READINESS-STATUS.json --require-p0
 
 ci-redteam-full: validate-final security-redteam-live security-redteam-live-hardened mcp-conformance-report
 	@echo "Full red-team CI profile passed."

@@ -118,9 +118,10 @@ Status: In progress (all P0 blockers complete; remaining P1/P2 hardening tasks o
 
 ## P2-02 — Release readiness scoreboard
 - **Area:** Delivery governance
+- **Status:** ✅ Completed (2026-03-08)
 - **Scope:**
   - Add a machine-readable readiness matrix (JSON/YAML) consumed by CI.
   - Fail release workflow if any P0 gate is open.
 - **Strict gates:**
-  - [ ] CI blocks tagged release when production blockers are unresolved.
-  - [ ] Status is visible in one file and one workflow output.
+  - [x] CI blocks tagged release when production blockers are unresolved.
+  - [x] Status is visible in one file and one workflow output.
