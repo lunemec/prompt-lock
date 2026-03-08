@@ -77,6 +77,8 @@ Current defaults allow insecure operation (auth disabled and plaintext return al
 
 ## SEC-004: Remove sensitive token material from audit and logs
 
+Status: ✅ Completed (2026-03-08)
+
 ### Problem
 Audit/log records may expose lease/session identifiers and high-risk command details.
 
@@ -86,9 +88,9 @@ Audit/log records may expose lease/session identifiers and high-risk command det
 - Ensure command logging is policy-aware and minimally necessary.
 
 ### Success gates
-- [ ] No raw lease/session/bootstrap tokens appear in audit file.
-- [ ] Security tests verify redaction/masking for token-like values.
-- [ ] Manual grep over test fixtures/log output shows no bearer/token leakage.
+- [x] No raw lease/session/bootstrap tokens appear in audit file.
+- [x] Security tests verify redaction/masking for token-like values.
+- [x] Manual grep over test fixtures/log output shows no bearer/token leakage.
 
 ---
 
