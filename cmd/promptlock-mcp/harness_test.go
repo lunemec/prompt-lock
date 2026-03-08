@@ -298,6 +298,33 @@ func TestMCPToolsCallMissingSessionToken(t *testing.T) {
 	}
 }
 
+func TestMCPMalformedJSONReturnsParseError(t *testing.T) {
+	_, writeLine, readJSON := launchMCP(t, map[string]string{})
+	writeLine(`{"jsonrpc":"2.0","id":1,"method"`)
+	msg := readJSON()
+	if msg["error"] == nil {
+		t.Fatalf("expected parse error")
+	}
+}
+
+func TestMCPUnknownToolError(t *testing.T) {
+	_, writeLine, readJSON := launchMCP(t, map[string]string{"PROMPTLOCK_SESSION_TOKEN": "s1"})
+	writeLine(`{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"unknown_tool","arguments":{}}}`)
+	msg := readJSON()
+	if msg["error"] == nil {
+		t.Fatalf("expected unknown tool error")
+	}
+}
+
+func TestMCPInvalidArgsValidationError(t *testing.T) {
+	_, writeLine, readJSON := launchMCP(t, map[string]string{"PROMPTLOCK_SESSION_TOKEN": "s1"})
+	writeLine(`{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"bad intent !","command":["bash"],"ttl_minutes":5}}}`)
+	msg := readJSON()
+	if msg["error"] == nil {
+		t.Fatalf("expected validation error")
+	}
+}
+
 func TestMCPToolsCallInvalidSessionToken(t *testing.T) {
 	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid session", http.StatusUnauthorized)

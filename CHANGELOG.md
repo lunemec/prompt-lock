@@ -53,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added MCP negative-path harness tests (denied, timeout, missing/invalid session token, policy-denied execute).
 - Added `security_profile` support with hardened preset behavior.
 - Added beta readiness checklist document.
+- Added ADR-0014 and ADR-0015 for host Docker mediation and network egress control strategy.
+- Expanded MCP conformance-related harness tests (malformed JSON, unknown tool, validation errors).
 - Added threat-model document and key rotation/revocation operations runbook.
 - Added MCP protocol conformance notes document.
 - Added release packaging script, release workflow, and versioned deployment guide.
