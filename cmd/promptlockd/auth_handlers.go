@@ -47,7 +47,7 @@ func (s *server) handleAuthBootstrapCreate(w http.ResponseWriter, r *http.Reques
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	t := auth.BootstrapToken{Token: "boot_" + itoa(s.nextSeq()), AgentID: req.AgentID, CreatedAt: s.now(), ExpiresAt: s.now().Add(time.Duration(s.authCfg.BootstrapTokenTTLSeconds) * time.Second)}
+	t := auth.BootstrapToken{Token: mustSecureToken("boot_"), AgentID: req.AgentID, CreatedAt: s.now(), ExpiresAt: s.now().Add(time.Duration(s.authCfg.BootstrapTokenTTLSeconds) * time.Second)}
 	s.authStore.SaveBootstrap(t)
 	at, aid := actorFromRequest(r)
 	_ = s.svc.Audit.Write(ports.AuditEvent{Event: "auth_bootstrap_created", Timestamp: s.now(), ActorType: at, ActorID: aid, AgentID: req.AgentID, Metadata: map[string]string{"container_id": req.ContainerID}})
@@ -73,7 +73,7 @@ func (s *server) handleAuthPairComplete(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), 403)
 		return
 	}
-	g := auth.PairingGrant{GrantID: "grant_" + itoa(s.nextSeq()), AgentID: bt.AgentID, ContainerID: req.ContainerID, CreatedAt: s.now(), LastUsedAt: s.now(), IdleExpiresAt: s.now().Add(time.Duration(s.authCfg.GrantIdleTimeoutMinutes) * time.Minute), AbsoluteExpiresAt: s.now().Add(time.Duration(s.authCfg.GrantAbsoluteMaxMinutes) * time.Minute)}
+	g := auth.PairingGrant{GrantID: mustSecureToken("grant_"), AgentID: bt.AgentID, ContainerID: req.ContainerID, CreatedAt: s.now(), LastUsedAt: s.now(), IdleExpiresAt: s.now().Add(time.Duration(s.authCfg.GrantIdleTimeoutMinutes) * time.Minute), AbsoluteExpiresAt: s.now().Add(time.Duration(s.authCfg.GrantAbsoluteMaxMinutes) * time.Minute)}
 	s.authStore.SaveGrant(g)
 	_ = s.svc.Audit.Write(ports.AuditEvent{Event: "auth_pair_completed", Timestamp: s.now(), ActorType: "agent", ActorID: bt.AgentID, AgentID: bt.AgentID, Metadata: map[string]string{"container_id": req.ContainerID, "grant_id": g.GrantID}})
 	writeJSON(w, map[string]any{"grant_id": g.GrantID, "idle_expires_at": g.IdleExpiresAt, "absolute_expires_at": g.AbsoluteExpiresAt})
@@ -106,7 +106,7 @@ func (s *server) handleAuthSessionMint(w http.ResponseWriter, r *http.Request) {
 	g.LastUsedAt = now
 	g.IdleExpiresAt = now.Add(time.Duration(s.authCfg.GrantIdleTimeoutMinutes) * time.Minute)
 	s.authStore.UpdateGrant(g)
-	st := auth.SessionToken{Token: "sess_" + itoa(s.nextSeq()), GrantID: g.GrantID, AgentID: g.AgentID, CreatedAt: now, ExpiresAt: now.Add(time.Duration(s.authCfg.SessionTTLMinutes) * time.Minute)}
+	st := auth.SessionToken{Token: mustSecureToken("sess_"), GrantID: g.GrantID, AgentID: g.AgentID, CreatedAt: now, ExpiresAt: now.Add(time.Duration(s.authCfg.SessionTTLMinutes) * time.Minute)}
 	s.authStore.SaveSession(st)
 	_ = s.svc.Audit.Write(ports.AuditEvent{Event: "auth_session_minted", Timestamp: s.now(), ActorType: "agent", ActorID: g.AgentID, AgentID: g.AgentID, Metadata: map[string]string{"grant_id": g.GrantID}})
 	writeJSON(w, map[string]any{"session_token": st.Token, "expires_at": st.ExpiresAt})

@@ -9,7 +9,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/lunemec/promptlock/internal/adapters/audit"
@@ -30,7 +29,6 @@ type server struct {
 	networkEgressPolicy  config.NetworkEgressPolicy
 	authStore            *auth.Store
 	unixSocketConfigured bool
-	seq                  *uint64
 	now                  func() time.Time
 }
 
@@ -93,9 +91,8 @@ func main() {
 	}
 	defer sink.Close()
 
-	var seq uint64
-	newReq := func() string { return "req_" + itoa(atomic.AddUint64(&seq, 1)) }
-	newLease := func() string { return "lease_" + itoa(atomic.AddUint64(&seq, 1)) }
+	newReq := func() string { return mustSecureToken("req_") }
+	newLease := func() string { return mustSecureToken("lease_") }
 
 	svc := app.Service{
 		Policy:       cfg.ToPolicy(),
@@ -115,7 +112,7 @@ func main() {
 		log.Fatal(err)
 	}
 	authStore := auth.NewStore()
-	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, authStore: authStore, unixSocketConfigured: cfg.UnixSocket != "", seq: &seq, now: func() time.Time { return time.Now().UTC() }}
+	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, authStore: authStore, unixSocketConfigured: cfg.UnixSocket != "", now: func() time.Time { return time.Now().UTC() }}
 	if cfg.Auth.EnableAuth {
 		startAuthCleanupLoop(s)
 	}
@@ -292,8 +289,6 @@ func getenv(k, d string) string {
 	}
 	return d
 }
-
-func (s *server) nextSeq() uint64 { return atomic.AddUint64(s.seq, 1) }
 
 func itoa(n uint64) string { return strconv.FormatUint(n, 10) }
 
