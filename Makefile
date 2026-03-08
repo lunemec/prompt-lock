@@ -1,4 +1,4 @@
-.PHONY: help lint test fuzz security docs validate-changelog validate-final ci e2e-compose release-package
+.PHONY: help lint test fuzz security docs validate-changelog hygiene validate-final ci e2e-compose release-package
 
 help:
 	@echo "Targets: lint test fuzz security docs validate-changelog validate-final ci e2e-compose release-package"
@@ -28,7 +28,10 @@ docs:
 validate-changelog:
 	python3 scripts/validate_changelog.py
 
-validate-final: lint security docs validate-changelog test
+hygiene:
+	bash scripts/validate_repo_hygiene.sh
+
+validate-final: lint security docs validate-changelog hygiene test
 	@echo "Final validation gate passed."
 
 ci: validate-final

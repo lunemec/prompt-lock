@@ -25,3 +25,4 @@ If unsure about security impact, explicitly escalate in output.
 - New changes must be under `[Unreleased]`.
 - Released versions must use proper SemVer headings.
 - `make validate-final` must pass before commit/merge.
+- Repository must remain free of sync/conflict/tmp artifacts (`.syncthing.*`, `*.sync-conflict-*`, stray `*.tmp`), enforced by `make hygiene`.

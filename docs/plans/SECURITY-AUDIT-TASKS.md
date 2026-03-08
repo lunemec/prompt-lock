@@ -195,6 +195,8 @@ Hash-chain audit is tamper-evident but can still be reset without external ancho
 
 ## SEC-010: Repository hygiene for tmp/sync/conflict artifacts
 
+Status: ✅ Completed (2026-03-08)
+
 ### Problem
 Syncthing/tmp/conflict files are present in tree and increase leak/misconfiguration risk.
 
@@ -204,9 +206,9 @@ Syncthing/tmp/conflict files are present in tree and increase leak/misconfigurat
 - Clean existing tracked/untracked artifacts as appropriate.
 
 ### Success gates
-- [ ] CI fails when forbidden temp/conflict artifacts are introduced.
-- [ ] Workspace tree is clean from sync tmp artifacts.
-- [ ] Developer docs mention local hygiene expectations.
+- [x] CI fails when forbidden temp/conflict artifacts are introduced.
+- [x] Workspace tree is clean from sync tmp artifacts.
+- [x] Developer docs mention local hygiene expectations.
 
 ---
 

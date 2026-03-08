@@ -1,5 +1,10 @@
 __pycache__/
 *.pyc
 
-.syncthing.*.tmp
-**/.syncthing.*.tmp
+.syncthing.*
+**/.syncthing.*
+*.sync-conflict-*
+**/*.sync-conflict-*
+*.tmp
+**/*.tmp
+.DS_Store
