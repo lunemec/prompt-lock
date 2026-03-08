@@ -18,7 +18,7 @@ func (s *server) handleDeny(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
+		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 	requestID := r.URL.Query().Get("request_id")

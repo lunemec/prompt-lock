@@ -4,7 +4,7 @@ import "net/http"
 
 func (s *server) handleMetaCapabilities(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", 405)
+		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 	writeJSON(w, map[string]any{

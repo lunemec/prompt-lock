@@ -35,7 +35,7 @@ func (s *server) handleAuthBootstrapCreate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
+		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !s.authEnabled {
@@ -61,7 +61,7 @@ func (s *server) handleAuthBootstrapCreate(w http.ResponseWriter, r *http.Reques
 
 func (s *server) handleAuthPairComplete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
+		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !s.authEnabled {
@@ -92,7 +92,7 @@ func (s *server) handleAuthPairComplete(w http.ResponseWriter, r *http.Request) 
 
 func (s *server) handleAuthSessionMint(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
+		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !s.authEnabled {
@@ -131,7 +131,7 @@ func (s *server) handleAuthRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
+		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !s.authEnabled {
