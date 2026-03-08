@@ -28,6 +28,7 @@ Status: In progress.
   3. malformed JSON on valid POST => `400`
 
 ## P0-02 — Native TLS/mTLS transport profile (deferred but tracked)
+- **Status:** 🚧 In progress (phase 1 scaffolding implemented, 2026-03-08)
 - **Area:** Security
 - **Problem:** No native TLS/mTLS server mode in broker transport path.
 - **Scope (phase 1):**

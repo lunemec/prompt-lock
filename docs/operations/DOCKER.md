@@ -36,7 +36,8 @@ Yes, dockerizing this tool makes sense.
 
 ## Secure transport recipes
 - Preferred: expose PromptLock via unix socket (`unix_socket`) and keep TCP local-only.
-- If TCP is required: keep `address` on localhost or put behind authenticated mTLS reverse proxy.
+- If TCP is required: either enable native TLS (`tls.enable`) or place broker behind authenticated mTLS reverse proxy.
+- Native mTLS can be enabled with `tls.require_client_cert=true` and `tls.client_ca_file`.
 - `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is an explicit emergency override; use only for controlled testing and rotate credentials afterward.
 
 ## Future

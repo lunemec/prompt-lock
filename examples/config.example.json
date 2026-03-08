@@ -47,6 +47,13 @@
     },
     "deny_substrings": ["169.254.169.254", "metadata.google.internal", "localhost", "127.0.0.1"]
   },
+  "tls": {
+    "enable": false,
+    "cert_file": "/etc/promptlock/tls/server.crt",
+    "key_file": "/etc/promptlock/tls/server.key",
+    "client_ca_file": "/etc/promptlock/tls/clients-ca.crt",
+    "require_client_cert": false
+  },
   "secrets": [
     { "name": "github_token", "value": "REPLACE_ME" },
     { "name": "npm_token", "value": "REPLACE_ME" }

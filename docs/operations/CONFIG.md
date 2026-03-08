@@ -47,8 +47,14 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 - `cleanup_interval_seconds` controls background auth garbage collection of expired/used records.
 - For hardened local deployments, prefer `unix_socket` and keep TCP on localhost only.
 - CLI clients can target unix socket with `--broker-unix-socket` / `PROMPTLOCK_BROKER_UNIX_SOCKET`.
-- If auth is enabled and TCP is non-local without unix socket, broker fails to start unless `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is set.
+- If auth is enabled and TCP is non-local without unix socket or TLS, broker fails to start unless `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is set.
 - Using `PROMPTLOCK_ALLOW_INSECURE_TCP=1` emits a startup warning and audit event (`startup_insecure_tcp_override`).
+
+## TLS / mTLS transport settings
+- `tls.enable=true` enables native HTTPS listener on `address`.
+- `tls.cert_file` and `tls.key_file` are required when TLS is enabled.
+- `tls.require_client_cert=true` enables mTLS and requires `tls.client_ca_file`.
+- In mTLS mode, clients without valid cert chains signed by `client_ca_file` are rejected.
 
 ## Profile presets
 - `security_profile: dev` keeps compatibility-oriented defaults (**insecure for production**).

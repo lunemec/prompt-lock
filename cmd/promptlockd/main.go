@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -118,7 +120,7 @@ func main() {
 	if err := validateTransportSafety(cfg, allowInsecureTCP); err != nil {
 		log.Fatal(err)
 	}
-	insecureTCPOverride := cfg.Auth.EnableAuth && cfg.UnixSocket == "" && !isLocalAddress(cfg.Address) && allowInsecureTCP == "1"
+	insecureTCPOverride := cfg.Auth.EnableAuth && cfg.UnixSocket == "" && !cfg.TLS.Enable && !isLocalAddress(cfg.Address) && allowInsecureTCP == "1"
 	if insecureTCPOverride {
 		log.Printf("WARNING: insecure TCP override enabled (PROMPTLOCK_ALLOW_INSECURE_TCP=1) on %s", cfg.Address)
 	}
@@ -145,6 +147,16 @@ func main() {
 		defer func() { _ = os.Remove(cfg.UnixSocket) }()
 		log.Printf("promptlock listening on unix socket %s", cfg.UnixSocket)
 		log.Fatal(http.Serve(ln, nil))
+	}
+
+	if cfg.TLS.Enable {
+		tlsCfg, err := buildTLSConfig(cfg)
+		if err != nil {
+			log.Fatal(err)
+		}
+		srv := &http.Server{Addr: cfg.Address, Handler: nil, TLSConfig: tlsCfg}
+		log.Printf("promptlock listening with tls on %s", cfg.Address)
+		log.Fatal(srv.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile))
 	}
 
 	log.Printf("promptlock listening on %s", cfg.Address)
@@ -308,8 +320,24 @@ func isLocalAddress(addr string) bool {
 }
 
 func validateTransportSafety(cfg config.Config, allowInsecure string) error {
-	if cfg.Auth.EnableAuth && cfg.UnixSocket == "" && !isLocalAddress(cfg.Address) && allowInsecure != "1" {
-		return fmt.Errorf("auth enabled on non-local TCP without unix socket; set unix_socket or PROMPTLOCK_ALLOW_INSECURE_TCP=1")
+	if err := validateTLSConfig(cfg); err != nil {
+		return err
+	}
+	if cfg.Auth.EnableAuth && cfg.UnixSocket == "" && !cfg.TLS.Enable && !isLocalAddress(cfg.Address) && allowInsecure != "1" {
+		return fmt.Errorf("auth enabled on non-local TCP without unix socket or tls; set unix_socket, enable tls, or PROMPTLOCK_ALLOW_INSECURE_TCP=1")
+	}
+	return nil
+}
+
+func validateTLSConfig(cfg config.Config) error {
+	if !cfg.TLS.Enable {
+		return nil
+	}
+	if strings.TrimSpace(cfg.TLS.CertFile) == "" || strings.TrimSpace(cfg.TLS.KeyFile) == "" {
+		return fmt.Errorf("tls enabled requires tls.cert_file and tls.key_file")
+	}
+	if cfg.TLS.RequireClientCert && strings.TrimSpace(cfg.TLS.ClientCAFile) == "" {
+		return fmt.Errorf("tls.require_client_cert=true requires tls.client_ca_file")
 	}
 	return nil
 }
@@ -329,4 +357,23 @@ func validateSecurityProfile(cfg config.Config, allowInsecureProfile string) err
 		return fmt.Errorf("security_profile=%s requires auth.enable_auth=true", profile)
 	}
 	return nil
+}
+
+func buildTLSConfig(cfg config.Config) (*tls.Config, error) {
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if !cfg.TLS.RequireClientCert {
+		return tlsCfg, nil
+	}
+	caPath := strings.TrimSpace(cfg.TLS.ClientCAFile)
+	caBytes, err := os.ReadFile(caPath)
+	if err != nil {
+		return nil, fmt.Errorf("read tls client ca: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caBytes) {
+		return nil, fmt.Errorf("parse tls client ca: no certificates found")
+	}
+	tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+	tlsCfg.ClientCAs = pool
+	return tlsCfg, nil
 }

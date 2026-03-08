@@ -35,4 +35,29 @@ func TestValidateTransportSafety(t *testing.T) {
 	if err := validateTransportSafety(cfg, ""); err != nil {
 		t.Fatalf("expected unix socket to satisfy safety, got %v", err)
 	}
+	cfg.UnixSocket = ""
+	cfg.TLS.Enable = true
+	cfg.TLS.CertFile = "/tmp/cert.pem"
+	cfg.TLS.KeyFile = "/tmp/key.pem"
+	if err := validateTransportSafety(cfg, ""); err != nil {
+		t.Fatalf("expected tls to satisfy safety, got %v", err)
+	}
+}
+
+func TestValidateTLSConfig(t *testing.T) {
+	cfg := config.Default()
+	cfg.TLS.Enable = true
+	if err := validateTLSConfig(cfg); err == nil {
+		t.Fatalf("expected error for missing cert/key")
+	}
+	cfg.TLS.CertFile = "/tmp/cert.pem"
+	cfg.TLS.KeyFile = "/tmp/key.pem"
+	if err := validateTLSConfig(cfg); err != nil {
+		t.Fatalf("expected tls config success, got %v", err)
+	}
+	cfg.TLS.RequireClientCert = true
+	cfg.TLS.ClientCAFile = ""
+	if err := validateTLSConfig(cfg); err == nil {
+		t.Fatalf("expected error for missing client CA in mTLS mode")
+	}
 }

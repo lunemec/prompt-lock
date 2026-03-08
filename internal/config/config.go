@@ -17,6 +17,7 @@ type Config struct {
 	ExecutionPolicy     ExecutionPolicy     `json:"execution_policy"`
 	HostOpsPolicy       HostOpsPolicy       `json:"host_ops_policy"`
 	NetworkEgressPolicy NetworkEgressPolicy `json:"network_egress_policy"`
+	TLS                 TLSConfig           `json:"tls"`
 	Secrets             []SecretEntry       `json:"secrets"`
 	Intents             IntentMap           `json:"intents"`
 }
@@ -45,6 +46,7 @@ func Default() Config {
 		ExecutionPolicy:     defaultExecutionPolicy(),
 		HostOpsPolicy:       defaultHostOpsPolicy(),
 		NetworkEgressPolicy: defaultNetworkEgressPolicy(),
+		TLS:                 defaultTLSConfig(),
 		Policy: PolicyConfig{
 			DefaultTTLMinutes: p.DefaultTTLMinutes,
 			MinTTLMinutes:     p.MinTTLMinutes,
