@@ -22,6 +22,8 @@ make e2e-compose
 
 4. Confirm beta readiness checklist status:
    - `docs/plans/BETA-READINESS.md`
+5. Confirm security policy and disclosure path are published:
+   - `SECURITY.md`
 
 ## Build release artifacts
 

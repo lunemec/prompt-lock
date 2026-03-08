@@ -25,6 +25,15 @@ Yes, dockerizing this tool makes sense.
 - host-side protected audit mount
 - prefer unix socket exposure over broad TCP bind for broker API
 
+## Hardened production baseline (recommended)
+- `security_profile: hardened`
+- `auth.enable_auth: true`
+- `auth.allow_plaintext_secret_return: false`
+- `unix_socket` enabled and permission-restricted (preferred transport)
+- TCP, if enabled, bound to localhost only or behind authenticated mTLS proxy
+- host-protected audit path outside agent-writable mounts
+- explicit secret/session backend strategy (do not rely only on in-memory defaults)
+
 ## Secure transport recipes
 - Preferred: expose PromptLock via unix socket (`unix_socket`) and keep TCP local-only.
 - If TCP is required: keep `address` on localhost or put behind authenticated mTLS reverse proxy.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"strings"
@@ -28,7 +29,8 @@ func (s *server) requireOperator(w http.ResponseWriter, r *http.Request) (*http.
 		return r, false
 	}
 	tok := bearerToken(r)
-	if tok == "" || tok != s.authCfg.OperatorToken {
+	expected := s.authCfg.OperatorToken
+	if tok == "" || subtle.ConstantTimeCompare([]byte(tok), []byte(expected)) != 1 {
 		s.recordAuthFailure(r, "operator", "invalid_operator_token")
 		http.Error(w, "operator auth required", http.StatusUnauthorized)
 		return r, false

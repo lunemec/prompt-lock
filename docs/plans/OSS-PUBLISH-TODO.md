@@ -1,14 +1,14 @@
 # OSS Publish TODO (Security + Architecture)
 
-Status: parked (requested by Lukas, 2026-03-08)
+Status: in-progress (Wave 0 started, 2026-03-08)
 
 ## MUST before broader OSS launch
-- [ ] Add `LICENSE` file.
-- [ ] Add `SECURITY.md` (disclosure/reporting policy).
+- [x] Add `LICENSE` file.
+- [x] Add `SECURITY.md` (disclosure/reporting policy).
 - [ ] Add `CONTRIBUTING.md` with security/threat-model guardrails.
-- [ ] Switch operator token comparison to constant-time compare.
-- [ ] Add hardened deployment guide (unix socket first, no insecure TCP by default).
-- [ ] Add explicit production warning for in-memory secret/auth stores.
+- [x] Switch operator token comparison to constant-time compare.
+- [x] Add hardened deployment guide (unix socket first, no insecure TCP by default).
+- [x] Add explicit production warning for in-memory secret/auth stores.
 - [ ] Add red-team style e2e suite (auth bypass, replay, egress bypass, policy bypass attempts).
 
 ## SHOULD before v1.0
