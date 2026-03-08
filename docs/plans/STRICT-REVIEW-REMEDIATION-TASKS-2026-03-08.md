@@ -28,7 +28,7 @@ Status: In progress.
   3. malformed JSON on valid POST => `400`
 
 ## P0-02 — Native TLS/mTLS transport profile (deferred but tracked)
-- **Status:** 🚧 In progress (phase 1 scaffolding implemented, 2026-03-08)
+- **Status:** ✅ Completed (phase 1, 2026-03-08)
 - **Area:** Security
 - **Problem:** No native TLS/mTLS server mode in broker transport path.
 - **Scope (phase 1):**
@@ -36,9 +36,9 @@ Status: In progress.
   - TLS listener path in broker with secure defaults.
   - Optional mTLS client cert verification mode.
 - **Strict gates:**
-  - [ ] Broker can run HTTPS with provided cert/key.
-  - [ ] mTLS mode rejects clients without valid cert.
-  - [ ] Startup validation fails fast on incomplete TLS config.
+  - [x] Broker can run HTTPS with provided cert/key.
+  - [x] mTLS mode rejects clients without valid cert.
+  - [x] Startup validation fails fast on incomplete TLS config.
 - **Test scenarios:**
   1. HTTPS startup success with valid cert/key.
   2. Startup fail with missing key.
