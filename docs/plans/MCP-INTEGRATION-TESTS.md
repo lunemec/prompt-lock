@@ -23,7 +23,7 @@ Move MCP adapter from scaffold-level confidence to integration-level confidence 
    - malformed JSON-RPC payloads
    - oversized arguments
    - denied intents and timeout paths
-   - status: partially implemented (denied path, timeout path, missing-session-token path)
+   - status: implemented for denied, timeout, missing-session-token, invalid-session-token, and policy-denied execute paths
 
 ## Exit criteria for "MCP-ready beta"
 - deterministic harness test suite in CI

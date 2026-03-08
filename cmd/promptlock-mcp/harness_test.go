@@ -298,6 +298,53 @@ func TestMCPToolsCallMissingSessionToken(t *testing.T) {
 	}
 }
 
+func TestMCPToolsCallInvalidSessionToken(t *testing.T) {
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+	}))
+	defer broker.Close()
+
+	_, writeLine, readJSON := launchMCP(t, map[string]string{
+		"PROMPTLOCK_BROKER_URL":    broker.URL,
+		"PROMPTLOCK_SESSION_TOKEN": "bad-token",
+	})
+	writeLine(`{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}`)
+	msg := readJSON()
+	if msg["error"] == nil {
+		t.Fatalf("expected invalid session token error")
+	}
+}
+
+func TestMCPToolsCallPolicyDeniedPath(t *testing.T) {
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/intents/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{"secrets": []string{"github_token"}})
+		case "/v1/leases/request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"request_id": "r-policy"})
+		case "/v1/requests/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "approved"})
+		case "/v1/leases/by-request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"lease_token": "l-policy"})
+		case "/v1/leases/execute":
+			http.Error(w, "command denied by policy", http.StatusForbidden)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer broker.Close()
+
+	_, writeLine, readJSON := launchMCP(t, map[string]string{
+		"PROMPTLOCK_BROKER_URL":    broker.URL,
+		"PROMPTLOCK_SESSION_TOKEN": "s1",
+	})
+	writeLine(`{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}`)
+	msg := readJSON()
+	if msg["error"] == nil {
+		t.Fatalf("expected policy denied error")
+	}
+}
+
 func waitBroker(t *testing.T, base string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)

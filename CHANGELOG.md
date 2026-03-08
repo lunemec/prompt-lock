@@ -50,8 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added initial MCP RPC response-shape tests and MCP integration test roadmap.
 - Added MCP stdio harness tests for initialize/tools/list and tools/call mocked-broker roundtrip.
 - Added MCP tools/call live broker-backed E2E positive-path harness test.
-- Added MCP negative-path harness tests (denied, timeout, missing session token).
+- Added MCP negative-path harness tests (denied, timeout, missing/invalid session token, policy-denied execute).
 - Added `security_profile` support with hardened preset behavior.
+- Added beta readiness checklist document.
 - Added fuzz tests for MCP argument parsing and broker execute-command policy validation.
 - Added Dockerfile + docker-compose e2e smoke path and Makefile targets (`fuzz`, `e2e-compose`).
 - Wrapper execution docs and intent examples in config.
