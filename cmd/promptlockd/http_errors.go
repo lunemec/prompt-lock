@@ -6,11 +6,12 @@ import (
 )
 
 var (
-	ErrBadRequest   = errors.New("bad_request")
-	ErrUnauthorized = errors.New("unauthorized")
-	ErrForbidden    = errors.New("forbidden")
-	ErrNotFound     = errors.New("not_found")
-	ErrInternal     = errors.New("internal_error")
+	ErrBadRequest       = errors.New("bad_request")
+	ErrMethodNotAllowed = errors.New("method_not_allowed")
+	ErrUnauthorized     = errors.New("unauthorized")
+	ErrForbidden        = errors.New("forbidden")
+	ErrNotFound         = errors.New("not_found")
+	ErrInternal         = errors.New("internal_error")
 )
 
 func writeMappedError(w http.ResponseWriter, kind error, msg string) {
@@ -18,6 +19,8 @@ func writeMappedError(w http.ResponseWriter, kind error, msg string) {
 	switch {
 	case errors.Is(kind, ErrBadRequest):
 		status = http.StatusBadRequest
+	case errors.Is(kind, ErrMethodNotAllowed):
+		status = http.StatusMethodNotAllowed
 	case errors.Is(kind, ErrUnauthorized):
 		status = http.StatusUnauthorized
 	case errors.Is(kind, ErrForbidden):

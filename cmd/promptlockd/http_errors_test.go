@@ -13,6 +13,7 @@ func TestWriteMappedErrorStatusCodes(t *testing.T) {
 		status int
 	}{
 		{"bad_request", ErrBadRequest, http.StatusBadRequest},
+		{"method_not_allowed", ErrMethodNotAllowed, http.StatusMethodNotAllowed},
 		{"unauthorized", ErrUnauthorized, http.StatusUnauthorized},
 		{"forbidden", ErrForbidden, http.StatusForbidden},
 		{"not_found", ErrNotFound, http.StatusNotFound},

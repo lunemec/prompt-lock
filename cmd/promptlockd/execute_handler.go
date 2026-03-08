@@ -30,7 +30,7 @@ func (s *server) handleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		writeMappedError(w, ErrBadRequest, "method not allowed")
+		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 	var req executeReq
