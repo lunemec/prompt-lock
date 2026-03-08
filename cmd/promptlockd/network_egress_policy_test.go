@@ -22,3 +22,50 @@ func TestNetworkEgressPolicy(t *testing.T) {
 		t.Fatalf("expected deny substring block")
 	}
 }
+
+func TestNetworkEgressExtractsNonURLDomainForms(t *testing.T) {
+	s := &server{networkEgressPolicy: config.NetworkEgressPolicy{
+		Enabled:      true,
+		AllowDomains: []string{"api.github.com"},
+	}}
+	if err := s.validateNetworkEgress([]string{"curl", "api.github.com"}, ""); err != nil {
+		t.Fatalf("expected bare domain to be allowed: %v", err)
+	}
+	if err := s.validateNetworkEgress([]string{"curl", "--host", "api.github.com"}, ""); err != nil {
+		t.Fatalf("expected --host form to be allowed: %v", err)
+	}
+	if err := s.validateNetworkEgress([]string{"curl", "--url", "https://api.github.com/repos"}, ""); err != nil {
+		t.Fatalf("expected --url form to be allowed: %v", err)
+	}
+}
+
+func TestNetworkEgressIntentDeterministic(t *testing.T) {
+	s := &server{networkEgressPolicy: config.NetworkEgressPolicy{
+		Enabled:            true,
+		RequireIntentMatch: true,
+		AllowDomains:       []string{"fallback.example.com"},
+		IntentAllowDomains: map[string][]string{"run_tests": {"api.github.com"}},
+	}}
+	if err := s.validateNetworkEgress([]string{"curl", "https://api.github.com/repos"}, "run_tests"); err != nil {
+		t.Fatalf("expected intent allow to pass: %v", err)
+	}
+	if err := s.validateNetworkEgress([]string{"curl", "https://fallback.example.com"}, "run_tests"); err == nil {
+		t.Fatalf("expected fallback domain blocked when intent map exists")
+	}
+	if err := s.validateNetworkEgress([]string{"curl", "https://api.github.com/repos"}, ""); err == nil {
+		t.Fatalf("expected missing intent to fail when require_intent_match=true")
+	}
+}
+
+func TestNetworkEgressBlocksPrivateIPTargets(t *testing.T) {
+	s := &server{networkEgressPolicy: config.NetworkEgressPolicy{
+		Enabled:      true,
+		AllowDomains: []string{"10.0.0.1", "127.0.0.1"},
+	}}
+	if err := s.validateNetworkEgress([]string{"curl", "http://127.0.0.1:8080"}, ""); err == nil {
+		t.Fatalf("expected loopback IP to be blocked")
+	}
+	if err := s.validateNetworkEgress([]string{"curl", "10.0.0.1"}, ""); err == nil {
+		t.Fatalf("expected private IP to be blocked")
+	}
+}

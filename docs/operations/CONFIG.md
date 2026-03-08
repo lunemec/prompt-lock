@@ -74,6 +74,7 @@ Startup guardrails:
 
 ## Network egress policy notes
 - `network_egress_policy.enabled` toggles domain checks for broker-exec commands.
+- Broker-level egress checks are defense-in-depth input validation, not a complete network firewall. For strong guarantees, combine with host-level egress controls.
 - `network_egress_policy.require_intent_match` requires intent-specific domain mapping.
 - `network_egress_policy.allow_domains` defines fallback global domains.
 - `network_egress_policy.intent_allow_domains` defines per-intent destination domains.

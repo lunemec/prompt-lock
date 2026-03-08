@@ -116,6 +116,8 @@ Allowlisting only the executable prefix (e.g., `bash`) is too permissive and all
 
 ## SEC-006: Improve network egress enforcement reliability
 
+Status: ✅ Completed (2026-03-08)
+
 ### Problem
 Current URL/domain extraction is partial and can be bypassed by non-URL forms.
 
@@ -125,10 +127,10 @@ Current URL/domain extraction is partial and can be bypassed by non-URL forms.
 - Document boundary: broker-level checks are advisory unless combined with host/network controls.
 
 ### Success gates
-- [ ] Tests cover URL + non-URL domain argument forms.
-- [ ] Denylist catches known metadata/local pivot targets.
-- [ ] Intent/domain allowlist behavior is deterministic and tested.
-- [ ] Docs clearly state guarantees and limitations.
+- [x] Tests cover URL + non-URL domain argument forms.
+- [x] Denylist catches known metadata/local pivot targets.
+- [x] Intent/domain allowlist behavior is deterministic and tested.
+- [x] Docs clearly state guarantees and limitations.
 
 ---
 
