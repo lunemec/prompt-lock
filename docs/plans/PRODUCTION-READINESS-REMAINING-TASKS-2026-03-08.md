@@ -77,13 +77,14 @@ Status: In progress (all P0 blockers complete; remaining P1/P2 hardening tasks o
 
 ## P1-02 — Add hardened deployment profile smoke suite
 - **Area:** Security / operations
+- **Status:** ✅ Completed (2026-03-08)
 - **Problem:** Live harness currently runs dev profile for practicality; need hardened-path confidence.
 - **Scope:**
   - Add dedicated hardened smoke run (unix socket/TLS/mTLS variants).
   - Include config examples used by smoke tests.
 - **Strict gates:**
-  - [ ] Hardened smoke test runs in CI profile (full/nightly).
-  - [ ] Failures output actionable diagnostics.
+  - [x] Hardened smoke test runs in CI profile (full/nightly).
+  - [x] Failures output actionable diagnostics.
 
 ## P1-03 — Secret leakage regression suite
 - **Area:** Security
