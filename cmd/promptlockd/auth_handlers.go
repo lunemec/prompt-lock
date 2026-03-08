@@ -39,16 +39,16 @@ func (s *server) handleAuthBootstrapCreate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if !s.authEnabled {
-		http.Error(w, "auth disabled", 400)
+		writeMappedError(w, ErrBadRequest, "auth disabled")
 		return
 	}
 	var req bootstrapCreateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), 400)
+		writeMappedError(w, ErrBadRequest, err.Error())
 		return
 	}
 	if req.AgentID == "" || req.ContainerID == "" {
-		http.Error(w, "agent_id and container_id are required", 400)
+		writeMappedError(w, ErrBadRequest, "agent_id and container_id are required")
 		return
 	}
 	t := auth.BootstrapToken{Token: mustSecureToken("boot_"), AgentID: req.AgentID, ContainerID: req.ContainerID, CreatedAt: s.now(), ExpiresAt: s.now().Add(time.Duration(s.authCfg.BootstrapTokenTTLSeconds) * time.Second)}
@@ -65,22 +65,22 @@ func (s *server) handleAuthPairComplete(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !s.authEnabled {
-		http.Error(w, "auth disabled", 400)
+		writeMappedError(w, ErrBadRequest, "auth disabled")
 		return
 	}
 	var req bootstrapConsumeReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), 400)
+		writeMappedError(w, ErrBadRequest, err.Error())
 		return
 	}
 	if req.Token == "" || req.ContainerID == "" {
-		http.Error(w, "token and container_id are required", 400)
+		writeMappedError(w, ErrBadRequest, "token and container_id are required")
 		return
 	}
 	bt, err := s.authStore.ConsumeBootstrap(req.Token, req.ContainerID, s.now())
 	if err != nil {
 		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "auth_pair_denied", Timestamp: s.now(), ActorType: "agent", ActorID: "unknown", Metadata: map[string]string{"reason": err.Error(), "container_id": req.ContainerID}})
-		http.Error(w, err.Error(), 403)
+		writeMappedError(w, ErrForbidden, err.Error())
 		return
 	}
 	g := auth.PairingGrant{GrantID: mustSecureToken("grant_"), AgentID: bt.AgentID, ContainerID: req.ContainerID, CreatedAt: s.now(), LastUsedAt: s.now(), IdleExpiresAt: s.now().Add(time.Duration(s.authCfg.GrantIdleTimeoutMinutes) * time.Minute), AbsoluteExpiresAt: s.now().Add(time.Duration(s.authCfg.GrantAbsoluteMaxMinutes) * time.Minute)}
@@ -96,22 +96,22 @@ func (s *server) handleAuthSessionMint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.authEnabled {
-		http.Error(w, "auth disabled", 400)
+		writeMappedError(w, ErrBadRequest, "auth disabled")
 		return
 	}
 	var req mintSessionReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), 400)
+		writeMappedError(w, ErrBadRequest, err.Error())
 		return
 	}
 	g, err := s.authStore.GetGrant(req.GrantID)
 	if err != nil {
-		http.Error(w, err.Error(), 404)
+		writeMappedError(w, ErrNotFound, err.Error())
 		return
 	}
 	now := s.now()
 	if g.Revoked || !now.Before(g.IdleExpiresAt) || !now.Before(g.AbsoluteExpiresAt) {
-		http.Error(w, "grant expired or revoked", 403)
+		writeMappedError(w, ErrForbidden, "grant expired or revoked")
 		return
 	}
 	g.LastUsedAt = now
@@ -135,23 +135,23 @@ func (s *server) handleAuthRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.authEnabled {
-		http.Error(w, "auth disabled", 400)
+		writeMappedError(w, ErrBadRequest, "auth disabled")
 		return
 	}
 	var req revokeReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), 400)
+		writeMappedError(w, ErrBadRequest, err.Error())
 		return
 	}
 	if req.GrantID != "" {
 		if err := s.authStore.RevokeGrant(req.GrantID); err != nil {
-			http.Error(w, err.Error(), 404)
+			writeMappedError(w, ErrNotFound, err.Error())
 			return
 		}
 	}
 	if req.SessionID != "" {
 		if err := s.authStore.RevokeSession(req.SessionID); err != nil {
-			http.Error(w, err.Error(), 404)
+			writeMappedError(w, ErrNotFound, err.Error())
 			return
 		}
 	}

@@ -23,14 +23,14 @@ func (s *server) handleDeny(w http.ResponseWriter, r *http.Request) {
 	}
 	requestID := r.URL.Query().Get("request_id")
 	if requestID == "" {
-		http.Error(w, "request_id required", 400)
+		writeMappedError(w, ErrBadRequest, "request_id required")
 		return
 	}
 	var req denyReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	denied, err := s.svc.DenyRequest(requestID, req.Reason)
 	if err != nil {
-		http.Error(w, err.Error(), 400)
+		writeMappedError(w, ErrBadRequest, err.Error())
 		return
 	}
 	at, aid := actorFromRequest(r)

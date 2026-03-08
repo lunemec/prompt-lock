@@ -8,7 +8,9 @@ Provide an executable adversarial regression gate for high-risk abuse classes:
 - network egress bypass.
 
 ## Initial implementation
-This initial scaffold uses existing high-signal tests in `cmd/promptlockd` and groups them by abuse class via `scripts/run_redteam_e2e.sh`.
+This implementation now has two layers:
+1. In-process grouped security test runs via `scripts/run_redteam_e2e.sh`
+2. Live broker black-box harness via `scripts/run_redteam_live.py` (machine-readable JSON report)
 
 ## Abuse classes mapped to tests
 
@@ -38,10 +40,12 @@ This initial scaffold uses existing high-signal tests in `cmd/promptlockd` and g
 
 ```bash
 make security-redteam
+make security-redteam-live
 ```
 
 ## CI integration
-`make ci` now includes `security-redteam` so these checks run on every CI validation pass.
+- `make ci` includes `security-redteam` on every validation pass.
+- `make ci-redteam-full` runs `validate-final` plus the live black-box harness and writes `reports/redteam-live.json`.
 
 ## Next hardening phase
 - Add dedicated replay tests for grant/session re-use after revocation.

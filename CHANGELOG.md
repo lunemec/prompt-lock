@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- Live black-box red-team harness (`scripts/run_redteam_live.py`) with machine-readable report output (`reports/redteam-live.json`).
 - Optional durable auth persistence (`auth.store_file`) for bootstrap/grant/session state with reload support.
 - Native TLS/mTLS transport config scaffolding (`tls.enable`, cert/key, optional client CA and client-cert requirement) with startup validation and tests.
 - App-layer control-plane policy service (`internal/app.ControlPlanePolicy`) for execute, network-egress, and host-docker policy evaluation.
@@ -78,7 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Execute and host-docker handlers now delegate policy decisions to app-layer policy services, reducing transport-layer policy duplication.
 - Security and architecture review task plans are now fully remediated and marked complete.
-- HTTP method mismatch semantics are now consistent (`405 Method Not Allowed`) for execute and host-docker endpoints.
+- HTTP method mismatch and status mapping semantics are now standardized through shared inbound error taxonomy across handlers.
 - Hardened profile now tightens broker-exec defaults by removing shell wrappers from execution allowlist and adding command-smuggling deny markers (`&&`, `||`, `;`, `$(`, backticks).
 - Hardened profile now restricts host Docker compose mediation verbs to read-only `config` and `ps`.
 - Wrapper now waits for external approval by default, with polling/timeout controls.

@@ -8,3 +8,4 @@ __pycache__/
 *.tmp
 **/*.tmp
 .DS_Store
+reports/*.json

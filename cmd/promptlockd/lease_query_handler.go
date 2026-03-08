@@ -14,12 +14,12 @@ func (s *server) handleLeaseByRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	requestID := r.URL.Query().Get("request_id")
 	if requestID == "" {
-		http.Error(w, "request_id required", 400)
+		writeMappedError(w, ErrBadRequest, "request_id required")
 		return
 	}
 	lease, err := s.svc.Leases.GetLeaseByRequestID(requestID)
 	if err != nil {
-		http.Error(w, err.Error(), 404)
+		writeMappedError(w, ErrNotFound, err.Error())
 		return
 	}
 	writeJSON(w, map[string]any{"lease_token": lease.Token, "expires_at": lease.ExpiresAt})

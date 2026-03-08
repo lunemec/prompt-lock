@@ -176,17 +176,17 @@ func (s *server) handleResolveIntent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
+		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 	var req resolveIntentReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), 400)
+		writeMappedError(w, ErrBadRequest, err.Error())
 		return
 	}
 	secrets, ok := s.intents[req.Intent]
 	if !ok || len(secrets) == 0 {
-		http.Error(w, "unknown intent", 404)
+		writeMappedError(w, ErrNotFound, "unknown intent")
 		return
 	}
 	writeJSON(w, map[string]any{"intent": req.Intent, "secrets": secrets})
@@ -199,17 +199,17 @@ func (s *server) handleRequestStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", 405)
+		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 	requestID := r.URL.Query().Get("request_id")
 	if requestID == "" {
-		http.Error(w, "request_id required", 400)
+		writeMappedError(w, ErrBadRequest, "request_id required")
 		return
 	}
 	req, err := s.svc.Requests.GetRequest(requestID)
 	if err != nil {
-		http.Error(w, err.Error(), 404)
+		writeMappedError(w, ErrNotFound, err.Error())
 		return
 	}
 	writeJSON(w, map[string]any{"request_id": req.ID, "status": req.Status})
@@ -222,12 +222,12 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
+		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 	var req leaseReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), 400)
+		writeMappedError(w, ErrBadRequest, err.Error())
 		return
 	}
 	if req.TTLMinutes == 0 {
@@ -235,7 +235,7 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	created, err := s.svc.RequestLease(req.AgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint)
 	if err != nil {
-		http.Error(w, err.Error(), 400)
+		writeMappedError(w, ErrBadRequest, err.Error())
 		return
 	}
 	writeJSON(w, map[string]any{"request_id": created.ID, "status": created.Status})
@@ -248,19 +248,19 @@ func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
+		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 	requestID := r.URL.Query().Get("request_id")
 	if requestID == "" {
-		http.Error(w, "request_id required", 400)
+		writeMappedError(w, ErrBadRequest, "request_id required")
 		return
 	}
 	var req approveReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	lease, err := s.svc.ApproveRequest(requestID, req.TTLMinutes)
 	if err != nil {
-		http.Error(w, err.Error(), 400)
+		writeMappedError(w, ErrBadRequest, err.Error())
 		return
 	}
 	at, aid := actorFromRequest(r)
@@ -275,23 +275,23 @@ func (s *server) handleAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
+		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 	if s.authEnabled && !s.authCfg.AllowPlaintextSecretReturn {
 		at, aid := actorFromRequest(r)
 		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "plaintext_secret_access_blocked", Timestamp: s.now(), ActorType: at, ActorID: aid})
-		http.Error(w, "plaintext secret return disabled by policy", http.StatusForbidden)
+		writeMappedError(w, ErrForbidden, "plaintext secret return disabled by policy")
 		return
 	}
 	var req accessReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), 400)
+		writeMappedError(w, ErrBadRequest, err.Error())
 		return
 	}
 	v, err := s.svc.AccessSecret(req.LeaseToken, req.Secret, req.CommandFingerprint, req.WorkdirFingerprint)
 	if err != nil {
-		http.Error(w, err.Error(), 403)
+		writeMappedError(w, ErrForbidden, err.Error())
 		return
 	}
 	writeJSON(w, map[string]any{"secret": req.Secret, "value": v})

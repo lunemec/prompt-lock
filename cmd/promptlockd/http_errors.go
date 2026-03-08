@@ -8,6 +8,7 @@ import (
 var (
 	ErrBadRequest       = errors.New("bad_request")
 	ErrMethodNotAllowed = errors.New("method_not_allowed")
+	ErrRateLimited      = errors.New("rate_limited")
 	ErrUnauthorized     = errors.New("unauthorized")
 	ErrForbidden        = errors.New("forbidden")
 	ErrNotFound         = errors.New("not_found")
@@ -21,6 +22,8 @@ func writeMappedError(w http.ResponseWriter, kind error, msg string) {
 		status = http.StatusBadRequest
 	case errors.Is(kind, ErrMethodNotAllowed):
 		status = http.StatusMethodNotAllowed
+	case errors.Is(kind, ErrRateLimited):
+		status = http.StatusTooManyRequests
 	case errors.Is(kind, ErrUnauthorized):
 		status = http.StatusUnauthorized
 	case errors.Is(kind, ErrForbidden):

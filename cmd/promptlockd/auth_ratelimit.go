@@ -89,7 +89,7 @@ func (s *server) enforceAuthRateLimit(w http.ResponseWriter, r *http.Request, sc
 		return true
 	}
 	_ = s.svc.Audit.Write(ports.AuditEvent{Event: "auth_rate_limited", Timestamp: s.now(), ActorType: scope, ActorID: key})
-	http.Error(w, "too many auth attempts", http.StatusTooManyRequests)
+	writeMappedError(w, ErrRateLimited, "too many auth attempts")
 	return false
 }
 

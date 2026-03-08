@@ -32,7 +32,7 @@ func (s *server) requireOperator(w http.ResponseWriter, r *http.Request) (*http.
 	expected := s.authCfg.OperatorToken
 	if tok == "" || subtle.ConstantTimeCompare([]byte(tok), []byte(expected)) != 1 {
 		s.recordAuthFailure(r, "operator", "invalid_operator_token")
-		http.Error(w, "operator auth required", http.StatusUnauthorized)
+		writeMappedError(w, ErrUnauthorized, "operator auth required")
 		return r, false
 	}
 	return withActor(r, "operator", "token-operator"), true
@@ -48,24 +48,24 @@ func (s *server) requireAgentSession(w http.ResponseWriter, r *http.Request) (*h
 	tok := bearerToken(r)
 	if tok == "" {
 		s.recordAuthFailure(r, "agent", "missing_session_token")
-		http.Error(w, "agent session token required", http.StatusUnauthorized)
+		writeMappedError(w, ErrUnauthorized, "agent session token required")
 		return r, false
 	}
 	sess, err := s.authStore.ValidateSession(tok, s.now())
 	if err != nil {
 		s.recordAuthFailure(r, "agent", "invalid_session_token")
-		http.Error(w, "invalid session", http.StatusUnauthorized)
+		writeMappedError(w, ErrUnauthorized, "invalid session")
 		return r, false
 	}
 	g, err := s.authStore.GetGrant(sess.GrantID)
 	if err != nil {
 		s.recordAuthFailure(r, "agent", "invalid_grant")
-		http.Error(w, "invalid grant", http.StatusUnauthorized)
+		writeMappedError(w, ErrUnauthorized, "invalid grant")
 		return r, false
 	}
 	if err := s.validateGrantActive(g); err != nil {
 		s.recordAuthFailure(r, "agent", "inactive_grant")
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		writeMappedError(w, ErrUnauthorized, err.Error())
 		return r, false
 	}
 	return withActor(r, "agent", sess.AgentID), true

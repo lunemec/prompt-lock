@@ -64,11 +64,12 @@ Status: In progress.
 
 ## P1-01 — Extend red-team suite to full endpoint adversarial flows
 - **Area:** Security testing
+- **Status:** ✅ Completed (2026-03-08)
 - **Scope:** black-box HTTP abuse harness (auth bypass/replay/policy bypass/egress bypass).
 - **Strict gates:**
-  - [ ] Includes live broker process harness.
-  - [ ] Produces machine-readable findings summary.
-  - [ ] Integrated in CI profile (full or nightly).
+  - [x] Includes live broker process harness.
+  - [x] Produces machine-readable findings summary.
+  - [x] Integrated in CI profile (full or nightly).
 
 ## P1-02 — Finish transport-thin handlers migration
 - **Area:** Architecture
@@ -79,10 +80,11 @@ Status: In progress.
 
 ## P1-03 — Standardize error mapping across all handlers
 - **Area:** Usability + architecture
+- **Status:** ✅ Completed (2026-03-08)
 - **Scope:** move all inbound handlers to shared mapper (no mixed `http.Error` style).
 - **Strict gates:**
-  - [ ] Stable status semantics per contract.
-  - [ ] Contract doc + tests reflect final taxonomy.
+  - [x] Stable status semantics per contract.
+  - [x] Contract doc + tests reflect final taxonomy.
 
 ---
 

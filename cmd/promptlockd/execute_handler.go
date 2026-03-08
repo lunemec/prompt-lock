@@ -53,7 +53,7 @@ func (s *server) handleExecute(w http.ResponseWriter, r *http.Request) {
 	if err := s.controlPolicy().ValidateNetworkEgress(req.Command, req.Intent); err != nil {
 		at, aid := actorFromRequest(r)
 		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "network_egress_blocked", Timestamp: s.now(), ActorType: at, ActorID: aid, Metadata: map[string]string{"reason": err.Error(), "command": strings.Join(req.Command, " ")}})
-		http.Error(w, err.Error(), http.StatusForbidden)
+		writeMappedError(w, ErrForbidden, err.Error())
 		return
 	}
 
