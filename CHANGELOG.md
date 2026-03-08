@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
-- Initial Secret Lease Broker prototype with request/approve/access flow.
+- Initial PromptLock prototype with request/approve/access flow.
 - Agent skill for requesting short-lived secret leases.
 - AGENTS/docs harness structure and security-focused standards.
 - Final validation gate with changelog + security baseline checks.

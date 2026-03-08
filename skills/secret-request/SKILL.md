@@ -1,6 +1,6 @@
 ---
 name: secret-request
-description: Request short-lived secret leases from Secret Lease Broker with explicit human approval.
+description: Request short-lived secret leases from PromptLock with explicit human approval.
 ---
 
 # Secret Request Skill

@@ -130,5 +130,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    print(f"Mock Secret Lease Broker listening on http://{HOST}:{PORT}")
+    print(f"Mock PromptLock broker listening on http://{HOST}:{PORT}")
     HTTPServer((HOST, PORT), Handler).serve_forever()
