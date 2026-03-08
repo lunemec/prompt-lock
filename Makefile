@@ -1,7 +1,7 @@
-.PHONY: help lint test fuzz security docs validate-changelog validate-final ci e2e-compose
+.PHONY: help lint test fuzz security docs validate-changelog validate-final ci e2e-compose release-package
 
 help:
-	@echo "Targets: lint test fuzz security docs validate-changelog validate-final ci e2e-compose"
+	@echo "Targets: lint test fuzz security docs validate-changelog validate-final ci e2e-compose release-package"
 
 lint:
 	bash -n scripts/secretctl.sh scripts/human-approve.sh
@@ -36,3 +36,8 @@ ci: validate-final
 e2e-compose:
 	docker compose -f docker-compose.e2e.yml up --build --abort-on-container-exit --exit-code-from e2e-runner
 	docker compose -f docker-compose.e2e.yml down -v
+
+release-package:
+	@test -n "$(VERSION)" || (echo "Usage: make release-package VERSION=vX.Y.Z" && exit 1)
+	chmod +x scripts/release-package.sh
+	scripts/release-package.sh "$(VERSION)"

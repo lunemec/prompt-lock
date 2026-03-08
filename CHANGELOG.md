@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added beta readiness checklist document.
 - Added threat-model document and key rotation/revocation operations runbook.
 - Added MCP protocol conformance notes document.
+- Added release packaging script, release workflow, and versioned deployment guide.
 - Added fuzz tests for MCP argument parsing and broker execute-command policy validation.
 - Added Dockerfile + docker-compose e2e smoke path and Makefile targets (`fuzz`, `e2e-compose`).
 - Wrapper execution docs and intent examples in config.

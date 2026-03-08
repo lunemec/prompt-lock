@@ -23,4 +23,4 @@
 - [ ] Add stricter MCP protocol conformance tests vs target MCP clients
 - [x] Add documented threat-model walkthrough with sample attack simulations
 - [x] Add operational runbook for key rotation/revocation drills
-- [ ] Add release packaging + versioned deployment guide
+- [x] Add release packaging + versioned deployment guide
