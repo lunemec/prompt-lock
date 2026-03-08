@@ -81,6 +81,7 @@ func (c *Config) applyProfile() {
 		return
 	case "hardened":
 		c.Auth.AllowPlaintextSecretReturn = false
+		c.NetworkEgressPolicy.RequireIntentMatch = true
 		if c.ExecutionPolicy.MaxTimeoutSec > 120 {
 			c.ExecutionPolicy.MaxTimeoutSec = 120
 		}

@@ -14,6 +14,7 @@ import (
 
 type executeReq struct {
 	LeaseToken         string   `json:"lease_token"`
+	Intent             string   `json:"intent,omitempty"`
 	Command            []string `json:"command"`
 	Secrets            []string `json:"secrets"`
 	CommandFingerprint string   `json:"command_fingerprint"`
@@ -48,7 +49,7 @@ func (s *server) handleExecute(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "secrets are required", 400)
 		return
 	}
-	if err := s.validateNetworkEgress(req.Command); err != nil {
+	if err := s.validateNetworkEgress(req.Command, req.Intent); err != nil {
 		at, aid := actorFromRequest(r)
 		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "network_egress_blocked", Timestamp: s.now(), ActorType: at, ActorID: aid, Metadata: map[string]string{"reason": err.Error(), "command": strings.Join(req.Command, " ")}})
 		http.Error(w, err.Error(), http.StatusForbidden)

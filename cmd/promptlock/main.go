@@ -109,6 +109,10 @@ func runExec(args []string) {
 		}
 	}
 
+	if *brokerExec && strings.TrimSpace(*intent) == "" {
+		fatal(fmt.Errorf("--broker-exec requires --intent for intent-aware policy enforcement"))
+	}
+
 	fingerprint := commandFingerprint(cmdArgs)
 	wdfp, err := workdirFingerprint()
 	if err != nil {
@@ -541,13 +545,14 @@ func brokerCapabilities(broker, brokerUnix string) (capabilities, error) {
 	return out, nil
 }
 
-func executeWithSecret(broker, brokerUnix, sessionToken, lease string, command, secrets []string, fp, wdfp string) (int, string, error) {
+func executeWithSecret(broker, brokerUnix, sessionToken, lease, intent string, command, secrets []string, fp, wdfp string) (int, string, error) {
 	var out struct {
 		ExitCode     int    `json:"exit_code"`
 		StdoutStderr string `json:"stdout_stderr"`
 	}
 	payload := map[string]any{
 		"lease_token":         lease,
+		"intent":              intent,
 		"command":             command,
 		"secrets":             secrets,
 		"command_fingerprint": fp,

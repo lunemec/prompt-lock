@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func (s *server) validateNetworkEgress(cmd []string) error {
+func (s *server) validateNetworkEgress(cmd []string, intent string) error {
 	p := s.networkEgressPolicy
 	if !p.Enabled {
 		return nil
@@ -22,12 +22,23 @@ func (s *server) validateNetworkEgress(cmd []string) error {
 	if len(domains) == 0 {
 		return nil
 	}
-	if len(p.AllowDomains) == 0 {
-		return fmt.Errorf("network egress disabled: no allow_domains configured")
+
+	allow := p.AllowDomains
+	trimIntent := strings.TrimSpace(intent)
+	if trimIntent != "" {
+		if byIntent, ok := p.IntentAllowDomains[trimIntent]; ok && len(byIntent) > 0 {
+			allow = byIntent
+		}
+	} else if p.RequireIntentMatch {
+		return fmt.Errorf("network egress requires intent-specific policy")
+	}
+
+	if len(allow) == 0 {
+		return fmt.Errorf("network egress disabled: no allowed domains for intent %q", trimIntent)
 	}
 
 	for _, dom := range domains {
-		if !domainAllowed(dom, p.AllowDomains) {
+		if !domainAllowed(dom, allow) {
 			return fmt.Errorf("domain %q not allowed by network policy", dom)
 		}
 	}

@@ -18,6 +18,7 @@ Prompt injection and autonomous agents can exfiltrate data via outbound network 
 - Operator override flow for exceptional network access.
 - Audit records for policy denials and granted exceptions.
 - Baseline implementation includes command-domain allowlist and deny-substring checks in broker-exec path.
+- Hardened implementation includes intent-aware domain mapping with optional `require_intent_match` enforcement.
 
 ## Consequences
 - Better containment of data exfiltration attempts.

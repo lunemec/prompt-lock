@@ -35,7 +35,12 @@
   },
   "network_egress_policy": {
     "enabled": true,
+    "require_intent_match": true,
     "allow_domains": ["api.github.com", "registry.npmjs.org", "pypi.org"],
+    "intent_allow_domains": {
+      "run_tests": ["api.github.com"],
+      "install_deps": ["registry.npmjs.org", "pypi.org"]
+    },
     "deny_substrings": ["169.254.169.254", "metadata.google.internal", "localhost", "127.0.0.1"]
   },
   "secrets": [

@@ -67,7 +67,9 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 
 ## Network egress policy notes
 - `network_egress_policy.enabled` toggles domain checks for broker-exec commands.
-- `network_egress_policy.allow_domains` defines allowed destination domains.
+- `network_egress_policy.require_intent_match` requires intent-specific domain mapping.
+- `network_egress_policy.allow_domains` defines fallback global domains.
+- `network_egress_policy.intent_allow_domains` defines per-intent destination domains.
 - `network_egress_policy.deny_substrings` blocks dangerous target patterns (metadata endpoints, local pivots, etc.).
 - Denials are audit-logged as `network_egress_blocked`.
 

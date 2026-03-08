@@ -184,6 +184,7 @@ func executeWithIntent(args map[string]interface{}) (string, error) {
 	}
 	if err := postAuth(broker+"/v1/leases/execute", session, map[string]any{
 		"lease_token":         lease.LeaseToken,
+		"intent":              intent,
 		"command":             cmd,
 		"secrets":             resolved.Secrets,
 		"command_fingerprint": fp,
