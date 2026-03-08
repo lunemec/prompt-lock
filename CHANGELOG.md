@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `security_profile` support with hardened preset behavior.
 - Added beta readiness checklist document.
 - Added ADR-0014 and ADR-0015 for host Docker mediation and network egress control strategy.
+- Added host Docker mediation MVP endpoint (`/v1/host/docker/execute`) with policy allow/deny checks and tests.
 - Expanded MCP conformance-related harness tests (malformed JSON, unknown tool, validation errors).
 - Added MCP stdin scanner size cap (1 MiB) and related protocol-hardening notes/tests.
 - Added MCP conformance tests for batch-request rejection and invalid-request rejection.

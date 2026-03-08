@@ -25,6 +25,11 @@
     "default_timeout_sec": 120,
     "max_timeout_sec": 600
   },
+  "host_ops_policy": {
+    "docker_allow_subcommands": ["version", "ps", "images", "compose"],
+    "docker_deny_substrings": ["--privileged", "--pid=host", "-v /:/", "docker.sock", "--network host"],
+    "docker_timeout_sec": 30
+  },
   "secrets": [
     { "name": "github_token", "value": "REPLACE_ME" },
     { "name": "npm_token", "value": "REPLACE_ME" }

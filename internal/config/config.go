@@ -15,6 +15,7 @@ type Config struct {
 	Policy          PolicyConfig    `json:"policy"`
 	Auth            AuthConfig      `json:"auth"`
 	ExecutionPolicy ExecutionPolicy `json:"execution_policy"`
+	HostOpsPolicy   HostOpsPolicy   `json:"host_ops_policy"`
 	Secrets         []SecretEntry   `json:"secrets"`
 	Intents         IntentMap       `json:"intents"`
 }
@@ -41,6 +42,7 @@ func Default() Config {
 		Intents:         IntentMap{},
 		Auth:            defaultAuthConfig(),
 		ExecutionPolicy: defaultExecutionPolicy(),
+		HostOpsPolicy:   defaultHostOpsPolicy(),
 		Policy: PolicyConfig{
 			DefaultTTLMinutes: p.DefaultTTLMinutes,
 			MinTTLMinutes:     p.MinTTLMinutes,

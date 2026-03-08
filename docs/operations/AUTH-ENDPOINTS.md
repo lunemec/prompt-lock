@@ -70,6 +70,7 @@ Operator endpoints require operator token:
 - `/v1/leases/deny`
 - `/v1/auth/bootstrap/create`
 - `/v1/auth/revoke`
+- `/v1/host/docker/execute`
 
 ## Current status
 - Foundation implemented in memory store and handlers.

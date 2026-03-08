@@ -58,6 +58,11 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 - `max_output_bytes` limits output returned from broker execution.
 - `default_timeout_sec` and `max_timeout_sec` enforce execution time bounds.
 
+## Host Docker mediation policy notes
+- `host_ops_policy.docker_allow_subcommands` allowlists Docker subcommands for host execution.
+- `host_ops_policy.docker_deny_substrings` blocks dangerous argument patterns.
+- `host_ops_policy.docker_timeout_sec` limits host Docker command runtime.
+
 ## Notes
 - Keep this file host-owned and permission-restricted.
 - Do not place this config in agent-writable workspace mounts.
