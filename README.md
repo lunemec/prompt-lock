@@ -32,7 +32,7 @@ See `docs/CONTRACT.md`.
 - `docs/decisions/` — ADRs for architecture and requirement changes
 - `docs/standards/` — engineering standards (Red-Green-Blue TDD, security reporting)
 - `docs/plans/` — active execution plan and gates
-- `docs/operations/` — runbooks, Dockerization, config, wrapper execution notes, and MCP adapter notes
+- `docs/operations/` — runbooks, Dockerization, config, wrapper execution notes, MCP adapter notes, and key rotation/revocation runbook
 - `docs/context/` — product context and trust boundaries
 - `scripts/mock-broker.py` — minimal local broker (demo)
 - `scripts/secretctl.sh` — agent-facing CLI wrapper

@@ -21,6 +21,6 @@
 
 ## Remaining before beta tag
 - [ ] Add stricter MCP protocol conformance tests vs target MCP clients
-- [ ] Add documented threat-model walkthrough with sample attack simulations
-- [ ] Add operational runbook for key rotation/revocation drills
+- [x] Add documented threat-model walkthrough with sample attack simulations
+- [x] Add operational runbook for key rotation/revocation drills
 - [ ] Add release packaging + versioned deployment guide
