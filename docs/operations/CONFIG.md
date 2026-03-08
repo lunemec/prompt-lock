@@ -45,6 +45,7 @@ Environment variables `PROMPTLOCK_ADDR` and `PROMPTLOCK_AUDIT_PATH` override con
 - `operator_token` is mandatory when auth is enabled.
 - `allow_plaintext_secret_return=false` is recommended for hardened mode; plaintext secret API calls are blocked.
 - `cleanup_interval_seconds` controls background auth garbage collection of expired/used records.
+- `store_file` (optional) enables durable auth bootstrap/grant/session persistence to a host path.
 - For hardened local deployments, prefer `unix_socket` and keep TCP on localhost only.
 - CLI clients can target unix socket with `--broker-unix-socket` / `PROMPTLOCK_BROKER_UNIX_SOCKET`.
 - If auth is enabled and TCP is non-local without unix socket or TLS, broker fails to start unless `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is set.
@@ -94,4 +95,5 @@ Startup guardrails:
 ## Notes
 - Keep this file host-owned and permission-restricted.
 - Do not place this config in agent-writable workspace mounts.
+- If using `auth.store_file`, place it on host-protected storage (not agent-writable paths).
 - Prefer external secret backends for production (Vault/1Password/etc).

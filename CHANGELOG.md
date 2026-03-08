@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- Optional durable auth persistence (`auth.store_file`) for bootstrap/grant/session state with reload support.
 - Native TLS/mTLS transport config scaffolding (`tls.enable`, cert/key, optional client CA and client-cert requirement) with startup validation and tests.
 - App-layer control-plane policy service (`internal/app.ControlPlanePolicy`) for execute, network-egress, and host-docker policy evaluation.
 - Explicit route registration by bounded context (`meta`, `lease`, `auth`, `host-ops`) with route registration test coverage.

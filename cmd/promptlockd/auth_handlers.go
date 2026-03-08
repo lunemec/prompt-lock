@@ -53,6 +53,7 @@ func (s *server) handleAuthBootstrapCreate(w http.ResponseWriter, r *http.Reques
 	}
 	t := auth.BootstrapToken{Token: mustSecureToken("boot_"), AgentID: req.AgentID, ContainerID: req.ContainerID, CreatedAt: s.now(), ExpiresAt: s.now().Add(time.Duration(s.authCfg.BootstrapTokenTTLSeconds) * time.Second)}
 	s.authStore.SaveBootstrap(t)
+	s.persistAuthStore()
 	at, aid := actorFromRequest(r)
 	_ = s.svc.Audit.Write(ports.AuditEvent{Event: "auth_bootstrap_created", Timestamp: s.now(), ActorType: at, ActorID: aid, AgentID: req.AgentID, Metadata: map[string]string{"container_id": req.ContainerID}})
 	writeJSON(w, map[string]any{"bootstrap_token": t.Token, "expires_at": t.ExpiresAt})
@@ -84,6 +85,7 @@ func (s *server) handleAuthPairComplete(w http.ResponseWriter, r *http.Request) 
 	}
 	g := auth.PairingGrant{GrantID: mustSecureToken("grant_"), AgentID: bt.AgentID, ContainerID: req.ContainerID, CreatedAt: s.now(), LastUsedAt: s.now(), IdleExpiresAt: s.now().Add(time.Duration(s.authCfg.GrantIdleTimeoutMinutes) * time.Minute), AbsoluteExpiresAt: s.now().Add(time.Duration(s.authCfg.GrantAbsoluteMaxMinutes) * time.Minute)}
 	s.authStore.SaveGrant(g)
+	s.persistAuthStore()
 	_ = s.svc.Audit.Write(ports.AuditEvent{Event: "auth_pair_completed", Timestamp: s.now(), ActorType: "agent", ActorID: bt.AgentID, AgentID: bt.AgentID, Metadata: map[string]string{"container_id": req.ContainerID, "grant_id": g.GrantID}})
 	writeJSON(w, map[string]any{"grant_id": g.GrantID, "idle_expires_at": g.IdleExpiresAt, "absolute_expires_at": g.AbsoluteExpiresAt})
 }
@@ -117,6 +119,7 @@ func (s *server) handleAuthSessionMint(w http.ResponseWriter, r *http.Request) {
 	s.authStore.UpdateGrant(g)
 	st := auth.SessionToken{Token: mustSecureToken("sess_"), GrantID: g.GrantID, AgentID: g.AgentID, CreatedAt: now, ExpiresAt: now.Add(time.Duration(s.authCfg.SessionTTLMinutes) * time.Minute)}
 	s.authStore.SaveSession(st)
+	s.persistAuthStore()
 	_ = s.svc.Audit.Write(ports.AuditEvent{Event: "auth_session_minted", Timestamp: s.now(), ActorType: "agent", ActorID: g.AgentID, AgentID: g.AgentID, Metadata: map[string]string{"grant_id": g.GrantID}})
 	writeJSON(w, map[string]any{"session_token": st.Token, "expires_at": st.ExpiresAt})
 }
@@ -152,6 +155,7 @@ func (s *server) handleAuthRevoke(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.persistAuthStore()
 	at, aid := actorFromRequest(r)
 	_ = s.svc.Audit.Write(ports.AuditEvent{Event: "auth_revoked", Timestamp: s.now(), ActorType: at, ActorID: aid, Metadata: map[string]string{"grant_id": req.GrantID, "session_id": req.SessionID}})
 	writeJSON(w, map[string]any{"status": "revoked"})

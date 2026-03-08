@@ -47,14 +47,15 @@ Status: In progress.
 ## P0-03 — Durable backend plan for auth/secret/session stores
 - **Area:** Security + resilience
 - **Problem:** In-memory stores are non-durable and weak for production operation.
+- **Status:** 🚧 In progress (phase 1 auth-store durability implemented, 2026-03-08)
 - **Scope (phase 1):**
   - Define persistence adapter interfaces and storage contract.
   - Implement first durable adapter (file/bolt/sqlite or external backend shim).
   - Add migration + failure-mode docs.
 - **Strict gates:**
-  - [ ] Restart preserves grants/sessions where configured.
-  - [ ] Revocation semantics preserved across restarts.
-  - [ ] Docs clearly state backend trade-offs.
+  - [x] Restart preserves grants/sessions where configured.
+  - [x] Revocation semantics preserved across restarts.
+  - [x] Docs clearly state backend trade-offs.
 - **Test scenarios:**
   1. Mint session, restart broker, session still valid (within TTL).
   2. Revoke grant, restart, grant remains revoked.

@@ -11,6 +11,7 @@ type AuthConfig struct {
 	CleanupIntervalSeconds     int    `json:"cleanup_interval_seconds"`
 	RateLimitWindowSeconds     int    `json:"rate_limit_window_seconds"`
 	RateLimitMaxAttempts       int    `json:"rate_limit_max_attempts"`
+	StoreFile                  string `json:"store_file"`
 }
 
 func defaultAuthConfig() AuthConfig {
@@ -25,5 +26,6 @@ func defaultAuthConfig() AuthConfig {
 		CleanupIntervalSeconds:     60,
 		RateLimitWindowSeconds:     60,
 		RateLimitMaxAttempts:       20,
+		StoreFile:                  "",
 	}
 }
