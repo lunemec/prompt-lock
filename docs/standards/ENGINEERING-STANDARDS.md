@@ -20,6 +20,8 @@ If unsure about security impact, explicitly escalate in output.
 
 ## Project process requirements
 - Provide Makefile commands for common contributor workflows.
+- **Default stack discipline:** keep implementation and automation in the project’s primary stack (Go for PromptLock). Avoid introducing additional runtime/toolchain dependencies (e.g., Python/Node scripts) unless absolutely necessary.
+- If an additional toolchain is truly required, document the rationale and get explicit maintainer approval before merging.
 - Document architectural and requirement decisions in ADRs.
 - Maintain CHANGELOG.md using Keep-a-Changelog.
 - New changes must be under `[Unreleased]`.

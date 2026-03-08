@@ -77,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Wrapper execution docs and intent examples in config.
 
 ### Changed
+- Engineering standards now require default single-stack discipline (Go-first tooling) and explicit approval/justification before adding secondary runtime dependencies.
 - Execute and host-docker handlers now delegate policy decisions to app-layer policy services, reducing transport-layer policy duplication.
 - Security and architecture review task plans are now fully remediated and marked complete.
 - HTTP method mismatch and status mapping semantics are now standardized through shared inbound error taxonomy across handlers.

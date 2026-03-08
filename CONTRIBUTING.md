@@ -46,6 +46,7 @@ Do not file public issues for vulnerabilities. See `SECURITY.md`.
 - Prefer transport-thin handlers and policy/business logic in app/core layers.
 - Keep dependency direction inward-only.
 - Avoid adding direct coupling between unrelated adapters.
+- Keep contributor tooling aligned with the primary project stack (Go). Adding new runtime/toolchain dependencies requires explicit maintainer approval and documented justification.
 
 ## Commit guidance
 
