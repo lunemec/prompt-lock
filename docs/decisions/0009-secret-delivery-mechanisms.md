@@ -21,7 +21,15 @@ All mechanisms are tied to approved lease scope and command execution context.
 - No persistence of secret material in repository/workspace paths.
 - Full audit trail for secret materialization events.
 
+## Consequences
+- Gives adapters a clear preference order without forcing a single mechanism for every client.
+- Preserves portability across tools that require file-based credentials.
+
 ## Security implications
 - File-based delivery can still leak if process is malicious/compromised.
 - Mechanism choice reduces accidental exposure but does not eliminate intentional exfiltration once plaintext is read.
 - Must be paired with containment controls (ADR-0010).
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

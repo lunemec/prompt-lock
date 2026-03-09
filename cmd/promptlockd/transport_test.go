@@ -9,7 +9,10 @@ import (
 func TestIsLocalAddress(t *testing.T) {
 	cases := map[string]bool{
 		"127.0.0.1:8765": true,
+		"127.0.0.2:8765": true,
 		"localhost:8765": true,
+		"[::1]:8765":     true,
+		"::1":            true,
 		"0.0.0.0:8765":   false,
 		"10.0.0.5:8765":  false,
 	}
@@ -25,21 +28,21 @@ func TestValidateTransportSafety(t *testing.T) {
 	cfg.Auth.EnableAuth = true
 	cfg.Address = "0.0.0.0:8765"
 	cfg.UnixSocket = ""
-	if err := validateTransportSafety(cfg, ""); err == nil {
+	if err := validateTransportSafety(cfg, "", ""); err == nil {
 		t.Fatalf("expected transport safety error")
 	}
-	if err := validateTransportSafety(cfg, "1"); err != nil {
+	if err := validateTransportSafety(cfg, "1", ""); err != nil {
 		t.Fatalf("expected override success, got %v", err)
 	}
 	cfg.UnixSocket = "/tmp/promptlock.sock"
-	if err := validateTransportSafety(cfg, ""); err != nil {
+	if err := validateTransportSafety(cfg, "", ""); err != nil {
 		t.Fatalf("expected unix socket to satisfy safety, got %v", err)
 	}
 	cfg.UnixSocket = ""
 	cfg.TLS.Enable = true
 	cfg.TLS.CertFile = "/tmp/cert.pem"
 	cfg.TLS.KeyFile = "/tmp/key.pem"
-	if err := validateTransportSafety(cfg, ""); err != nil {
+	if err := validateTransportSafety(cfg, "", ""); err != nil {
 		t.Fatalf("expected tls to satisfy safety, got %v", err)
 	}
 }
@@ -52,8 +55,33 @@ func TestValidateTransportSafetyWithTLS(t *testing.T) {
 	cfg.TLS.Enable = true
 	cfg.TLS.CertFile = "/tmp/cert.pem"
 	cfg.TLS.KeyFile = "/tmp/key.pem"
-	if err := validateTransportSafety(cfg, ""); err != nil {
+	if err := validateTransportSafety(cfg, "", ""); err != nil {
 		t.Fatalf("expected tls transport safety success, got %v", err)
+	}
+}
+
+func TestValidateTransportSafety_NoAuthNonLocalTCP(t *testing.T) {
+	cfg := config.Default()
+	cfg.Auth.EnableAuth = false
+	cfg.Address = "0.0.0.0:8765"
+	cfg.UnixSocket = ""
+	cfg.TLS.Enable = false
+
+	if err := validateTransportSafety(cfg, "", ""); err == nil {
+		t.Fatalf("expected unauthenticated non-local TCP startup to fail")
+	}
+	if err := validateTransportSafety(cfg, "", "1"); err != nil {
+		t.Fatalf("expected unauthenticated non-local override success, got %v", err)
+	}
+
+	cfg.Address = "127.0.0.1:8765"
+	if err := validateTransportSafety(cfg, "", ""); err != nil {
+		t.Fatalf("expected local unauthenticated TCP to pass, got %v", err)
+	}
+
+	cfg.Address = "[::1]:8765"
+	if err := validateTransportSafety(cfg, "", ""); err != nil {
+		t.Fatalf("expected IPv6 loopback unauthenticated TCP to pass, got %v", err)
 	}
 }
 
@@ -81,6 +109,21 @@ func TestValidateSecretSourceSafety(t *testing.T) {
 	cfg.SecretSource.FilePath = "/tmp/secrets.json"
 	if err := validateSecretSourceSafety(cfg); err != nil {
 		t.Fatalf("expected file source with path to pass, got %v", err)
+	}
+	cfg.SecretSource.Type = "external"
+	cfg.SecretSource.ExternalURL = ""
+	cfg.SecretSource.ExternalAuthTokenEnv = "PROMPTLOCK_EXTERNAL_SECRET_TOKEN"
+	if err := validateSecretSourceSafety(cfg); err == nil {
+		t.Fatalf("expected external source without URL to fail")
+	}
+	cfg.SecretSource.ExternalURL = "https://secrets.example.local"
+	cfg.SecretSource.ExternalAuthTokenEnv = ""
+	if err := validateSecretSourceSafety(cfg); err == nil {
+		t.Fatalf("expected external source without auth token env to fail")
+	}
+	cfg.SecretSource.ExternalAuthTokenEnv = "PROMPTLOCK_EXTERNAL_SECRET_TOKEN"
+	if err := validateSecretSourceSafety(cfg); err != nil {
+		t.Fatalf("expected external source with URL and token env to pass, got %v", err)
 	}
 }
 

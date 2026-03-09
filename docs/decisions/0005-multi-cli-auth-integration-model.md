@@ -30,3 +30,11 @@ For each tool, use this order:
 - Adds adapter implementation effort.
 - Greatly improves portability across Codex/Claude/Gemini/others.
 - Reduces maintenance burden compared with maintaining hard forks.
+
+## Security implications
+- Adapter isolation reduces the chance that one tool-specific integration weakens the default security posture.
+- Multiple delivery paths increase implementation surface area and require strong audit and regression coverage.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

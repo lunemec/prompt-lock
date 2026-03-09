@@ -32,6 +32,8 @@ Yes, dockerizing this tool makes sense.
 - `unix_socket` enabled and permission-restricted (preferred transport)
 - TCP, if enabled, bound to localhost only or behind authenticated mTLS proxy
 - host-protected audit path outside agent-writable mounts
+- host-protected `state_store_file` and `auth.store_file` paths outside agent-writable mounts
+- `PROMPTLOCK_AUTH_STORE_KEY` (or configured `auth.store_encryption_key_env`) supplied via orchestrator secret, not baked into images
 - explicit secret/session backend strategy (do not rely only on in-memory defaults)
 
 ## Secure transport recipes
@@ -41,8 +43,9 @@ Yes, dockerizing this tool makes sense.
 - Canonical hardened mTLS setup: `docs/operations/MTLS-HARDENED.md`.
 - `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is an explicit emergency override; use only for controlled testing and rotate credentials afterward.
 
-## Canonical real flow
-- Use `docs/operations/REAL-E2E-HOST-CONTAINER.md` for host daemon + container agent + interactive approval walkthrough.
+## Canonical host-plus-container walkthrough
+- Use `docs/operations/REAL-E2E-HOST-CONTAINER.md` for the CLI-first host daemon + container agent + interactive approval lab walkthrough.
+- Use `docs/operations/MTLS-HARDENED.md` for hardened non-local TCP guidance.
 
 ## Future
 - Provide docker-compose example:

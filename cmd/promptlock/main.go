@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -107,11 +108,8 @@ func runExec(args []string) {
 
 	caps, err := brokerCapabilities(*broker, *brokerUnix)
 	if err == nil {
-		if caps.AuthEnabled && *sessionToken == "" {
-			fatal(fmt.Errorf("broker requires session token; provide --session-token or PROMPTLOCK_SESSION_TOKEN"))
-		}
-		if caps.AuthEnabled && !caps.AllowPlaintextSecretReturn && !*brokerExec {
-			fatal(fmt.Errorf("broker policy disables plaintext secret return; re-run with --broker-exec"))
+		if err := validateExecCapabilityPreconditions(caps, *sessionToken, *brokerExec); err != nil {
+			fatal(err)
 		}
 	}
 
@@ -241,7 +239,7 @@ func postJSONAuth(baseURL, unixSocket, path, bearer string, in any, out any) err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("request failed: %s", resp.Status)
+		return responseError("request failed", resp)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }
@@ -330,7 +328,7 @@ func fetchLeaseByRequest(broker, brokerUnix, sessionToken, requestID string) (st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("fetch lease failed: %s", resp.Status)
+		return "", responseError("fetch lease failed", resp)
 	}
 	var out struct {
 		LeaseToken string `json:"lease_token"`
@@ -351,7 +349,7 @@ func requestStatus(broker, brokerUnix, sessionToken, requestID string) (string, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("status check failed: %s", resp.Status)
+		return "", responseError("status check failed", resp)
 	}
 	var out struct {
 		Status string `json:"status"`
@@ -521,7 +519,7 @@ func listPending(broker, brokerUnix, operatorToken string) ([]struct {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("pending request failed: %s", resp.Status)
+		return nil, responseError("pending request failed", resp)
 	}
 	var out pendingResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -542,13 +540,32 @@ func brokerCapabilities(broker, brokerUnix string) (capabilities, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return capabilities{}, fmt.Errorf("capabilities request failed: %s", resp.Status)
+		return capabilities{}, responseError("capabilities request failed", resp)
 	}
 	var out capabilities
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return capabilities{}, err
 	}
 	return out, nil
+}
+
+func responseError(prefix string, resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	msg := strings.TrimSpace(string(body))
+	if msg == "" {
+		return fmt.Errorf("%s: %s", prefix, resp.Status)
+	}
+	return fmt.Errorf("%s: %s (%s)", prefix, msg, resp.Status)
+}
+
+func validateExecCapabilityPreconditions(caps capabilities, sessionToken string, brokerExec bool) error {
+	if caps.AuthEnabled && strings.TrimSpace(sessionToken) == "" {
+		return fmt.Errorf("broker requires session token; provide --session-token or PROMPTLOCK_SESSION_TOKEN")
+	}
+	if caps.AuthEnabled && !caps.AllowPlaintextSecretReturn && !brokerExec {
+		return fmt.Errorf("broker policy disables plaintext secret return; re-run with --broker-exec")
+	}
+	return nil
 }
 
 func executeWithSecret(broker, brokerUnix, sessionToken, lease, intent string, command, secrets []string, fp, wdfp string) (int, string, error) {
@@ -618,8 +635,8 @@ func runAuthPair(args []string) {
 		fatal(fmt.Errorf("--token and --container are required"))
 	}
 	var out struct {
-		GrantID          string    `json:"grant_id"`
-		IdleExpiresAt    time.Time `json:"idle_expires_at"`
+		GrantID           string    `json:"grant_id"`
+		IdleExpiresAt     time.Time `json:"idle_expires_at"`
 		AbsoluteExpiresAt time.Time `json:"absolute_expires_at"`
 	}
 	if err := postJSONAuth(*broker, *brokerUnix, "/v1/auth/pair/complete", "", map[string]string{"token": *token, "container_id": *container}, &out); err != nil {

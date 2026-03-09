@@ -1,19 +1,32 @@
 package main
 
 import (
-	"log"
+	"errors"
 	"strings"
 )
 
-func (s *server) persistAuthStore() {
+var errMissingAuthStorePersister = errors.New("auth store persister not configured")
+
+func (s *server) persistAuthStore() error {
 	if !s.authEnabled {
-		return
+		return nil
 	}
 	path := strings.TrimSpace(s.authStoreFile)
 	if path == "" {
-		return
+		return nil
 	}
-	if err := s.authStore.SaveToFile(path); err != nil {
-		log.Printf("WARN: failed to persist auth store: %v", err)
+	persister := s.authStorePersister
+	if persister == nil && s.authStore != nil {
+		persister = s.authStore
 	}
+	if persister == nil {
+		return s.closeDurabilityGate("auth_store", errMissingAuthStorePersister)
+	}
+	var err error
+	if len(s.authStoreKey) > 0 {
+		err = persister.SaveToFileEncrypted(path, s.authStoreKey)
+	} else {
+		err = persister.SaveToFile(path)
+	}
+	return s.closeDurabilityGate("auth_store", err)
 }

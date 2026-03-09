@@ -1,8 +1,9 @@
 # MCP Conformance Matrix
 
 ## Target clients/protocol expectations
-- Generic JSON-RPC 2.0 MCP clients over stdio
-- Request/response framing: one JSON-RPC message per line
+- Target profile A: line-oriented JSON-RPC 2.0 clients using string IDs and occasionally `params: null`
+- Target profile B: line-oriented JSON-RPC 2.0 clients using numeric IDs with object params
+- Request/response framing: one JSON-RPC message per line (stdio)
 
 ## Covered behaviors
 - Parse errors return `-32700`
@@ -10,7 +11,10 @@
 - Unknown method/tool returns `-32601`
 - Invalid params return `-32602`
 - Batch requests rejected (`-32600`)
+- Parse/batch protocol errors include `id: null` when request id is not available
 - Notifications (no `id`) do not emit responses
+- String request IDs are echoed unchanged in responses
+- `tools/list` accepts `params: null` from target profile A clients
 - Tool call execute path + denied/timeout/session-failure paths
 - Response shape/schema invariants for initialize/tools/list/error payloads
 

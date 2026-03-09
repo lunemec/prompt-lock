@@ -16,8 +16,16 @@ PromptLock should integrate with multiple agent ecosystems. Protocol choice impa
 - ACP can be added later without changing core policy/lease logic.
 - Core broker remains protocol-agnostic via ports/adapters architecture.
 
+## Consequences
+- Establishes MCP as the first protocol-hardening track for interoperability work.
+- Defers ACP-specific complexity until there is a concrete integration need.
+
 ## Security implications
 - Protocol adapters must not weaken core non-disclosure/lease enforcement.
 - Adapter layers must preserve audit events and operator approval semantics.
 - MCP exposure must be **capability-first** (execute-with-secret) and not plaintext-secret-first.
 - Raw secret-return MCP methods are disallowed by default and require explicit break-glass policy if ever enabled.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

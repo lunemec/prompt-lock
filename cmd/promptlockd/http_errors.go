@@ -6,13 +6,14 @@ import (
 )
 
 var (
-	ErrBadRequest       = errors.New("bad_request")
-	ErrMethodNotAllowed = errors.New("method_not_allowed")
-	ErrRateLimited      = errors.New("rate_limited")
-	ErrUnauthorized     = errors.New("unauthorized")
-	ErrForbidden        = errors.New("forbidden")
-	ErrNotFound         = errors.New("not_found")
-	ErrInternal         = errors.New("internal_error")
+	ErrBadRequest         = errors.New("bad_request")
+	ErrMethodNotAllowed   = errors.New("method_not_allowed")
+	ErrRateLimited        = errors.New("rate_limited")
+	ErrUnauthorized       = errors.New("unauthorized")
+	ErrForbidden          = errors.New("forbidden")
+	ErrNotFound           = errors.New("not_found")
+	ErrServiceUnavailable = errors.New("service_unavailable")
+	ErrInternal           = errors.New("internal_error")
 )
 
 func writeMappedError(w http.ResponseWriter, kind error, msg string) {
@@ -30,6 +31,8 @@ func writeMappedError(w http.ResponseWriter, kind error, msg string) {
 		status = http.StatusForbidden
 	case errors.Is(kind, ErrNotFound):
 		status = http.StatusNotFound
+	case errors.Is(kind, ErrServiceUnavailable):
+		status = http.StatusServiceUnavailable
 	case errors.Is(kind, ErrInternal):
 		status = http.StatusInternalServerError
 	}

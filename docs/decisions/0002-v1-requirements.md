@@ -40,3 +40,7 @@ Discovery inputs from project owner clarified MVP scope for OSS, agent-agnostic 
 - 5-minute default TTL lowers blast radius.
 - Reusable lease improves usability but increases need for precise access audit trails.
 - Explicit secret naming limits broad secret exposure.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

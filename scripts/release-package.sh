@@ -14,20 +14,34 @@ fi
 
 VERSION="${VERSION#v}"
 OUT_DIR="dist/promptlock-${VERSION}"
-rm -rf "$OUT_DIR"
+GORELEASER_DIST=".goreleaser-dist"
+GORELEASER_VERSION="${GORELEASER_VERSION:-v2.7.0}"
+
+rm -rf "$OUT_DIR" "$GORELEASER_DIST"
 mkdir -p "$OUT_DIR/bin"
 
-GOOS=linux GOARCH=amd64 go build -o "$OUT_DIR/bin/promptlockd-linux-amd64" ./cmd/promptlockd
-GOOS=linux GOARCH=amd64 go build -o "$OUT_DIR/bin/promptlock-linux-amd64" ./cmd/promptlock
-GOOS=linux GOARCH=amd64 go build -o "$OUT_DIR/bin/promptlock-mcp-linux-amd64" ./cmd/promptlock-mcp
+go run "github.com/goreleaser/goreleaser/v2@${GORELEASER_VERSION}" build --snapshot --clean --config .goreleaser.yaml
 
-GOOS=darwin GOARCH=arm64 go build -o "$OUT_DIR/bin/promptlockd-darwin-arm64" ./cmd/promptlockd
-GOOS=darwin GOARCH=arm64 go build -o "$OUT_DIR/bin/promptlock-darwin-arm64" ./cmd/promptlock
-GOOS=darwin GOARCH=arm64 go build -o "$OUT_DIR/bin/promptlock-mcp-darwin-arm64" ./cmd/promptlock-mcp
+for bin in \
+  promptlockd-linux-amd64 \
+  promptlock-linux-amd64 \
+  promptlock-mcp-linux-amd64 \
+  promptlockd-darwin-arm64 \
+  promptlock-darwin-arm64 \
+  promptlock-mcp-darwin-arm64
+do
+  src="${GORELEASER_DIST}/${bin}"
+  if [[ ! -f "$src" ]]; then
+    echo "missing expected GoReleaser artifact: $src" >&2
+    exit 1
+  fi
+  cp "$src" "$OUT_DIR/bin/$bin"
+done
 
 cp README.md "$OUT_DIR/"
 cp -r docs "$OUT_DIR/docs"
 
 ( cd dist && tar -czf "promptlock-${VERSION}.tar.gz" "promptlock-${VERSION}" )
+rm -rf "$GORELEASER_DIST"
 
 echo "Built dist/promptlock-${VERSION}.tar.gz"

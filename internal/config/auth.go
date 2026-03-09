@@ -12,6 +12,7 @@ type AuthConfig struct {
 	RateLimitWindowSeconds     int    `json:"rate_limit_window_seconds"`
 	RateLimitMaxAttempts       int    `json:"rate_limit_max_attempts"`
 	StoreFile                  string `json:"store_file"`
+	StoreEncryptionKeyEnv      string `json:"store_encryption_key_env"`
 }
 
 func defaultAuthConfig() AuthConfig {
@@ -27,5 +28,6 @@ func defaultAuthConfig() AuthConfig {
 		RateLimitWindowSeconds:     60,
 		RateLimitMaxAttempts:       20,
 		StoreFile:                  "",
+		StoreEncryptionKeyEnv:      "PROMPTLOCK_AUTH_STORE_KEY",
 	}
 }

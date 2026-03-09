@@ -169,7 +169,7 @@ func TestMCPToolsCallRealBrokerE2E(t *testing.T) {
 
 	brokerCmd := exec.Command("go", "run", "./cmd/promptlockd")
 	brokerCmd.Dir = "../.."
-	brokerCmd.Env = append(os.Environ(), "PROMPTLOCK_CONFIG="+cfgPath)
+	brokerCmd.Env = append(os.Environ(), "PROMPTLOCK_CONFIG="+cfgPath, "PROMPTLOCK_ALLOW_DEV_PROFILE=1")
 	if err := brokerCmd.Start(); err != nil {
 		t.Fatal(err)
 	}

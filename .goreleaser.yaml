@@ -1,0 +1,59 @@
+version: 2
+
+project_name: promptlock
+dist: .goreleaser-dist
+
+builds:
+  - id: promptlockd
+    main: ./cmd/promptlockd
+    binary: promptlockd-{{ .Os }}-{{ .Arch }}
+    no_unique_dist_dir: true
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: linux
+        goarch: arm64
+      - goos: darwin
+        goarch: amd64
+
+  - id: promptlock
+    main: ./cmd/promptlock
+    binary: promptlock-{{ .Os }}-{{ .Arch }}
+    no_unique_dist_dir: true
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: linux
+        goarch: arm64
+      - goos: darwin
+        goarch: amd64
+
+  - id: promptlock-mcp
+    main: ./cmd/promptlock-mcp
+    binary: promptlock-mcp-{{ .Os }}-{{ .Arch }}
+    no_unique_dist_dir: true
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: linux
+        goarch: arm64
+      - goos: darwin
+        goarch: amd64

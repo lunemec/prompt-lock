@@ -14,7 +14,7 @@ Use this checklist to move from compatibility mode to hardened mode.
 - [ ] timeout and output caps tuned
 
 ## 3) Plaintext return de-risk
-- [ ] set `auth.allow_plaintext_secret_return=false`
+- [ ] verify `/v1/meta/capabilities` reports `allow_plaintext_secret_return=false` (hardened default)
 - [ ] verify no workflows depend on `/v1/leases/access`
 - [ ] monitor `plaintext_secret_access_blocked` audit events
 

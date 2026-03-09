@@ -31,3 +31,7 @@ Agents usually request outcomes ("run tests", "publish package"), not specific s
 - Reduces exposure from direct secret retrieval APIs.
 - Keeps approvals semantically meaningful (intent-level).
 - Requires robust policy mapping and audit coverage.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

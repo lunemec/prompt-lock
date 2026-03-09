@@ -17,7 +17,9 @@ func startAuthCleanupLoop(s *server) {
 		for range t.C {
 			rb, rs, rg := s.authStore.CleanupExpired(s.now())
 			if rb+rs+rg > 0 {
-				s.persistAuthStore()
+				if err := s.persistAuthStore(); err != nil {
+					continue
+				}
 				_ = s.svc.Audit.Write(ports.AuditEvent{
 					Event:     "auth_cleanup",
 					Timestamp: s.now(),

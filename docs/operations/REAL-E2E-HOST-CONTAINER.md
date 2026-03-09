@@ -1,18 +1,25 @@
-# Real E2E: Host Daemon + Container Agent (CLI-first)
+# Real E2E: Host Daemon + Container Agent (CLI-first Lab Flow)
 
-This is the canonical real-world flow for PromptLock with:
+This document shows the canonical CLI-first lab validation flow for PromptLock with:
 - host running `promptlockd`
 - host operator approving requests interactively
 - containerized agent executing via `promptlock` CLI
 
-No curl required in the primary flow.
+No curl is required in the primary flow.
+
+This is not the hardened production TCP baseline. The current CLI docs do not yet cover direct client-certificate handling, so this walkthrough uses the explicit insecure TCP override for controlled local validation only. For hardened non-local TCP deployments, use [MTLS-HARDENED.md](./MTLS-HARDENED.md) or an authenticated mTLS proxy in front of PromptLock.
 
 ## Prerequisites
 - Host has PromptLock repo and Go toolchain.
 - Docker can run a container that reaches host (`host.docker.internal`).
 - You have chosen an operator token and container identity.
+- You understand that `PROMPTLOCK_ALLOW_INSECURE_TCP=1` below is for local validation only and must not be used as a production deployment pattern.
 
-## 1) Host: start daemon
+## Topology guidance
+- Preferred production baseline: `unix_socket` for local-only deployments, or TLS/mTLS for any non-local TCP listener.
+- This walkthrough: hardened policy controls plus explicit insecure TCP override to validate the host-plus-container approval path with the current CLI surface.
+
+## 1) Host: start daemon for lab validation
 
 Create config (example):
 
@@ -22,6 +29,7 @@ Create config (example):
   "address": "0.0.0.0:8765",
   "unix_socket": "",
   "audit_path": "/tmp/promptlock-audit.jsonl",
+  "state_store_file": "/tmp/promptlock-state-store.json",
   "auth": {
     "enable_auth": true,
     "operator_token": "op_real_test_token",
@@ -33,7 +41,8 @@ Create config (example):
     "cleanup_interval_seconds": 60,
     "rate_limit_window_seconds": 60,
     "rate_limit_max_attempts": 50,
-    "store_file": "/tmp/promptlock-auth-store.json"
+    "store_file": "/tmp/promptlock-auth-store.json",
+    "store_encryption_key_env": "PROMPTLOCK_AUTH_STORE_KEY"
   },
   "secret_source": {
     "type": "env",
@@ -54,9 +63,12 @@ Create config (example):
 Export host-provided secret and start daemon:
 
 ```bash
-export PROMPTLOCK_SECRET_GITHUB_TOKEN='ghp_real_demo_value'
+export PROMPTLOCK_SECRET_GITHUB_TOKEN='demo_github_token_value'
+export PROMPTLOCK_AUTH_STORE_KEY='replace_with_long_random_value'
 PROMPTLOCK_ALLOW_INSECURE_TCP=1 PROMPTLOCK_CONFIG=/tmp/promptlock-real.json go run ./cmd/promptlockd
 ```
+
+This startup mode is acceptable only for controlled local testing. If you need a hardened remote-access path, stop here and switch to [MTLS-HARDENED.md](./MTLS-HARDENED.md).
 
 ## 2) Host: run interactive approval queue
 
@@ -118,3 +130,5 @@ Expected: `audit verify ok: ...`
 - `agent session token required`: session token missing for agent commands.
 - `request denied`: operator denied in approval queue.
 - `secret backend unavailable`: secret source backend misconfigured/unavailable.
+- Want a secure non-local TCP deployment instead of this lab path: use [MTLS-HARDENED.md](./MTLS-HARDENED.md).
+- For command-to-endpoint/token mapping and remediation by failure text: use [CLI-ENDPOINT-CONTRACT-MATRIX.md](./CLI-ENDPOINT-CONTRACT-MATRIX.md).

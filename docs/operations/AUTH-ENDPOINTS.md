@@ -64,6 +64,9 @@ Examples:
 - `/v1/leases/access`
 - `/v1/leases/execute`
 
+Note:
+- `allow_plaintext_secret_return=false` blocks `/v1/leases/access` even when auth is disabled.
+
 Operator endpoints require operator token:
 - `/v1/requests/pending`
 - `/v1/leases/approve`
@@ -73,6 +76,7 @@ Operator endpoints require operator token:
 - `/v1/host/docker/execute`
 
 ## Current status
-- Foundation implemented in memory store and handlers.
-- Initial endpoint-level authz enforcement implemented (operator token + session token).
-- Remaining hardening: stronger actor attribution in audit events and transport security defaults.
+- Auth foundation, endpoint authz enforcement, actor attribution, and transport safety defaults are implemented.
+- Durable auth persistence and CLI auth helpers are documented elsewhere in the operations docs and README.
+- The canonical CLI-command to endpoint/token mapping is in `docs/operations/CLI-ENDPOINT-CONTRACT-MATRIX.md`.
+- Follow-up operator-documentation polish is tracked in `docs/plans/BACKLOG.md`.

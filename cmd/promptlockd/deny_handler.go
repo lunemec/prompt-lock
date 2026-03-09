@@ -21,6 +21,9 @@ func (s *server) handleDeny(w http.ResponseWriter, r *http.Request) {
 		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !s.requireDurabilityReady(w) {
+		return
+	}
 	requestID := r.URL.Query().Get("request_id")
 	if requestID == "" {
 		writeMappedError(w, ErrBadRequest, "request_id required")
@@ -31,6 +34,10 @@ func (s *server) handleDeny(w http.ResponseWriter, r *http.Request) {
 	denied, err := s.svc.DenyRequest(requestID, req.Reason)
 	if err != nil {
 		writeMappedError(w, ErrBadRequest, err.Error())
+		return
+	}
+	if err := s.persistRequestLeaseState(); err != nil {
+		writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
 		return
 	}
 	at, aid := actorFromRequest(r)

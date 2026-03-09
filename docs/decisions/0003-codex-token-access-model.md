@@ -20,3 +20,7 @@ Codex-like tools may need access to credentials for longer-running autonomous ta
 ## Security implications
 - Short leases reduce blast radius.
 - Renewal events add explicit visibility in audit logs.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

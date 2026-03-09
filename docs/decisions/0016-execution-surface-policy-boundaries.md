@@ -1,6 +1,6 @@
-# ADR-0016: Execution-surface policy boundaries
+# 0016 - Execution-surface policy boundaries
 
-- Status: Accepted
+- Status: accepted
 - Date: 2026-03-08
 
 ## Context
@@ -26,6 +26,14 @@ That made policy drift likely and reduced testability.
 - Slightly larger app surface area.
 - Requires explicit policy wiring in server construction.
 
+## Security implications
+- Reduces the chance of policy drift across high-risk execution surfaces.
+- Makes security behavior easier to regression-test outside HTTP-specific handlers.
+
 ## Follow-up
 - Continue migrating remaining non-transport decisions from handlers into app/domain services.
 - Extend conformance checks when new adapters/entrypoints are added.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

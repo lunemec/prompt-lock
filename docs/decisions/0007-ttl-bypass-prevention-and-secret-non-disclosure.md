@@ -28,3 +28,11 @@ If raw secret values are returned to agent scripts, they can be copied into long
 - Stronger enforcement of lease semantics.
 - Slightly more complexity in command orchestration.
 - Better defense against prompt-injection-assisted exfiltration.
+
+## Security implications
+- Makes plaintext export an explicit exception path instead of a silent default.
+- Pushes more enforcement pressure onto execution policy, audit, and containment controls.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

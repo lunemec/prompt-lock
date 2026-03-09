@@ -11,10 +11,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lunemec/promptlock/internal/adapters/audit"
 	"github.com/lunemec/promptlock/internal/adapters/envsecret"
+	"github.com/lunemec/promptlock/internal/adapters/externalsecret"
 	"github.com/lunemec/promptlock/internal/adapters/filesecret"
 	"github.com/lunemec/promptlock/internal/adapters/memory"
 	"github.com/lunemec/promptlock/internal/app"
@@ -33,11 +35,28 @@ type server struct {
 	networkEgressPolicy  config.NetworkEgressPolicy
 	securityProfile      string
 	authStore            *auth.Store
+	authStorePersister   authStorePersister
 	authStoreFile        string
+	authStoreKey         []byte
+	stateStoreFile       string
+	stateStorePersister  stateStorePersister
 	authLimiter          *authRateLimiter
 	policyEngine         app.ControlPlanePolicy
 	unixSocketConfigured bool
+	insecureDevMode      bool
+	durabilityMu         sync.RWMutex
+	durabilityClosed     bool
+	durabilityReason     string
 	now                  func() time.Time
+}
+
+type stateStorePersister interface {
+	SaveStateToFile(path string) error
+}
+
+type authStorePersister interface {
+	SaveToFile(path string) error
+	SaveToFileEncrypted(path string, key []byte) error
 }
 
 type leaseReq struct {
@@ -80,6 +99,9 @@ func main() {
 	if v := os.Getenv("PROMPTLOCK_UNIX_SOCKET"); v != "" {
 		cfg.UnixSocket = v
 	}
+	if v := os.Getenv("PROMPTLOCK_STATE_STORE_FILE"); v != "" {
+		cfg.StateStoreFile = v
+	}
 	if v := os.Getenv("PROMPTLOCK_OPERATOR_TOKEN"); v != "" {
 		cfg.Auth.OperatorToken = v
 	}
@@ -96,6 +118,12 @@ func main() {
 			log.Fatalf("init file secret source: %v", err)
 		}
 		secretStore = fs
+	case "external":
+		fs, err := externalsecret.New(cfg.SecretSource.ExternalURL, cfg.SecretSource.ExternalAuthTokenEnv, cfg.SecretSource.ExternalTimeoutSec)
+		if err != nil {
+			log.Fatalf("init external secret source: %v", err)
+		}
+		secretStore = fs
 	default:
 		store.SetSecret("github_token", getenv("PROMPTLOCK_DEMO_GITHUB_TOKEN", "DEMO_GITHUB_TOKEN"))
 		store.SetSecret("npm_token", getenv("PROMPTLOCK_DEMO_NPM_TOKEN", "DEMO_NPM_TOKEN"))
@@ -103,6 +131,11 @@ func main() {
 			if s.Name != "" {
 				store.SetSecret(s.Name, s.Value)
 			}
+		}
+	}
+	if strings.TrimSpace(cfg.StateStoreFile) != "" {
+		if err := store.LoadStateFromFile(cfg.StateStoreFile); err != nil {
+			log.Fatalf("load request/lease state store: %v", err)
 		}
 	}
 
@@ -129,6 +162,9 @@ func main() {
 	if err := validateSecurityProfile(cfg, getenv("PROMPTLOCK_ALLOW_INSECURE_PROFILE", "")); err != nil {
 		log.Fatal(err)
 	}
+	if err := validateDeploymentMode(cfg, getenv("PROMPTLOCK_ALLOW_DEV_PROFILE", "")); err != nil {
+		log.Fatal(err)
+	}
 	if cfg.Auth.EnableAuth && cfg.Auth.OperatorToken == "" {
 		log.Fatal("auth enabled but operator_token is empty")
 	}
@@ -136,27 +172,56 @@ func main() {
 		log.Fatal(err)
 	}
 	allowInsecureTCP := getenv("PROMPTLOCK_ALLOW_INSECURE_TCP", "")
-	if err := validateTransportSafety(cfg, allowInsecureTCP); err != nil {
+	allowInsecureNoAuthTCP := getenv("PROMPTLOCK_ALLOW_INSECURE_NOAUTH_TCP", "")
+	if err := validateTransportSafety(cfg, allowInsecureTCP, allowInsecureNoAuthTCP); err != nil {
 		log.Fatal(err)
 	}
 	insecureTCPOverride := cfg.Auth.EnableAuth && cfg.UnixSocket == "" && !cfg.TLS.Enable && !isLocalAddress(cfg.Address) && allowInsecureTCP == "1"
+	insecureNoAuthTCPOverride := !cfg.Auth.EnableAuth && cfg.UnixSocket == "" && !cfg.TLS.Enable && !isLocalAddress(cfg.Address) && allowInsecureNoAuthTCP == "1"
+	insecureDevMode := isInsecureDevMode(cfg)
 	if insecureTCPOverride {
 		log.Printf("WARNING: insecure TCP override enabled (PROMPTLOCK_ALLOW_INSECURE_TCP=1) on %s", cfg.Address)
 	}
+	if insecureNoAuthTCPOverride {
+		log.Printf("WARNING: unauthenticated non-local TCP override enabled (PROMPTLOCK_ALLOW_INSECURE_NOAUTH_TCP=1) on %s", cfg.Address)
+	}
+	if insecureDevMode {
+		log.Printf("WARNING: insecure dev mode enabled (auth disabled + plaintext secret return enabled)")
+	}
 	authStore := auth.NewStore()
+	authStoreKey, err := resolveAuthStoreEncryptionKey(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
 	if cfg.Auth.EnableAuth && strings.TrimSpace(cfg.Auth.StoreFile) != "" {
-		if err := authStore.LoadFromFile(cfg.Auth.StoreFile); err != nil {
+		var err error
+		if len(authStoreKey) > 0 {
+			err = authStore.LoadFromFileEncrypted(cfg.Auth.StoreFile, authStoreKey)
+		} else {
+			err = authStore.LoadFromFile(cfg.Auth.StoreFile)
+		}
+		if err != nil {
 			log.Fatalf("load auth store: %v", err)
 		}
 	}
 	policyEngine := app.NewDefaultControlPlanePolicy(cfg.ExecutionPolicy, cfg.HostOpsPolicy, cfg.NetworkEgressPolicy)
-	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, securityProfile: strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)), authStore: authStore, authStoreFile: cfg.Auth.StoreFile, authLimiter: newAuthRateLimiter(cfg.Auth), policyEngine: policyEngine, unixSocketConfigured: cfg.UnixSocket != "", now: func() time.Time { return time.Now().UTC() }}
+	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, securityProfile: strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)), authStore: authStore, authStorePersister: authStore, authStoreFile: cfg.Auth.StoreFile, authStoreKey: authStoreKey, stateStoreFile: cfg.StateStoreFile, stateStorePersister: store, authLimiter: newAuthRateLimiter(cfg.Auth), policyEngine: policyEngine, unixSocketConfigured: cfg.UnixSocket != "", insecureDevMode: insecureDevMode, now: func() time.Time { return time.Now().UTC() }}
 	if strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)) == "hardened" && strings.EqualFold(strings.TrimSpace(cfg.SecretSource.Type), "in_memory") {
 		log.Printf("WARNING: hardened profile using in_memory secret source (set secret_source.type=env or external backend)")
 		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "startup_inmemory_secret_source_warning", Timestamp: s.now(), ActorType: "system", ActorID: "promptlockd"})
 	}
 	if insecureTCPOverride {
 		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "startup_insecure_tcp_override", Timestamp: s.now(), ActorType: "system", ActorID: "promptlockd", Metadata: map[string]string{"address": cfg.Address}})
+	}
+	if insecureNoAuthTCPOverride {
+		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "startup_insecure_noauth_tcp_override", Timestamp: s.now(), ActorType: "system", ActorID: "promptlockd", Metadata: map[string]string{"address": cfg.Address}})
+	}
+	if insecureDevMode {
+		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "startup_insecure_dev_mode_warning", Timestamp: s.now(), ActorType: "system", ActorID: "promptlockd"})
+	}
+	if cfg.Auth.EnableAuth && strings.TrimSpace(cfg.Auth.StoreFile) != "" && len(authStoreKey) == 0 {
+		log.Printf("WARNING: auth store persistence is not encrypted (set %s for encryption key in non-dev use)", cfg.Auth.StoreEncryptionKeyEnv)
+		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "startup_auth_store_plaintext_warning", Timestamp: s.now(), ActorType: "system", ActorID: "promptlockd", Metadata: map[string]string{"store_file": cfg.Auth.StoreFile}})
 	}
 	if cfg.Auth.EnableAuth {
 		startAuthCleanupLoop(s)
@@ -206,17 +271,24 @@ func getenv(k, d string) string {
 func itoa(n uint64) string { return strconv.FormatUint(n, 10) }
 
 func isLocalAddress(addr string) bool {
-	a := strings.TrimSpace(strings.ToLower(addr))
+	a := strings.TrimSpace(addr)
 	if a == "" {
 		return false
 	}
-	if strings.HasPrefix(a, "127.0.0.1:") || strings.HasPrefix(a, "localhost:") {
+	host := a
+	if h, _, err := net.SplitHostPort(a); err == nil {
+		host = h
+	} else if strings.HasPrefix(a, "[") && strings.HasSuffix(a, "]") {
+		host = strings.TrimSuffix(strings.TrimPrefix(a, "["), "]")
+	}
+	host = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")))
+	if host == "localhost" {
 		return true
 	}
-	if a == "127.0.0.1" || a == "localhost" {
-		return true
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
 	}
-	return false
+	return strings.HasPrefix(host, "127.")
 }
 
 func validateSecretSourceSafety(cfg config.Config) error {
@@ -224,11 +296,19 @@ func validateSecretSourceSafety(cfg config.Config) error {
 	if src == "" {
 		src = "in_memory"
 	}
-	if src != "in_memory" && src != "env" && src != "file" {
-		return fmt.Errorf("unsupported secret_source.type %q (supported: in_memory, env, file)", cfg.SecretSource.Type)
+	if src != "in_memory" && src != "env" && src != "file" && src != "external" {
+		return fmt.Errorf("unsupported secret_source.type %q (supported: in_memory, env, file, external)", cfg.SecretSource.Type)
 	}
 	if src == "file" && strings.TrimSpace(cfg.SecretSource.FilePath) == "" {
 		return fmt.Errorf("secret_source.type=file requires secret_source.file_path")
+	}
+	if src == "external" {
+		if strings.TrimSpace(cfg.SecretSource.ExternalURL) == "" {
+			return fmt.Errorf("secret_source.type=external requires secret_source.external_url")
+		}
+		if strings.TrimSpace(cfg.SecretSource.ExternalAuthTokenEnv) == "" {
+			return fmt.Errorf("secret_source.type=external requires secret_source.external_auth_token_env")
+		}
 	}
 	if strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)) == "hardened" && src == "in_memory" {
 		mode := strings.ToLower(strings.TrimSpace(cfg.SecretSource.InMemoryHardened))
@@ -239,14 +319,21 @@ func validateSecretSourceSafety(cfg config.Config) error {
 	return nil
 }
 
-func validateTransportSafety(cfg config.Config, allowInsecure string) error {
+func validateTransportSafety(cfg config.Config, allowInsecureAuthTCP, allowInsecureNoAuthTCP string) error {
 	if err := validateTLSConfig(cfg); err != nil {
 		return err
 	}
-	if cfg.Auth.EnableAuth && cfg.UnixSocket == "" && !cfg.TLS.Enable && !isLocalAddress(cfg.Address) && allowInsecure != "1" {
+	if cfg.Auth.EnableAuth && cfg.UnixSocket == "" && !cfg.TLS.Enable && !isLocalAddress(cfg.Address) && allowInsecureAuthTCP != "1" {
 		return fmt.Errorf("auth enabled on non-local TCP without unix socket or tls; set unix_socket, enable tls, or PROMPTLOCK_ALLOW_INSECURE_TCP=1")
 	}
+	if !cfg.Auth.EnableAuth && cfg.UnixSocket == "" && !cfg.TLS.Enable && !isLocalAddress(cfg.Address) && allowInsecureNoAuthTCP != "1" {
+		return fmt.Errorf("auth disabled on non-local TCP without unix socket or tls; enable auth, set unix_socket, enable tls, or PROMPTLOCK_ALLOW_INSECURE_NOAUTH_TCP=1")
+	}
 	return nil
+}
+
+func isInsecureDevMode(cfg config.Config) bool {
+	return !cfg.Auth.EnableAuth && cfg.Auth.AllowPlaintextSecretReturn
 }
 
 func validateTLSConfig(cfg config.Config) error {
@@ -277,6 +364,56 @@ func validateSecurityProfile(cfg config.Config, allowInsecureProfile string) err
 		return fmt.Errorf("security_profile=%s requires auth.enable_auth=true", profile)
 	}
 	return nil
+}
+
+func validateDeploymentMode(cfg config.Config, allowDevProfile string) error {
+	profile := strings.TrimSpace(strings.ToLower(cfg.SecurityProfile))
+	if profile == "" {
+		profile = "dev"
+	}
+	if profile == "dev" && allowDevProfile != "1" {
+		return fmt.Errorf("security_profile=dev is disabled by default; set PROMPTLOCK_ALLOW_DEV_PROFILE=1 for local testing or use security_profile=hardened")
+	}
+	if profile != "dev" {
+		if strings.TrimSpace(cfg.StateStoreFile) == "" {
+			return fmt.Errorf("non-dev profile requires state_store_file for durable request/lease state")
+		}
+		if strings.TrimSpace(cfg.Auth.StoreFile) == "" {
+			return fmt.Errorf("non-dev profile requires auth.store_file for durable auth state")
+		}
+		src := strings.ToLower(strings.TrimSpace(cfg.SecretSource.Type))
+		if src == "" {
+			src = "in_memory"
+		}
+		if src == "in_memory" {
+			return fmt.Errorf("non-dev profile requires secret_source.type of env, file, or external (in_memory is not allowed)")
+		}
+	}
+	if profile != "dev" && cfg.Auth.EnableAuth && strings.TrimSpace(cfg.Auth.StoreFile) != "" {
+		keyEnv := strings.TrimSpace(cfg.Auth.StoreEncryptionKeyEnv)
+		if keyEnv == "" {
+			keyEnv = "PROMPTLOCK_AUTH_STORE_KEY"
+		}
+		if strings.TrimSpace(os.Getenv(keyEnv)) == "" {
+			return fmt.Errorf("auth.store_file requires encrypted persistence in %s profile; set %s", profile, keyEnv)
+		}
+	}
+	return nil
+}
+
+func resolveAuthStoreEncryptionKey(cfg config.Config) ([]byte, error) {
+	keyEnv := strings.TrimSpace(cfg.Auth.StoreEncryptionKeyEnv)
+	if keyEnv == "" {
+		keyEnv = "PROMPTLOCK_AUTH_STORE_KEY"
+	}
+	v := strings.TrimSpace(os.Getenv(keyEnv))
+	if v == "" {
+		return nil, nil
+	}
+	if len(v) < 16 {
+		return nil, fmt.Errorf("%s must be at least 16 characters", keyEnv)
+	}
+	return []byte(v), nil
 }
 
 func buildTLSConfig(cfg config.Config) (*tls.Config, error) {

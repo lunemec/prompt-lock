@@ -21,3 +21,7 @@ Plaintext secret-return APIs are high risk in adversarial/prompt-injection scena
 - Reduces direct secret value exposure to caller process.
 - Improves policy and audit control over secret-dependent execution.
 - Requires careful command policy tuning to avoid overblocking needed workflows.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

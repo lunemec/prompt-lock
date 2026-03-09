@@ -2,7 +2,7 @@
 
 ## 1) Start broker
 ```bash
-python3 scripts/mock-broker.py
+go run ./cmd/promptlock-mock-broker
 ```
 
 ## 2) Agent requests lease

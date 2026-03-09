@@ -18,3 +18,7 @@ MCP support was requested after top security risks were addressed with broker-ex
 ## Security implications
 - Maintains non-disclosure direction by avoiding raw secret-return MCP tools.
 - Risk remains if executed commands intentionally exfiltrate data; mitigated by broker execution policy and audits.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

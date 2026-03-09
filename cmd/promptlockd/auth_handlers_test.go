@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,9 +20,16 @@ type nopAudit struct{}
 
 func (nopAudit) Write(event ports.AuditEvent) error { return nil }
 
+type failingAuthStorePersister struct{}
+
+func (failingAuthStorePersister) SaveToFile(string) error { return errors.New("disk full") }
+func (failingAuthStorePersister) SaveToFileEncrypted(string, []byte) error {
+	return errors.New("disk full")
+}
+
 func testAuthServer() *server {
 	return &server{
-		svc: app.Service{Audit: nopAudit{}, Now: func() time.Time { return time.Now().UTC() }},
+		svc:         app.Service{Audit: nopAudit{}, Now: func() time.Time { return time.Now().UTC() }},
 		authEnabled: true,
 		authCfg: config.AuthConfig{
 			EnableAuth:               true,
@@ -65,5 +74,23 @@ func TestPairCompleteRejectsContainerMismatch(t *testing.T) {
 	s.handleAuthPairComplete(pairW, pairReq)
 	if pairW.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 on container mismatch, got %d body=%s", pairW.Code, pairW.Body.String())
+	}
+}
+
+func TestAuthBootstrapCreateFailsClosedOnPersistFailure(t *testing.T) {
+	s := testAuthServer()
+	s.authStoreFile = "/tmp/promptlock-auth-store.json"
+	s.authStorePersister = failingAuthStorePersister{}
+
+	createBody := bytes.NewBufferString(`{"agent_id":"a1","container_id":"c1"}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/auth/bootstrap/create", createBody)
+	createReq.Header.Set("Authorization", "Bearer op-token")
+	createW := httptest.NewRecorder()
+	s.handleAuthBootstrapCreate(createW, createReq)
+	if createW.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 on persist failure, got %d body=%s", createW.Code, createW.Body.String())
+	}
+	if !strings.Contains(createW.Body.String(), "durability persistence unavailable") {
+		t.Fatalf("expected durability error message, got %q", createW.Body.String())
 	}
 }

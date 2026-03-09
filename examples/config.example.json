@@ -3,6 +3,7 @@
   "address": "127.0.0.1:8765",
   "unix_socket": "/tmp/promptlock.sock",
   "audit_path": "/var/log/promptlock/audit.jsonl",
+  "state_store_file": "/var/lib/promptlock/state-store.json",
   "policy": {
     "default_ttl_minutes": 5,
     "min_ttl_minutes": 1,
@@ -20,10 +21,11 @@
     "cleanup_interval_seconds": 60,
     "rate_limit_window_seconds": 60,
     "rate_limit_max_attempts": 20,
-    "store_file": "/var/lib/promptlock/auth-store.json"
+    "store_file": "/var/lib/promptlock/auth-store.json",
+    "store_encryption_key_env": "PROMPTLOCK_AUTH_STORE_KEY"
   },
   "execution_policy": {
-    "allowlist_prefixes": ["bash", "sh", "npm", "node", "go", "python", "pytest", "make", "git"],
+    "allowlist_prefixes": ["npm", "node", "go", "python", "pytest", "make", "git"],
     "denylist_substrings": ["printenv", "/proc/", "environ"],
     "output_security_mode": "redacted",
     "max_output_bytes": 65536,
@@ -56,15 +58,15 @@
     "require_client_cert": false
   },
   "secret_source": {
-    "type": "in_memory",
+    "type": "env",
     "env_prefix": "PROMPTLOCK_SECRET_",
+    "external_url": "https://secrets.example.internal",
+    "external_auth_token_env": "PROMPTLOCK_EXTERNAL_SECRET_TOKEN",
+    "external_timeout_sec": 10,
     "file_path": "/etc/promptlock/secrets.json",
-    "in_memory_hardened": "warn"
+    "in_memory_hardened": "fail"
   },
-  "secrets": [
-    { "name": "github_token", "value": "REPLACE_ME" },
-    { "name": "npm_token", "value": "REPLACE_ME" }
-  ],
+  "secrets": [],
   "intents": {
     "run_tests": ["github_token"],
     "publish_npm": ["npm_token"],

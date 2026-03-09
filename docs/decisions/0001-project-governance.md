@@ -23,3 +23,7 @@ We require:
 ## Security implications
 - Reduces risk of undocumented security regressions.
 - Improves forensic capability and governance under incidents.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

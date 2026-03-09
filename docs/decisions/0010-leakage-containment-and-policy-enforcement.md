@@ -22,7 +22,15 @@ Use layered controls:
 6. **Break-glass flow**
    - explicit, elevated approval for high-risk secret export operations.
 
+## Consequences
+- Security posture depends on layering multiple controls rather than assuming any single enforcement point is sufficient.
+- Operators must treat runtime hardening and audit operations as part of the product, not as optional add-ons.
+
 ## Security implications
 - Reduces practical exfiltration risk and improves incident forensics.
 - Does not claim absolute prevention once plaintext is available in-process.
 - Security posture depends on combining PromptLock controls with container/network hardening.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

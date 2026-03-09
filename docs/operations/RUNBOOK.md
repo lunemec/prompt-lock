@@ -1,16 +1,20 @@
 # RUNBOOK
 
 ## Local dev
-- Start mock broker: `python3 scripts/mock-broker.py`
+- Start mock broker: `go run ./cmd/promptlock-mock-broker`
+- Start real broker in dev profile (explicit opt-in): `PROMPTLOCK_ALLOW_DEV_PROFILE=1 go run ./cmd/promptlockd`
 - Request lease: `go run ./cmd/promptlock exec ...`
 - Approve lease interactively: `go run ./cmd/promptlock approve-queue`
 - Auth lifecycle helpers: `go run ./cmd/promptlock auth <bootstrap|pair|mint> ...`
-- Full real host+container flow: `docs/operations/REAL-E2E-HOST-CONTAINER.md`
+- CLI/endpoint auth contract matrix: `docs/operations/CLI-ENDPOINT-CONTRACT-MATRIX.md`
+- Full host+container lab walkthrough: `docs/operations/REAL-E2E-HOST-CONTAINER.md`
+- Hardened TCP mTLS baseline: `docs/operations/MTLS-HARDENED.md`
 
 ## Security operations
 - Keep audit trail on host storage (not container-writable paths).
 - Rotate demo secrets before any non-local use.
 - Treat this repository as prototype until production hardening is completed.
+- For non-dev profiles, ensure `state_store_file`, `auth.store_file`, and auth-store encryption key env are configured before startup.
 
 ### Audit integrity verification
 - Verify full hash-chain:
@@ -30,7 +34,7 @@
 
 ## First 30 minutes checklist (hardened deployment)
 1. Validate config parse + profile:
-   - `go run ./cmd/promptlock-readiness-check --file docs/plans/PRODUCTION-READINESS-STATUS.json --require-p0`
+   - `go run ./cmd/promptlock-readiness-check --file docs/plans/status/PRODUCTION-READINESS-STATUS.json --require-p0`
 2. Run baseline CI gate:
    - `make validate-final`
 3. Run hardened smoke suite:
@@ -50,6 +54,11 @@
 - **Secret backend failures**
   - Validate `secret_source.type` and provider-specific settings (`env_prefix` / `file_path`).
   - Expect deterministic client error: `secret backend unavailable`.
+- **Durability gate closed (`503` on auth/lease mutations)**
+  - Inspect audit for `durability_persist_failed` / `durability_gate_closed` and check host disk/permissions for `state_store_file` + `auth.store_file`.
+  - Fix storage issue, then restart broker to reopen mutating flows.
+- **Endpoint/auth confusion during CLI use**
+  - Use `docs/operations/CLI-ENDPOINT-CONTRACT-MATRIX.md` to confirm endpoint and token type for each command.
 - **Rollback quick path**
   - Revert to last known-good config and restart broker.
   - Re-run `make hardened-smoke` + audit verify before reopening traffic.

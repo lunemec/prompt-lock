@@ -1,5 +1,7 @@
 # Red-Team E2E Abuse Suite (Initial Scaffold)
 
+This is a reference note, not a canonical task-status file. Use `docs/plans/BACKLOG.md` for current status.
+
 ## Goal
 Provide an executable adversarial regression gate for high-risk abuse classes:
 - auth bypass,
@@ -10,7 +12,7 @@ Provide an executable adversarial regression gate for high-risk abuse classes:
 ## Initial implementation
 This implementation now has two layers:
 1. In-process grouped security test runs via `scripts/run_redteam_e2e.sh`
-2. Live broker black-box harness via `scripts/run_redteam_live.py` (machine-readable JSON report)
+2. Live broker black-box harness via `cmd/promptlock-redteam-live` (machine-readable JSON report)
 
 ## Abuse classes mapped to tests
 

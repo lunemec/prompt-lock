@@ -1,6 +1,7 @@
 # Integration discovery plan
 
-- Status: in-progress
+This is a reference note, not a canonical task-status file. Use `docs/plans/BACKLOG.md` for current status.
+
 - Goal: confirm practical auth injection paths for Codex + additional CLIs.
 
 ## Work items

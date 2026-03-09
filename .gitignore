@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+.ralph/
 
 .syncthing.*
 **/.syncthing.*
@@ -9,3 +10,5 @@ __pycache__/
 **/*.tmp
 .DS_Store
 reports/*.json
+dist/
+.goreleaser-dist/

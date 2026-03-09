@@ -25,16 +25,18 @@ See `docs/CONTRACT.md`.
 - `AGENTS.md` — project map and non-negotiable engineering/security rules
 - `CHANGELOG.md` — Keep-a-Changelog history (`[Unreleased]` required)
 - `Makefile` — exposed commands for developers/users
+- `docs/README.md` — documentation map and maintenance rules
 - `docs/CONTRACT.md` — API and security contract
 - `docs/NOTE-project-style-adoption.md` — reusable agent/docs style for other projects
 - `docs/architecture/` — architecture source of truth (hexagonal required)
   - includes secure execution flow and threat-model notes (`SECURE-EXEC-FLOW.md`)
 - `docs/decisions/` — ADRs for architecture and requirement changes
+  - `docs/decisions/INDEX.md` is the ADR entrypoint
 - `docs/standards/` — engineering standards (Red-Green-Blue TDD, security reporting)
-- `docs/plans/` — active execution plan and gates
+- `docs/plans/` — `ACTIVE-PLAN.md` handoff, `BACKLOG.md` open work, plus typed subdirectories for initiatives, checklists, notes, status files, and archives
 - `docs/operations/` — runbooks, Dockerization, config, wrapper execution notes, MCP adapter notes, key rotation/revocation, and release guide
 - `docs/context/` — product context and trust boundaries
-- `scripts/mock-broker.py` — minimal local broker (demo)
+- `cmd/promptlock-mock-broker` — minimal local broker (demo)
 - `scripts/secretctl.sh` — agent-facing CLI wrapper
 - `scripts/human-approve.sh` — human approval helper
 - `skills/secret-request/SKILL.md` — skill instructions for agents
@@ -67,16 +69,16 @@ Run docker-compose real-path smoke test:
 make e2e-compose
 ```
 
-Start broker (prototype Python mock):
+Start broker (prototype Go mock):
 
 ```bash
-python3 scripts/mock-broker.py
+go run ./cmd/promptlock-mock-broker
 ```
 
 Start broker (Go v1 skeleton):
 
 ```bash
-go run ./cmd/promptlockd
+PROMPTLOCK_ALLOW_DEV_PROFILE=1 go run ./cmd/promptlockd
 ```
 
 Start broker with host config:
@@ -120,7 +122,7 @@ go run ./cmd/promptlock auth pair --token <bootstrap_token> --container <contain
 go run ./cmd/promptlock auth mint --grant <grant_id>
 ```
 
-Canonical real host+container workflow:
+CLI-first host+container walkthrough:
 
 ```bash
 cat docs/operations/REAL-E2E-HOST-CONTAINER.md
@@ -132,7 +134,9 @@ This repository is primarily **agent-generated code and documentation**, followi
 ## Important
 This is a draft prototype for flow design and integration testing, not a production-grade secret manager.
 
-Current implementation uses in-memory request/lease/auth/session stores by default. For production, use hardened deployment controls and external durable backends for secrets/session authority.
+Current implementation uses in-memory request/lease/auth/session stores by default unless configured with durable host-backed state files. For production, use hardened deployment controls, encrypted auth persistence (`auth.store_encryption_key_env`), durable request/lease state persistence (`state_store_file`), and external secret backend adapters.
+
+Startup guardrails now enforce fail-closed production posture: non-dev profiles require durable state files and non-`in_memory` secret source; dev profile startup requires explicit opt-in (`PROMPTLOCK_ALLOW_DEV_PROFILE=1`).
 
 Production hardening should include mTLS, unix sockets, policy engine, encrypted at-rest storage, tamper-evident audit logs, and external secret backend integration (Vault/1Password/etc.).
 

@@ -1,6 +1,6 @@
 # MCP integration tests roadmap
 
-- Status: in-progress
+This is a reference note, not a canonical task-status file. Use `docs/plans/BACKLOG.md` for current status.
 
 ## Goal
 Move MCP adapter from scaffold-level confidence to integration-level confidence with real stdio roundtrips.

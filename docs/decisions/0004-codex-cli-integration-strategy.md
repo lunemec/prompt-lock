@@ -24,3 +24,7 @@ PromptLock should be testable with Codex workflows while minimizing maintenance 
 ## Security implications
 - Wrapper-based approach reduces accidental broad trust expansion.
 - Lease renewal and access events remain visible in PromptLock audit logs.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

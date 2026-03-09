@@ -1,11 +1,10 @@
-.PHONY: help lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke mcp-conformance-report production-readiness-gate leak-guard ci-redteam-full arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose release-package
+.PHONY: help lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate leak-guard ci-redteam-full arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose release-package
 
 help:
-	@echo "Targets: lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke mcp-conformance-report production-readiness-gate leak-guard ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose release-package"
+	@echo "Targets: lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate leak-guard ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose release-package"
 
 lint:
 	bash -n scripts/secretctl.sh scripts/human-approve.sh
-	python3 -m py_compile scripts/mock-broker.py
 
 test:
 	go test ./...
@@ -15,32 +14,35 @@ fuzz:
 	go test ./cmd/promptlockd -run=^$$ -fuzz=FuzzValidateExecuteCommand -fuzztime=5s
 
 security:
-	python3 scripts/validate_security_basics.py
+	go run ./cmd/promptlock-validate-security
 
 security-redteam:
 	bash scripts/run_redteam_e2e.sh
 
 security-redteam-live:
 	mkdir -p reports
-	python3 scripts/run_redteam_live.py reports/redteam-live.json dev
+	go run ./cmd/promptlock-redteam-live reports/redteam-live.json dev
 
 security-redteam-live-hardened:
 	mkdir -p reports
-	python3 scripts/run_redteam_live.py reports/redteam-live-hardened.json hardened
+	go run ./cmd/promptlock-redteam-live reports/redteam-live-hardened.json hardened
 
 hardened-smoke:
 	bash scripts/run_hardened_smoke.sh
+
+real-e2e-smoke:
+	bash scripts/run_real_e2e_smoke.sh
 
 mcp-conformance-report:
 	bash scripts/mcp_conformance_report.sh
 
 production-readiness-gate:
-	go run ./cmd/promptlock-readiness-check --file docs/plans/PRODUCTION-READINESS-STATUS.json --require-p0
+	go run ./cmd/promptlock-readiness-check --file docs/plans/status/PRODUCTION-READINESS-STATUS.json --require-p0
 
 leak-guard:
 	bash scripts/validate_no_secret_leaks.sh
 
-ci-redteam-full: validate-final security-redteam-live security-redteam-live-hardened mcp-conformance-report leak-guard
+ci-redteam-full: validate-final security-redteam-live security-redteam-live-hardened mcp-conformance-report real-e2e-smoke leak-guard
 	@echo "Full red-team CI profile passed."
 
 arch-conformance:
@@ -48,6 +50,7 @@ arch-conformance:
 
 docs:
 	@test -f AGENTS.md
+	@test -f docs/README.md
 	@test -f docs/CONTRACT.md
 	@test -f docs/architecture/ARCHITECTURE.md
 	@test -f docs/architecture/CONFORMANCE.md
@@ -57,15 +60,22 @@ docs:
 	@test -f docs/operations/REAL-E2E-HOST-CONTAINER.md
 	@test -f docs/compatibility/MCP-CONFORMANCE-MATRIX.md
 	@test -f docs/decisions/README.md
+	@test -f docs/decisions/INDEX.md
+	@test -f docs/plans/README.md
+	@test -f docs/plans/ACTIVE-PLAN.md
+	@test -f docs/plans/BACKLOG.md
+	@test -f docs/plans/status/PRODUCTION-READINESS-STATUS.json
+	@test -f docs/plans/checklists/BETA-READINESS.md
 	@test -f CHANGELOG.md
 
 validate-changelog:
-	python3 scripts/validate_changelog.py
+	go run ./cmd/promptlock-validate-changelog
 
 hygiene:
 	bash scripts/validate_repo_hygiene.sh
+	bash scripts/validate_hygiene_portability.sh
 
-validate-final: lint security security-redteam arch-conformance docs validate-changelog hygiene test
+validate-final: lint security security-redteam arch-conformance docs validate-changelog hygiene production-readiness-gate test
 	@echo "Final validation gate passed."
 
 ci: validate-final

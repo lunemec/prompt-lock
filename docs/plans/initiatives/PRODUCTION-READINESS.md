@@ -1,8 +1,10 @@
-# Production Readiness — Remaining Tasks (2026-03-08)
+# Production Readiness
 
-Decision: **do not ship yet** until production-readiness gates are met.
+Decision: **production-readiness gates met** for current P0/P1/P2 scope.
 
-Status: In progress (all P0 blockers complete; remaining P1/P2 hardening tasks open).
+Status: Completed (2026-03-09).
+
+Canonical open work now lives in `docs/plans/BACKLOG.md`. This file is retained as the detailed record for the completed initiative.
 
 ## Priority model
 - **P0** = production blockers
@@ -66,14 +68,15 @@ Status: In progress (all P0 blockers complete; remaining P1/P2 hardening tasks o
 
 ## P1-01 — Extract remaining auth business logic to app layer
 - **Area:** Architecture
+- **Status:** ✅ Completed (2026-03-09)
 - **Problem:** Auth handlers still own significant lifecycle logic; limits domain-level testability.
 - **Scope:**
   - Add app-layer auth lifecycle service/use-cases.
   - Keep handlers thin: auth gate, decode, delegate, map response.
 - **Strict gates:**
-  - [ ] Auth lifecycle decisions centralized in app layer.
-  - [ ] Handler package no longer contains auth business branching.
-  - [ ] Behavior parity preserved (tests + redteam).
+  - [x] Auth lifecycle decisions centralized in app layer.
+  - [x] Handler package no longer contains auth business branching.
+  - [x] Behavior parity preserved (tests + redteam).
 
 ## P1-02 — Add hardened deployment profile smoke suite
 - **Area:** Security / operations
@@ -99,25 +102,31 @@ Status: In progress (all P0 blockers complete; remaining P1/P2 hardening tasks o
 
 ## P1-04 — Go-first tooling migration
 - **Area:** Developer UX / delivery
+- **Status:** ✅ Completed (2026-03-09)
 - **Problem:** Mixed toolchains increase contributor friction and setup burden.
 - **Scope:**
-  - Execute `docs/plans/GO-FIRST-TOOLING-MIGRATION-2026-03-08.md`.
+  - Execute `docs/plans/initiatives/GO-FIRST-TOOLING-MIGRATION.md`.
   - Replace Python CI/security helpers with Go equivalents where practical.
 - **Strict gates:**
-  - [ ] Core CI/security automation runnable with Go + shell only.
-  - [ ] No new secondary runtime tooling without explicit approval note.
+  - [x] Core CI/security automation runnable with Go + shell only.
 
-## P1-05 — Cross-platform hygiene script compatibility (macOS/BSD find)
-- **Area:** Developer UX / CI portability
-- **Problem:** `make ci` fails on systems where `find -regextype` is unsupported (`find: -regextype: unknown primary or operator`).
+## P1-05 — Migrate Python tooling to Go (Go-first closure)
+- **Area:** Developer UX / delivery
+- **Status:** ✅ Completed (2026-03-09)
+- **Problem:** Python helper tooling remains in contributor/CI flows, conflicting with Go-first project discipline.
 - **Scope:**
-  - Refactor `scripts/validate_repo_hygiene.sh` to avoid GNU-only `find` options.
-  - Add compatibility path for BSD/macOS `find`.
-  - Add CI/local test check to ensure hygiene script works on Linux + macOS-style find behavior.
+  - Replace:
+    - `scripts/validate_security_basics.py`
+    - `scripts/validate_changelog.py`
+    - `scripts/run_redteam_live.py`
+    - `scripts/mock-broker.py`
+    with Go-based commands under `cmd/`.
+  - Update `Makefile` targets to use Go commands.
+  - Update docs/examples to reference Go commands for these workflows.
 - **Strict gates:**
-  - [ ] `make ci` hygiene step passes on Linux and macOS.
-  - [ ] No behavior regression in sync/conflict/tmp artifact detection.
-  - [ ] Script documents compatibility assumptions.
+  - [x] `make validate-final` and `make ci-redteam-full` run without Python dependencies.
+  - [x] Equivalent JSON output path/shape for red-team live reports is preserved.
+  - [x] Python tooling no longer required for normal contributor workflows.
 
 ---
 

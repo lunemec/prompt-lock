@@ -27,3 +27,7 @@ Prompt injection and autonomous agents can exfiltrate data via outbound network 
 ## Security implications
 - Reduces blast radius under compromised or malicious prompts.
 - Must be paired with execution policy controls and output redaction to be effective.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

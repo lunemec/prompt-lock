@@ -7,8 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- External HTTP-backed secret source adapter (`secret_source.type=external`) with bearer-token env wiring and timeout controls.
+- Durable request/lease state persistence support via `state_store_file`.
+- Encrypted auth-store persistence support (`auth.store_encryption_key_env`, default `PROMPTLOCK_AUTH_STORE_KEY`) and ADR-0018 for production deployment guardrails.
+- Canonical CLI/endpoint/token contract matrix at `docs/operations/CLI-ENDPOINT-CONTRACT-MATRIX.md` with operator remediation mappings for common auth/endpoint failures.
+- Hygiene portability regression guard script (`scripts/validate_hygiene_portability.sh`) wired into `make hygiene`.
+- `docs/README.md`, `docs/plans/README.md`, and `docs/decisions/INDEX.md` as canonical entrypoints for documentation, planning state, and ADR navigation.
+- Go tooling replacements for previous Python helpers:
+  - `cmd/promptlock-validate-security`
+  - `cmd/promptlock-validate-changelog`
+  - `cmd/promptlock-redteam-live`
+  - `cmd/promptlock-mock-broker`
+- ADR-0017 documenting unauthenticated non-local TCP startup guard and dev-mode risk signaling decisions.
 - Configurable secret source settings (`secret_source`) with `env` and `file` adapters for host-provided/durable secret material.
-- Live black-box red-team harness (`scripts/run_redteam_live.py`) with machine-readable report output (`reports/redteam-live.json`).
+- Live black-box red-team harness with machine-readable report output (`reports/redteam-live.json`).
 - Optional durable auth persistence (`auth.store_file`) for bootstrap/grant/session state with reload support.
 - Native TLS/mTLS transport config scaffolding (`tls.enable`, cert/key, optional client CA and client-cert requirement) with startup validation and tests.
 - App-layer control-plane policy service (`internal/app.ControlPlanePolicy`) for execute, network-egress, and host-docker policy evaluation.
@@ -78,6 +90,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Wrapper execution docs and intent examples in config.
 
 ### Changed
+- `security_profile=dev` now requires explicit startup opt-in (`PROMPTLOCK_ALLOW_DEV_PROFILE=1`) to reduce accidental insecure deployment.
+- Non-dev startup now fails fast unless `state_store_file` + `auth.store_file` are configured and `secret_source.type` is `env`, `file`, or `external`.
+- Auth-store atomic persistence now writes through secure unique temp files instead of predictable `<store>.tmp`, preventing symlink clobbering and concurrent tmp-file collision races.
+- Persistence failures now fail closed: auth-store/request-lease write failures close a durability gate, emit explicit audit events, and force mutating auth/lease endpoints to return `503 Service Unavailable`.
+- Hardened real-e2e smoke now sets auth-store encryption key env so non-dev encrypted auth persistence guards remain active in CI.
+- Real E2E smoke harness now uses hardened-compatible transport defaults (`BROKER_BIND_HOST=0.0.0.0`), emits actionable startup diagnostics, and asserts deny-path audit evidence in its JSON report.
+- Real E2E smoke harness now derives broker probe/CLI URL from dedicated smoke variables (`PROMPTLOCK_SMOKE_BROKER_URL` / `BROKER_CONNECT_HOST` / `BROKER_PORT`) so unrelated ambient `BROKER_URL` shell settings cannot break readiness checks.
+- Real E2E smoke harness now chooses a random high broker port when `BROKER_PORT` is unset, reducing `address already in use` failures from ambient local services.
+- Real E2E smoke harness approval/deny request selection now polls for task-matched `req_*` IDs to avoid queue-timing flake paths.
+- `make ci-redteam-full` now includes `real-e2e-smoke`.
+- Local-address detection for transport safety now recognizes loopback IPv4/IPv6 variants (for example `127.0.0.2`, `[::1]`) so local binds are not misclassified as non-local.
+- CLI HTTP error handling now preserves broker response body text alongside status to improve remediation fidelity (`request_id required`, `secret backend unavailable`, etc.).
+- MCP JSON-RPC error envelopes now include `id: null` for parse/batch errors, with expanded target-client conformance tests (string IDs and null params).
+- Documentation structure now requires `docs/plans/ACTIVE-PLAN.md` as the canonical handoff, `docs/plans/BACKLOG.md` as the canonical open-task list, typed `docs/plans/` subdirectories for active material, and archived date-stamped plan history under `docs/plans/archive/`.
+- Operational docs now distinguish the CLI-first host-plus-container lab walkthrough from the hardened mTLS production baseline, modernize the config example around `secret_source`, and mark planning notes as non-canonical status documents.
+- ADR metadata is now normalized around explicit consequences, security implications, lowercase status values, and supersession fields.
+- Auth lifecycle business logic moved into `internal/app.AuthLifecycle`, with auth handlers reduced to transport/auth-gate/decode/delegate/response mapping.
+- `Makefile` security/changelog/live-redteam targets now run Go commands instead of Python scripts.
+- Release packaging now builds binaries through a pinned GoReleaser configuration (`.goreleaser.yaml`) while preserving the existing `make release-package VERSION=...` workflow.
+- Python helper scripts (`mock-broker.py`, `validate_security_basics.py`, `validate_changelog.py`, `run_redteam_live.py`) were removed from active workflows in favor of Go command equivalents.
+- Transport safety now fails fast for unauthenticated non-local TCP without TLS/UDS unless explicit override (`PROMPTLOCK_ALLOW_INSECURE_NOAUTH_TCP=1`) is set, with warning + audit signal.
+- Plaintext secret-return deny policy now applies regardless of auth-enabled state; `/v1/leases/access` is blocked whenever `allow_plaintext_secret_return=false`.
+- `/v1/meta/capabilities` now includes `insecure_dev_mode` to surface high-risk dev posture (`auth=false` + plaintext return enabled).
 - Engineering standards now require default single-stack discipline (Go-first tooling) and explicit approval/justification before adding secondary runtime dependencies.
 - Execute and host-docker handlers now delegate policy decisions to app-layer policy services, reducing transport-layer policy duplication.
 - Security and architecture review task plans are now fully remediated and marked complete.

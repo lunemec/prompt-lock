@@ -13,6 +13,7 @@ type Config struct {
 	Address             string              `json:"address"`
 	UnixSocket          string              `json:"unix_socket"`
 	AuditPath           string              `json:"audit_path"`
+	StateStoreFile      string              `json:"state_store_file"`
 	Policy              PolicyConfig        `json:"policy"`
 	Auth                AuthConfig          `json:"auth"`
 	ExecutionPolicy     ExecutionPolicy     `json:"execution_policy"`
@@ -94,11 +95,20 @@ func (c *Config) normalize() {
 	if c.SecretSource.Type == "" {
 		c.SecretSource.Type = "in_memory"
 	}
+	if strings.TrimSpace(c.Auth.StoreEncryptionKeyEnv) == "" {
+		c.Auth.StoreEncryptionKeyEnv = "PROMPTLOCK_AUTH_STORE_KEY"
+	}
 	if c.SecretSource.EnvPrefix == "" {
 		c.SecretSource.EnvPrefix = "PROMPTLOCK_SECRET_"
 	}
 	if c.SecretSource.Type == "file" && c.SecretSource.FilePath == "" {
 		c.SecretSource.FilePath = "/etc/promptlock/secrets.json"
+	}
+	if strings.TrimSpace(c.SecretSource.ExternalAuthTokenEnv) == "" {
+		c.SecretSource.ExternalAuthTokenEnv = "PROMPTLOCK_EXTERNAL_SECRET_TOKEN"
+	}
+	if c.SecretSource.ExternalTimeoutSec <= 0 {
+		c.SecretSource.ExternalTimeoutSec = 10
 	}
 	switch c.SecretSource.InMemoryHardened {
 	case "", "warn", "fail":

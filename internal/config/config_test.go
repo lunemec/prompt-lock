@@ -38,6 +38,7 @@ func TestLoadFromFile(t *testing.T) {
 func TestSecretSourceDefaultsNormalize(t *testing.T) {
 	cfg := Default()
 	cfg.SecretSource = SecretSourceConfig{}
+	cfg.Auth.StoreEncryptionKeyEnv = ""
 	cfg.normalize()
 	if cfg.SecretSource.Type != "in_memory" {
 		t.Fatalf("expected in_memory default, got %q", cfg.SecretSource.Type)
@@ -47,5 +48,14 @@ func TestSecretSourceDefaultsNormalize(t *testing.T) {
 	}
 	if cfg.SecretSource.InMemoryHardened != "warn" {
 		t.Fatalf("expected warn default, got %q", cfg.SecretSource.InMemoryHardened)
+	}
+	if cfg.SecretSource.ExternalAuthTokenEnv != "PROMPTLOCK_EXTERNAL_SECRET_TOKEN" {
+		t.Fatalf("expected default external token env, got %q", cfg.SecretSource.ExternalAuthTokenEnv)
+	}
+	if cfg.SecretSource.ExternalTimeoutSec <= 0 {
+		t.Fatalf("expected positive external timeout default")
+	}
+	if cfg.Auth.StoreEncryptionKeyEnv != "PROMPTLOCK_AUTH_STORE_KEY" {
+		t.Fatalf("expected default auth store encryption key env, got %q", cfg.Auth.StoreEncryptionKeyEnv)
 	}
 }

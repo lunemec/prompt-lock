@@ -1,7 +1,12 @@
 package memory
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/lunemec/promptlock/internal/core/domain"
@@ -12,6 +17,11 @@ type Store struct {
 	requests map[string]domain.LeaseRequest
 	leases   map[string]domain.Lease
 	secrets  map[string]string
+}
+
+type persistedState struct {
+	Requests map[string]domain.LeaseRequest `json:"requests"`
+	Leases   map[string]domain.Lease        `json:"leases"`
 }
 
 func NewStore() *Store {
@@ -100,4 +110,116 @@ func (s *Store) SetSecret(name, value string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.secrets[name] = value
+}
+
+func (s *Store) SaveStateToFile(path string) error {
+	s.mu.RLock()
+	state := persistedState{
+		Requests: make(map[string]domain.LeaseRequest, len(s.requests)),
+		Leases:   make(map[string]domain.Lease, len(s.leases)),
+	}
+	for k, v := range s.requests {
+		state.Requests[k] = cloneLeaseRequest(v)
+	}
+	for k, v := range s.leases {
+		state.Leases[k] = cloneLease(v)
+	}
+	s.mu.RUnlock()
+
+	b, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+
+	tmpFile, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmpFile.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if err := tmpFile.Chmod(0o600); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if _, err := tmpFile.Write(b); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
+}
+
+func (s *Store) LoadStateFromFile(path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if len(bytes.TrimSpace(b)) == 0 {
+		return nil
+	}
+
+	var state persistedState
+	if err := json.Unmarshal(b, &state); err != nil {
+		return fmt.Errorf("parse memory store: %w", err)
+	}
+
+	requests := make(map[string]domain.LeaseRequest)
+	for k, v := range state.Requests {
+		requests[k] = cloneLeaseRequest(v)
+	}
+	leases := make(map[string]domain.Lease)
+	for k, v := range state.Leases {
+		leases[k] = cloneLease(v)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requests = requests
+	s.leases = leases
+	if s.secrets == nil {
+		s.secrets = map[string]string{}
+	}
+	return nil
+}
+
+func cloneLeaseRequest(req domain.LeaseRequest) domain.LeaseRequest {
+	if req.Secrets == nil {
+		return req
+	}
+	cp := req
+	cp.Secrets = append([]string(nil), req.Secrets...)
+	return cp
+}
+
+func cloneLease(lease domain.Lease) domain.Lease {
+	if lease.Secrets == nil {
+		return lease
+	}
+	cp := lease
+	cp.Secrets = append([]string(nil), lease.Secrets...)
+	return cp
 }

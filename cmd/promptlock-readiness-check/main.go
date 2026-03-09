@@ -20,7 +20,7 @@ type statusFile struct {
 }
 
 func main() {
-	file := flag.String("file", "docs/plans/PRODUCTION-READINESS-STATUS.json", "path to readiness status json")
+	file := flag.String("file", "docs/plans/status/PRODUCTION-READINESS-STATUS.json", "path to readiness status json")
 	requireP0 := flag.Bool("require-p0", false, "fail when any P0 task is not done")
 	flag.Parse()
 

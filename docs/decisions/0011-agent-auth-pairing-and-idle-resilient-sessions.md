@@ -32,7 +32,11 @@ This enables day-scale container runtimes while maintaining bounded credentials.
 - Host can revoke grant/session immediately.
 - All pair/mint/refresh/revoke events are audited host-side.
 
-## Security risks and mitigations
+## Consequences
+- Supports long-running containers without forcing repeated human pairing for every idle timeout.
+- Adds grant lifecycle complexity that must be visible in docs, tests, and audit records.
+
+## Security implications
 ### Risk: Stolen pairing grant inside compromised container
 - Mitigation: grant scoping, idle timeout, absolute expiry, revocation, egress controls.
 
@@ -44,3 +48,7 @@ This enables day-scale container runtimes while maintaining bounded credentials.
 
 ### Risk: Long-lived container accumulation
 - Mitigation: enforce max grant lifetime, periodic re-pair policy, stale grant sweeper.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

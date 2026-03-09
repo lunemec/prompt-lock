@@ -1,6 +1,6 @@
 # MCP protocol conformance notes (initial)
 
-- Status: in-progress
+This is a reference note, not a canonical task-status file. Use `docs/plans/BACKLOG.md` for current status.
 
 ## Current implementation
 - stdio JSON-RPC style request/response loop

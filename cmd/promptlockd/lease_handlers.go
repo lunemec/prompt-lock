@@ -40,6 +40,9 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !s.requireDurabilityReady(w) {
+		return
+	}
 	var req leaseReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeMappedError(w, ErrBadRequest, err.Error())
@@ -51,6 +54,10 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	created, err := s.svc.RequestLease(req.AgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint)
 	if err != nil {
 		writeMappedError(w, ErrBadRequest, err.Error())
+		return
+	}
+	if err := s.persistRequestLeaseState(); err != nil {
+		writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
 		return
 	}
 	writeJSON(w, map[string]any{"request_id": created.ID, "status": created.Status})
@@ -66,6 +73,9 @@ func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !s.requireDurabilityReady(w) {
+		return
+	}
 	requestID := r.URL.Query().Get("request_id")
 	if requestID == "" {
 		writeMappedError(w, ErrBadRequest, "request_id required")
@@ -76,6 +86,10 @@ func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
 	lease, err := s.svc.ApproveRequest(requestID, req.TTLMinutes)
 	if err != nil {
 		writeMappedError(w, ErrBadRequest, err.Error())
+		return
+	}
+	if err := s.persistRequestLeaseState(); err != nil {
+		writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
 		return
 	}
 	at, aid := actorFromRequest(r)
@@ -93,7 +107,7 @@ func (s *server) handleAccess(w http.ResponseWriter, r *http.Request) {
 		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
-	if s.authEnabled && !s.authCfg.AllowPlaintextSecretReturn {
+	if !s.authCfg.AllowPlaintextSecretReturn {
 		at, aid := actorFromRequest(r)
 		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "plaintext_secret_access_blocked", Timestamp: s.now(), ActorType: at, ActorID: aid})
 		writeMappedError(w, ErrForbidden, "plaintext secret return disabled by policy")

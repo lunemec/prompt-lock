@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +38,29 @@ func TestAccessBlockedWhenPlaintextDisabled(t *testing.T) {
 	s.handleAccess(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
+func TestAccessBlockedWhenPlaintextDisabledWithoutAuth(t *testing.T) {
+	now := time.Now().UTC()
+	store := memory.NewStore()
+	store.SetSecret("github_token", "x")
+
+	s := &server{
+		svc:         app.Service{Policy: domain.DefaultPolicy(), Requests: store, Leases: store, Secrets: store, Audit: storeAudit{}, Now: func() time.Time { return now }, NewRequestID: func() string { return "r1" }, NewLeaseTok: func() string { return "l1" }},
+		authEnabled: false,
+		authCfg:     config.AuthConfig{EnableAuth: false, AllowPlaintextSecretReturn: false},
+		now:         func() time.Time { return now },
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/leases/access", bytes.NewBufferString(`{"lease_token":"l1","secret":"github_token"}`))
+	w := httptest.NewRecorder()
+	s.handleAccess(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "plaintext secret return disabled by policy") {
+		t.Fatalf("expected plaintext policy denial, got body=%q", w.Body.String())
 	}
 }
 

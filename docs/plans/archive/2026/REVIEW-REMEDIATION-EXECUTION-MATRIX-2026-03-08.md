@@ -1,8 +1,8 @@
 # Review Remediation Execution Matrix (2026-03-08)
 
 Combines:
-- `docs/plans/SECURITY-REVIEW-TASKS-2026-03-08.md`
-- `docs/plans/ARCHITECTURE-REVIEW-TASKS-2026-03-08.md`
+- `docs/plans/archive/2026/SECURITY-REVIEW-TASKS-2026-03-08.md`
+- `docs/plans/archive/2026/ARCHITECTURE-REVIEW-TASKS-2026-03-08.md`
 
 ## Delivery strategy
 - **Wave 0 (Launch blockers):** finish all P0 security items first.

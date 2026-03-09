@@ -14,6 +14,7 @@ This is the canonical setup for hardened profile over TCP with mTLS.
   "security_profile": "hardened",
   "address": "0.0.0.0:8765",
   "unix_socket": "",
+  "state_store_file": "/var/lib/promptlock/state-store.json",
   "tls": {
     "enable": true,
     "cert_file": "/etc/promptlock/tls/server.crt",
@@ -24,7 +25,14 @@ This is the canonical setup for hardened profile over TCP with mTLS.
   "auth": {
     "enable_auth": true,
     "operator_token": "REPLACE_ME",
-    "allow_plaintext_secret_return": false
+    "allow_plaintext_secret_return": false,
+    "store_file": "/var/lib/promptlock/auth-store.json",
+    "store_encryption_key_env": "PROMPTLOCK_AUTH_STORE_KEY"
+  },
+  "secret_source": {
+    "type": "env",
+    "env_prefix": "PROMPTLOCK_SECRET_",
+    "in_memory_hardened": "fail"
   }
 }
 ```
@@ -32,6 +40,7 @@ This is the canonical setup for hardened profile over TCP with mTLS.
 Notes:
 - `unix_socket` must be empty when using TCP mTLS listener.
 - startup fails fast if cert/key/CA config is incomplete.
+- export the auth-store encryption key env (`PROMPTLOCK_AUTH_STORE_KEY`) before startup.
 
 ## 3) Validate behavior
 - client without certificate: TLS handshake should fail

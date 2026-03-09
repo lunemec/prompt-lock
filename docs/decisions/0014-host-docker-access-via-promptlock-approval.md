@@ -25,3 +25,7 @@ Directly binding `/var/run/docker.sock` into agent containers gives broad host c
 ## Security implications
 - Significantly lowers risk of container-to-host privilege expansion compared with raw docker.sock mounting.
 - Requires strict command-policy hardening to avoid policy bypass.
+
+## Supersedes / Superseded by
+- Supersedes: none
+- Superseded by: none

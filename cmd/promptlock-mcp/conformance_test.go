@@ -65,6 +65,10 @@ func TestBatchRequestRejected(t *testing.T) {
 	if int(errObj["code"].(float64)) != -32600 {
 		t.Fatalf("expected -32600 for batch rejection, got %+v", errObj)
 	}
+	id, hasID := msg["id"]
+	if !hasID || id != nil {
+		t.Fatalf("expected id=null for batch rejection, got %+v", msg)
+	}
 }
 
 func TestInvalidRequestRejected(t *testing.T) {
@@ -108,5 +112,34 @@ func TestNotificationNoResponse(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		// expected: no response emitted
+	}
+}
+
+func TestParseErrorReturnsNullID(t *testing.T) {
+	msg := runMCPAndExchange(t, `{"jsonrpc":"2.0","id":1,"method"`)
+	errObj, ok := msg["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error object, got %+v", msg)
+	}
+	if int(errObj["code"].(float64)) != -32700 {
+		t.Fatalf("expected -32700 for parse error, got %+v", errObj)
+	}
+	id, hasID := msg["id"]
+	if !hasID || id != nil {
+		t.Fatalf("expected id=null for parse error, got %+v", msg)
+	}
+}
+
+func TestInitializeEchoesStringID(t *testing.T) {
+	msg := runMCPAndExchange(t, `{"jsonrpc":"2.0","id":"client-1","method":"initialize","params":{"protocolVersion":"2024-11-05"}}`)
+	if got, ok := msg["id"].(string); !ok || got != "client-1" {
+		t.Fatalf("expected string id echo, got %+v", msg)
+	}
+}
+
+func TestToolsListAcceptsNullParams(t *testing.T) {
+	msg := runMCPAndExchange(t, `{"jsonrpc":"2.0","id":22,"method":"tools/list","params":null}`)
+	if _, ok := msg["result"].(map[string]any); !ok {
+		t.Fatalf("expected tools/list result object, got %+v", msg)
 	}
 }
