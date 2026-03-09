@@ -2,9 +2,10 @@
 
 ## Local dev
 - Start mock broker: `python3 scripts/mock-broker.py`
-- Request lease: `scripts/secretctl.sh request ...`
-- Approve lease: `scripts/human-approve.sh <request_id> <ttl>`
-- Access secret: `scripts/secretctl.sh access --lease <lease> --secret <name>`
+- Request lease: `go run ./cmd/promptlock exec ...`
+- Approve lease interactively: `go run ./cmd/promptlock approve-queue`
+- Auth lifecycle helpers: `go run ./cmd/promptlock auth <bootstrap|pair|mint> ...`
+- Full real host+container flow: `docs/operations/REAL-E2E-HOST-CONTAINER.md`
 
 ## Security operations
 - Keep audit trail on host storage (not container-writable paths).

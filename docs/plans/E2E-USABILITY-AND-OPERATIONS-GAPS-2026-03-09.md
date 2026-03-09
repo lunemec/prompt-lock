@@ -65,6 +65,7 @@ These are primary blockers for smooth real-world operator adoption even when sec
 ## Task group B — Single source-of-truth reality runbook
 
 ### B1 — Create canonical "Host daemon + container agent" guide
+- **Status:** ✅ Completed (2026-03-09)
 - **Target:** `docs/operations/REAL-E2E-HOST-CONTAINER.md`
 - **Must include:**
   - host daemon startup variants (unix socket, local TCP, TLS)
@@ -72,17 +73,18 @@ These are primary blockers for smooth real-world operator adoption even when sec
   - container start command (Linux + Docker Desktop notes)
   - CLI-only auth/bootstrap/mint/exec flow (post Task group A)
 - **Strict gates:**
-  - [ ] Zero curl required in canonical flow.
-  - [ ] Copy-paste commands tested end-to-end.
-  - [ ] Includes expected output snippets and failure hints.
+  - [x] Zero curl required in canonical flow.
+  - [x] Copy-paste commands tested end-to-end.
+  - [x] Includes expected output snippets and failure hints.
 
 ### B2 — Reconcile README/RUNBOOK/DOCKER examples
+- **Status:** ✅ Completed (2026-03-09)
 - **Problem:** mixed prototype-era instructions still present.
 - **Scope:** align all docs to current endpoint and CLI behavior.
 - **Strict gates:**
-  - [ ] No stale endpoint references.
-  - [ ] No contradictory startup guidance for hardened TCP behavior.
-  - [ ] Docs validation includes new runbook file.
+  - [x] No stale endpoint references.
+  - [x] No contradictory startup guidance for hardened TCP behavior.
+  - [x] Docs validation includes new runbook file.
 
 ---
 

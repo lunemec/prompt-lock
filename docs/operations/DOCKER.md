@@ -41,6 +41,9 @@ Yes, dockerizing this tool makes sense.
 - Canonical hardened mTLS setup: `docs/operations/MTLS-HARDENED.md`.
 - `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is an explicit emergency override; use only for controlled testing and rotate credentials afterward.
 
+## Canonical real flow
+- Use `docs/operations/REAL-E2E-HOST-CONTAINER.md` for host daemon + container agent + interactive approval walkthrough.
+
 ## Future
 - Provide docker-compose example:
   - broker service

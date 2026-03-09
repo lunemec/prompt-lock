@@ -106,16 +106,24 @@ scripts/secretctl.sh request \
   --secret npm_token
 ```
 
-Human approves:
+Human approves (interactive queue):
 
 ```bash
-scripts/human-approve.sh <request_id> 20
+go run ./cmd/promptlock approve-queue
 ```
 
-Agent fetches secret by lease token:
+Auth lifecycle helpers (CLI):
 
 ```bash
-scripts/secretctl.sh access --lease <lease_token> --secret github_token
+go run ./cmd/promptlock auth bootstrap --agent <agent_id> --container <container_id> --operator-token <token>
+go run ./cmd/promptlock auth pair --token <bootstrap_token> --container <container_id>
+go run ./cmd/promptlock auth mint --grant <grant_id>
+```
+
+Canonical real host+container workflow:
+
+```bash
+cat docs/operations/REAL-E2E-HOST-CONTAINER.md
 ```
 
 ## Agent-generated code note

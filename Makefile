@@ -54,6 +54,7 @@ docs:
 	@test -f docs/standards/ENGINEERING-STANDARDS.md
 	@test -f docs/operations/MTLS-HARDENED.md
 	@test -f docs/operations/HARDENED-SMOKE.md
+	@test -f docs/operations/REAL-E2E-HOST-CONTAINER.md
 	@test -f docs/compatibility/MCP-CONFORMANCE-MATRIX.md
 	@test -f docs/decisions/README.md
 	@test -f CHANGELOG.md

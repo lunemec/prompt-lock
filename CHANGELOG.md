@@ -97,6 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expanded operations runbook with first-30-minutes hardened checklist, incident quick-reference, and rollback guidance.
 - Hardened profile now only auto-defaults unix socket for local addresses; explicit non-local TCP configs no longer get silently overridden.
 - Added `promptlock auth` CLI family (`bootstrap`, `pair`, `mint`) so auth lifecycle can be run from CLI without raw curl flows.
+- Added canonical CLI-first host+container runbook and reconciled README/RUNBOOK/DOCKER docs to current approval/auth flow.
 - Hardened profile now tightens broker-exec defaults by removing shell wrappers from execution allowlist and adding command-smuggling deny markers (`&&`, `||`, `;`, `$(`, backticks).
 - Hardened profile now restricts host Docker compose mediation verbs to read-only `config` and `ps`.
 - Wrapper now waits for external approval by default, with polling/timeout controls.
