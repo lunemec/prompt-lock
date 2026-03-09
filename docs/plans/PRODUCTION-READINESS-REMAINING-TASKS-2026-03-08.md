@@ -107,6 +107,18 @@ Status: In progress (all P0 blockers complete; remaining P1/P2 hardening tasks o
   - [ ] Core CI/security automation runnable with Go + shell only.
   - [ ] No new secondary runtime tooling without explicit approval note.
 
+## P1-05 — Cross-platform hygiene script compatibility (macOS/BSD find)
+- **Area:** Developer UX / CI portability
+- **Problem:** `make ci` fails on systems where `find -regextype` is unsupported (`find: -regextype: unknown primary or operator`).
+- **Scope:**
+  - Refactor `scripts/validate_repo_hygiene.sh` to avoid GNU-only `find` options.
+  - Add compatibility path for BSD/macOS `find`.
+  - Add CI/local test check to ensure hygiene script works on Linux + macOS-style find behavior.
+- **Strict gates:**
+  - [ ] `make ci` hygiene step passes on Linux and macOS.
+  - [ ] No behavior regression in sync/conflict/tmp artifact detection.
+  - [ ] Script documents compatibility assumptions.
+
 ---
 
 ## P2-01 — Production runbook quality gate

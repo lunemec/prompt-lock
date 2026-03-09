@@ -35,7 +35,7 @@ type capabilities struct {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|approve-queue|audit-verify> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|approve-queue|audit-verify|auth> [flags]")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -45,8 +45,10 @@ func main() {
 		runApproveQueue(os.Args[2:])
 	case "audit-verify":
 		runAuditVerify(os.Args[2:])
+	case "auth":
+		runAuth(os.Args[2:])
 	default:
-		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|approve-queue|audit-verify> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|approve-queue|audit-verify|auth> [flags]")
 		os.Exit(2)
 	}
 }
@@ -566,6 +568,88 @@ func executeWithSecret(broker, brokerUnix, sessionToken, lease, intent string, c
 		return 1, "", err
 	}
 	return out.ExitCode, out.StdoutStderr, nil
+}
+
+func runAuth(args []string) {
+	if len(args) == 0 {
+		fatal(fmt.Errorf("usage: promptlock auth <bootstrap|pair|mint> [flags]"))
+	}
+	switch args[0] {
+	case "bootstrap":
+		runAuthBootstrap(args[1:])
+	case "pair":
+		runAuthPair(args[1:])
+	case "mint":
+		runAuthMint(args[1:])
+	default:
+		fatal(fmt.Errorf("usage: promptlock auth <bootstrap|pair|mint> [flags]"))
+	}
+}
+
+func runAuthBootstrap(args []string) {
+	fs := flag.NewFlagSet("auth bootstrap", flag.ExitOnError)
+	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
+	brokerUnix := fs.String("broker-unix-socket", getenv("PROMPTLOCK_BROKER_UNIX_SOCKET", ""), "broker unix socket path")
+	opToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
+	agent := fs.String("agent", "", "agent id")
+	container := fs.String("container", "", "container id")
+	fs.Parse(args)
+	if strings.TrimSpace(*opToken) == "" || strings.TrimSpace(*agent) == "" || strings.TrimSpace(*container) == "" {
+		fatal(fmt.Errorf("--operator-token, --agent and --container are required"))
+	}
+	var out struct {
+		BootstrapToken string    `json:"bootstrap_token"`
+		ExpiresAt      time.Time `json:"expires_at"`
+	}
+	if err := postJSONAuth(*broker, *brokerUnix, "/v1/auth/bootstrap/create", *opToken, map[string]string{"agent_id": *agent, "container_id": *container}, &out); err != nil {
+		fatal(err)
+	}
+	writeJSONStdout(map[string]any{"bootstrap_token": out.BootstrapToken, "expires_at": out.ExpiresAt})
+}
+
+func runAuthPair(args []string) {
+	fs := flag.NewFlagSet("auth pair", flag.ExitOnError)
+	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
+	brokerUnix := fs.String("broker-unix-socket", getenv("PROMPTLOCK_BROKER_UNIX_SOCKET", ""), "broker unix socket path")
+	token := fs.String("token", "", "bootstrap token")
+	container := fs.String("container", "", "container id")
+	fs.Parse(args)
+	if strings.TrimSpace(*token) == "" || strings.TrimSpace(*container) == "" {
+		fatal(fmt.Errorf("--token and --container are required"))
+	}
+	var out struct {
+		GrantID          string    `json:"grant_id"`
+		IdleExpiresAt    time.Time `json:"idle_expires_at"`
+		AbsoluteExpiresAt time.Time `json:"absolute_expires_at"`
+	}
+	if err := postJSONAuth(*broker, *brokerUnix, "/v1/auth/pair/complete", "", map[string]string{"token": *token, "container_id": *container}, &out); err != nil {
+		fatal(err)
+	}
+	writeJSONStdout(map[string]any{"grant_id": out.GrantID, "idle_expires_at": out.IdleExpiresAt, "absolute_expires_at": out.AbsoluteExpiresAt})
+}
+
+func runAuthMint(args []string) {
+	fs := flag.NewFlagSet("auth mint", flag.ExitOnError)
+	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
+	brokerUnix := fs.String("broker-unix-socket", getenv("PROMPTLOCK_BROKER_UNIX_SOCKET", ""), "broker unix socket path")
+	grant := fs.String("grant", "", "grant id")
+	fs.Parse(args)
+	if strings.TrimSpace(*grant) == "" {
+		fatal(fmt.Errorf("--grant is required"))
+	}
+	var out struct {
+		SessionToken string    `json:"session_token"`
+		ExpiresAt    time.Time `json:"expires_at"`
+	}
+	if err := postJSONAuth(*broker, *brokerUnix, "/v1/auth/session/mint", "", map[string]string{"grant_id": *grant}, &out); err != nil {
+		fatal(err)
+	}
+	writeJSONStdout(map[string]any{"session_token": out.SessionToken, "expires_at": out.ExpiresAt})
+}
+
+func writeJSONStdout(v any) {
+	b, _ := json.Marshal(v)
+	fmt.Println(string(b))
 }
 
 func runAuditVerify(args []string) {

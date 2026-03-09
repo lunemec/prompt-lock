@@ -23,31 +23,34 @@ These are primary blockers for smooth real-world operator adoption even when sec
 ## Task group A — CLI completeness for real auth lifecycle
 
 ### A1 — Add `promptlock auth bootstrap` command
+- **Status:** ✅ Completed (2026-03-09)
 - **Problem:** Operator must use raw API to create bootstrap token.
 - **Deliverable:** `promptlock auth bootstrap --agent <id> --container <id>`
 - **Expected output:** bootstrap token + expiry in consistent JSON/text format.
 - **Strict gates:**
-  - [ ] Works against auth-enabled broker.
-  - [ ] Requires operator auth token and fails cleanly when missing.
-  - [ ] Covered by CLI integration tests.
+  - [x] Works against auth-enabled broker.
+  - [x] Requires operator auth token and fails cleanly when missing.
+  - [x] Covered by CLI integration tests.
 - **Verification:**
   - Start daemon, run command, verify token accepted by pair command.
 
 ### A2 — Add `promptlock auth pair` command
+- **Status:** ✅ Completed (2026-03-09)
 - **Problem:** Agent/container pairing currently API-only.
 - **Deliverable:** `promptlock auth pair --token <boot> --container <id>`
 - **Strict gates:**
-  - [ ] Returns grant id and expiries.
-  - [ ] Replay/invalid token errors mapped to deterministic CLI messages.
-  - [ ] Tests cover success + replay denial + container mismatch.
+  - [x] Returns grant id and expiries.
+  - [x] Replay/invalid token errors mapped to deterministic CLI messages.
+  - [x] Tests cover success + replay denial + container mismatch.
 
 ### A3 — Add `promptlock auth mint` command
+- **Status:** ✅ Completed (2026-03-09)
 - **Problem:** Session token mint is API-only.
 - **Deliverable:** `promptlock auth mint --grant <id>`
 - **Strict gates:**
-  - [ ] Returns session token + expiry.
-  - [ ] Handles revoked/expired grant with deterministic error text.
-  - [ ] Tests for success/expired/revoked paths.
+  - [x] Returns session token + expiry.
+  - [x] Handles revoked/expired grant with deterministic error text.
+  - [x] Tests for success/expired/revoked paths.
 
 ### A4 — Optional automation path in `promptlock exec`
 - **Problem:** First-run ergonomics for container agents are complex.
