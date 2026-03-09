@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"strings"
 
 	"github.com/lunemec/promptlock/internal/core/domain"
 )
@@ -132,12 +133,17 @@ func (c *Config) applyProfile() {
 		c.HostOpsPolicy.DockerComposeAllowVerbs = []string{"config", "ps"}
 		c.HostOpsPolicy.DockerDenySubstrings = append(c.HostOpsPolicy.DockerDenySubstrings,
 			"&&", "||", ";", "$(", "`")
-		if c.UnixSocket == "" && !c.TLS.Enable {
+		if c.UnixSocket == "" && !c.TLS.Enable && isLocalAddressConfig(c.Address) {
 			c.UnixSocket = "/tmp/promptlock.sock"
 		}
 	default:
 		return
 	}
+}
+
+func isLocalAddressConfig(addr string) bool {
+	a := strings.TrimSpace(strings.ToLower(addr))
+	return strings.HasPrefix(a, "127.") || strings.HasPrefix(a, "localhost:") || strings.HasPrefix(a, "[::1]")
 }
 
 func (c Config) ToPolicy() domain.Policy {

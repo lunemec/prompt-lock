@@ -95,6 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added secret leakage regression coverage in audit sanitizer tests and CI leak-guard (`make leak-guard`).
 - Added hardened smoke suite (`make hardened-smoke`) covering hardened transport checks and live hardened abuse-path run.
 - Expanded operations runbook with first-30-minutes hardened checklist, incident quick-reference, and rollback guidance.
+- Hardened profile now only auto-defaults unix socket for local addresses; explicit non-local TCP configs no longer get silently overridden.
 - Hardened profile now tightens broker-exec defaults by removing shell wrappers from execution allowlist and adding command-smuggling deny markers (`&&`, `||`, `;`, `$(`, backticks).
 - Hardened profile now restricts host Docker compose mediation verbs to read-only `config` and `ps`.
 - Wrapper now waits for external approval by default, with polling/timeout controls.

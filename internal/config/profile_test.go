@@ -73,3 +73,14 @@ func TestApplyHardenedProfileWithTLSEnabledDoesNotForceUnixSocket(t *testing.T) 
 		t.Fatalf("expected unix socket to remain empty when tls is enabled, got %q", cfg.UnixSocket)
 	}
 }
+
+func TestApplyHardenedProfileWithNonLocalTCPDoesNotForceUnixSocket(t *testing.T) {
+	cfg := Default()
+	cfg.SecurityProfile = "hardened"
+	cfg.Address = "0.0.0.0:8765"
+	cfg.UnixSocket = ""
+	cfg.applyProfile()
+	if cfg.UnixSocket != "" {
+		t.Fatalf("expected unix socket to remain empty for non-local tcp, got %q", cfg.UnixSocket)
+	}
+}
