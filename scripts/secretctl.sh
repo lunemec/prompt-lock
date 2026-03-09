@@ -2,6 +2,7 @@
 set -euo pipefail
 
 BROKER_URL="${BROKER_URL:-http://127.0.0.1:8765}"
+SESSION_TOKEN="${SESSION_TOKEN:-}"
 
 usage() {
   cat <<'USAGE'
@@ -11,6 +12,7 @@ Usage:
 
 Env:
   BROKER_URL (default: http://127.0.0.1:8765)
+  SESSION_TOKEN (required when broker auth is enabled)
 USAGE
 }
 
@@ -46,7 +48,9 @@ if [[ "$cmd" == "request" ]]; then
     --argjson ttl "$ttl" \
     --argjson s "$json_secrets" \
     '{agent_id:$a, task_id:$t, reason:$r, ttl_minutes:$ttl, secrets:$s}' \
-  | curl -sS -X POST "$BROKER_URL/v1/leases/request" -H 'content-type: application/json' -d @-
+  | curl -sS -X POST "$BROKER_URL/v1/leases/request" \
+      -H "Authorization: Bearer $SESSION_TOKEN" \
+      -H 'content-type: application/json' -d @-
   echo
   exit 0
 fi
@@ -62,7 +66,9 @@ if [[ "$cmd" == "access" ]]; then
   done
 
   jq -n --arg l "$lease" --arg s "$secret" '{lease_token:$l, secret:$s}' \
-    | curl -sS -X POST "$BROKER_URL/v1/leases/access" -H 'content-type: application/json' -d @-
+    | curl -sS -X POST "$BROKER_URL/v1/leases/access" \
+        -H "Authorization: Bearer $SESSION_TOKEN" \
+        -H 'content-type: application/json' -d @-
   echo
   exit 0
 fi
