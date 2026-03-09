@@ -1,7 +1,9 @@
-.PHONY: help lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate leak-guard ci-redteam-full arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose release-package
+.PHONY: help lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate leak-guard storage-fsync-preflight storage-fsync-report storage-fsync-validate storage-fsync-release-gate ci-redteam-full arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose release-package
+
+FSYNC_REPORT ?= reports/storage-fsync-report.json
 
 help:
-	@echo "Targets: lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate leak-guard ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose release-package"
+	@echo "Targets: lint test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate leak-guard storage-fsync-preflight storage-fsync-report storage-fsync-validate storage-fsync-release-gate ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose release-package"
 
 lint:
 	bash -n scripts/secretctl.sh scripts/human-approve.sh
@@ -41,6 +43,28 @@ production-readiness-gate:
 
 leak-guard:
 	bash scripts/validate_no_secret_leaks.sh
+
+storage-fsync-preflight:
+	@test -n "$(MOUNT_DIR)" || (echo "Usage: make storage-fsync-preflight MOUNT_DIR=/path/to/mount" && exit 1)
+	go run ./cmd/promptlock-storage-fsync-check --dir "$(MOUNT_DIR)"
+
+storage-fsync-report:
+	@test -n "$(MOUNT_DIRS)" || (echo "Usage: make storage-fsync-report MOUNT_DIRS=/path/a,/path/b [FSYNC_REPORT=reports/storage-fsync-report.json]" && exit 1)
+	@mkdir -p "$(dir $(FSYNC_REPORT))"
+	go run ./cmd/promptlock-storage-fsync-check --dir-list "$(MOUNT_DIRS)" --json > "$(FSYNC_REPORT)"
+	@echo "storage fsync report written to $(FSYNC_REPORT)"
+
+storage-fsync-validate:
+	@test -n "$(FSYNC_REPORT)" || (echo "Usage: make storage-fsync-validate FSYNC_REPORT=reports/storage-fsync-report.json" && exit 1)
+	@test -f "$(FSYNC_REPORT)" || (echo "Missing fsync report file: $(FSYNC_REPORT)" && exit 1)
+	go run ./cmd/promptlock-storage-fsync-validate --file "$(FSYNC_REPORT)"
+
+storage-fsync-release-gate:
+	@test -n "$(MOUNT_DIRS)" || (echo "Usage: make storage-fsync-release-gate MOUNT_DIRS=/path/a,/path/b [FSYNC_REPORT=reports/storage-fsync-report.json]" && exit 1)
+	@mkdir -p "$(dir $(FSYNC_REPORT))"
+	go run ./cmd/promptlock-storage-fsync-check --dir-list "$(MOUNT_DIRS)" --json > "$(FSYNC_REPORT)"
+	go run ./cmd/promptlock-storage-fsync-validate --file "$(FSYNC_REPORT)"
+	@echo "storage fsync release gate passed with report $(FSYNC_REPORT)"
 
 ci-redteam-full: validate-final security-redteam-live security-redteam-live-hardened mcp-conformance-report real-e2e-smoke leak-guard
 	@echo "Full red-team CI profile passed."

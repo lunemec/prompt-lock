@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"net"
 	"os"
 	"strings"
 
@@ -152,8 +153,24 @@ func (c *Config) applyProfile() {
 }
 
 func isLocalAddressConfig(addr string) bool {
-	a := strings.TrimSpace(strings.ToLower(addr))
-	return strings.HasPrefix(a, "127.") || strings.HasPrefix(a, "localhost:") || strings.HasPrefix(a, "[::1]")
+	a := strings.TrimSpace(addr)
+	if a == "" {
+		return false
+	}
+	host := a
+	if h, _, err := net.SplitHostPort(a); err == nil {
+		host = h
+	} else if strings.HasPrefix(a, "[") && strings.HasSuffix(a, "]") {
+		host = strings.TrimSuffix(strings.TrimPrefix(a, "["), "]")
+	}
+	host = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")))
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func (c Config) ToPolicy() domain.Policy {

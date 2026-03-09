@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- `promptlock-storage-fsync-check` Go command with JSON report mode (`--json`, `--dir-list`) and Make workflows:
+  - `make storage-fsync-preflight MOUNT_DIR=...`
+  - `make storage-fsync-report MOUNT_DIRS=/path/a,/path/b`
+- `promptlock-storage-fsync-validate` Go command for fsync report JSON validation plus release/readiness Make gates:
+  - `make storage-fsync-validate FSYNC_REPORT=reports/storage-fsync-report.json`
+  - `make storage-fsync-release-gate MOUNT_DIRS=/path/a,/path/b FSYNC_REPORT=reports/storage-fsync-report.json`
+- Storage fsync JSON report provenance fields (`schema_version`, `generated_at`, `generated_by`, `hostname`) with validation enforcement in `promptlock-storage-fsync-validate`.
 - External HTTP-backed secret source adapter (`secret_source.type=external`) with bearer-token env wiring and timeout controls.
 - Durable request/lease state persistence support via `state_store_file`.
 - Encrypted auth-store persistence support (`auth.store_encryption_key_env`, default `PROMPTLOCK_AUTH_STORE_KEY`) and ADR-0018 for production deployment guardrails.
@@ -94,6 +101,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Non-dev startup now fails fast unless `state_store_file` + `auth.store_file` are configured and `secret_source.type` is `env`, `file`, or `external`.
 - Auth-store atomic persistence now writes through secure unique temp files instead of predictable `<store>.tmp`, preventing symlink clobbering and concurrent tmp-file collision races.
 - Persistence failures now fail closed: auth-store/request-lease write failures close a durability gate, emit explicit audit events, and force mutating auth/lease endpoints to return `503 Service Unavailable`.
+- Transport safety local-address classification now rejects non-IP hostnames that merely start with `127.` (for example `127.evil.example`) instead of treating them as loopback.
+- Hardened profile local-address detection now uses loopback parsing (hostname/IP) rather than `127.` string prefix matching, so non-IP `127.*` hostnames are not treated as local.
+- Atomic auth-store and request/lease state persistence now fsync parent directories after rename to harden crash-consistency of directory-entry updates.
+- Release/runbook fsync workflows now include explicit report-validation gates that fail closed when any mount result is not `ok=true`.
+- Tagged GitHub release workflow now runs `storage-fsync-release-gate` before packaging and uploads the fsync JSON report artifact for release evidence.
+- Project/release/security messaging now consistently describes PromptLock as experimental today with explicit production-readiness hardening as the target state.
 - Hardened real-e2e smoke now sets auth-store encryption key env so non-dev encrypted auth persistence guards remain active in CI.
 - Real E2E smoke harness now uses hardened-compatible transport defaults (`BROKER_BIND_HOST=0.0.0.0`), emits actionable startup diagnostics, and asserts deny-path audit evidence in its JSON report.
 - Real E2E smoke harness now derives broker probe/CLI URL from dedicated smoke variables (`PROMPTLOCK_SMOKE_BROKER_URL` / `BROKER_CONNECT_HOST` / `BROKER_PORT`) so unrelated ambient `BROKER_URL` shell settings cannot break readiness checks.

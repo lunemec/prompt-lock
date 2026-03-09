@@ -288,7 +288,7 @@ func isLocalAddress(addr string) bool {
 	if ip := net.ParseIP(host); ip != nil {
 		return ip.IsLoopback()
 	}
-	return strings.HasPrefix(host, "127.")
+	return false
 }
 
 func validateSecretSourceSafety(cfg config.Config) error {

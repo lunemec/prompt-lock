@@ -1,9 +1,11 @@
 package memory
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -181,5 +183,39 @@ func TestSaveLoadStatePreservesRequestStatuses(t *testing.T) {
 		if got.Status != want.Status {
 			t.Fatalf("status mismatch for %s: want=%q got=%q", want.ID, want.Status, got.Status)
 		}
+	}
+}
+
+func TestSaveStateToFileFailsClosedWhenParentDirSyncFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory-state.json")
+
+	s := NewStore()
+	if err := s.SaveRequest(domain.LeaseRequest{
+		ID:                 "req-1",
+		AgentID:            "agent-1",
+		TaskID:             "task-1",
+		Reason:             "sync failure regression",
+		TTLMinutes:         5,
+		Secrets:            []string{"secret-a"},
+		CommandFingerprint: "cmd-fp",
+		WorkdirFingerprint: "wd-fp",
+		Status:             domain.RequestPending,
+		CreatedAt:          time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+
+	origSyncParentDir := syncParentDir
+	t.Cleanup(func() { syncParentDir = origSyncParentDir })
+	syncParentDir = func(string) error {
+		return errors.New("sync parent dir: injected failure")
+	}
+
+	err := s.SaveStateToFile(path)
+	if err == nil {
+		t.Fatalf("expected save state to fail when parent directory sync fails")
+	}
+	if !strings.Contains(err.Error(), "sync parent dir") {
+		t.Fatalf("expected sync parent dir error, got %v", err)
 	}
 }

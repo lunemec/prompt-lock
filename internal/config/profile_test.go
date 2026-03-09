@@ -84,3 +84,34 @@ func TestApplyHardenedProfileWithNonLocalTCPDoesNotForceUnixSocket(t *testing.T)
 		t.Fatalf("expected unix socket to remain empty for non-local tcp, got %q", cfg.UnixSocket)
 	}
 }
+
+func TestApplyHardenedProfileWithNonIP127HostnameDoesNotForceUnixSocket(t *testing.T) {
+	cfg := Default()
+	cfg.SecurityProfile = "hardened"
+	cfg.Address = "127.evil.example:8765"
+	cfg.UnixSocket = ""
+	cfg.applyProfile()
+	if cfg.UnixSocket != "" {
+		t.Fatalf("expected unix socket to remain empty for non-IP 127.* hostname, got %q", cfg.UnixSocket)
+	}
+}
+
+func TestIsLocalAddressConfig(t *testing.T) {
+	cases := map[string]bool{
+		"127.0.0.1:8765":             true,
+		"127.0.0.2:8765":             true,
+		"localhost:8765":             true,
+		"localhost":                  true,
+		"[::1]:8765":                 true,
+		"::1":                        true,
+		"127.evil.example:8765":      false,
+		"127.localhost.invalid:8765": false,
+		"0.0.0.0:8765":               false,
+		"10.0.0.5:8765":              false,
+	}
+	for in, want := range cases {
+		if got := isLocalAddressConfig(in); got != want {
+			t.Fatalf("isLocalAddressConfig(%q)=%v want %v", in, got, want)
+		}
+	}
+}

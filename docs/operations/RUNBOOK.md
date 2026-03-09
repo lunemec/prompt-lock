@@ -13,8 +13,38 @@
 ## Security operations
 - Keep audit trail on host storage (not container-writable paths).
 - Rotate demo secrets before any non-local use.
-- Treat this repository as prototype until production hardening is completed.
+- Treat this repository as experimental while production-readiness hardening is completed.
 - For non-dev profiles, ensure `state_store_file`, `auth.store_file`, and auth-store encryption key env are configured before startup.
+
+### Storage fsync preflight (before production rollout)
+- Run this once per target storage mount (as the same service user PromptLock runs under):
+
+```bash
+make storage-fsync-preflight MOUNT_DIR=/var/lib/promptlock
+```
+
+- Direct command form:
+
+```bash
+go run ./cmd/promptlock-storage-fsync-check --dir /var/lib/promptlock
+```
+- Multi-mount JSON evidence report:
+
+```bash
+make storage-fsync-report MOUNT_DIRS=/var/lib/promptlock,/var/log/promptlock FSYNC_REPORT=reports/storage-fsync-report.json
+```
+- Report provenance fields now include `schema_version`, `generated_at`, `generated_by`, and `hostname` in addition to `ok/results`.
+- Validate a pre-generated report (fails if JSON is malformed or any mount has `ok=false`):
+
+```bash
+make storage-fsync-validate FSYNC_REPORT=reports/storage-fsync-report.json
+```
+- One-shot release/readiness gate (generate + validate report in one command):
+
+```bash
+make storage-fsync-release-gate MOUNT_DIRS=/var/lib/promptlock,/var/log/promptlock FSYNC_REPORT=reports/storage-fsync-report.json
+```
+- If this check fails, do not deploy PromptLock persistence on that mount; durability-gate behavior will fail closed (`503` on mutating auth/lease endpoints).
 
 ### Audit integrity verification
 - Verify full hash-chain:
@@ -56,6 +86,7 @@
   - Expect deterministic client error: `secret backend unavailable`.
 - **Durability gate closed (`503` on auth/lease mutations)**
   - Inspect audit for `durability_persist_failed` / `durability_gate_closed` and check host disk/permissions for `state_store_file` + `auth.store_file`.
+  - Confirm the underlying filesystem supports file + parent-directory `fsync` semantics; mounts that reject directory sync will keep the durability gate closed by design.
   - Fix storage issue, then restart broker to reopen mutating flows.
 - **Endpoint/auth confusion during CLI use**
   - Use `docs/operations/CLI-ENDPOINT-CONTRACT-MATRIX.md` to confirm endpoint and token type for each command.

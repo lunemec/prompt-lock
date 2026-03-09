@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -224,5 +225,64 @@ func TestSaveToFileEncryptedConcurrentWriters(t *testing.T) {
 	reloaded := NewStore()
 	if err := reloaded.LoadFromFileEncrypted(path, key); err != nil {
 		t.Fatalf("load encrypted store after concurrent writes: %v", err)
+	}
+}
+
+func TestSaveToFileFailsClosedWhenParentDirSyncFails(t *testing.T) {
+	now := time.Now().UTC()
+	path := filepath.Join(t.TempDir(), "auth-store.json")
+
+	s := NewStore()
+	s.SaveGrant(PairingGrant{
+		GrantID:           "g1",
+		AgentID:           "a1",
+		CreatedAt:         now,
+		LastUsedAt:        now,
+		IdleExpiresAt:     now.Add(30 * time.Minute),
+		AbsoluteExpiresAt: now.Add(2 * time.Hour),
+	})
+
+	origSyncParentDir := syncParentDir
+	t.Cleanup(func() { syncParentDir = origSyncParentDir })
+	syncParentDir = func(string) error {
+		return fmt.Errorf("sync parent dir: injected failure")
+	}
+
+	err := s.SaveToFile(path)
+	if err == nil {
+		t.Fatalf("expected save to fail when parent directory sync fails")
+	}
+	if !strings.Contains(err.Error(), "sync parent dir") {
+		t.Fatalf("expected sync parent dir error, got %v", err)
+	}
+}
+
+func TestSaveToFileEncryptedFailsClosedWhenParentDirSyncFails(t *testing.T) {
+	now := time.Now().UTC()
+	path := filepath.Join(t.TempDir(), "auth-store.enc.json")
+	key := []byte("fsync_encrypted_auth_store_key_012345")
+
+	s := NewStore()
+	s.SaveGrant(PairingGrant{
+		GrantID:           "g1",
+		AgentID:           "a1",
+		CreatedAt:         now,
+		LastUsedAt:        now,
+		IdleExpiresAt:     now.Add(30 * time.Minute),
+		AbsoluteExpiresAt: now.Add(2 * time.Hour),
+	})
+
+	origSyncParentDir := syncParentDir
+	t.Cleanup(func() { syncParentDir = origSyncParentDir })
+	syncParentDir = func(string) error {
+		return fmt.Errorf("sync parent dir: injected failure")
+	}
+
+	err := s.SaveToFileEncrypted(path, key)
+	if err == nil {
+		t.Fatalf("expected encrypted save to fail when parent directory sync fails")
+	}
+	if !strings.Contains(err.Error(), "sync parent dir") {
+		t.Fatalf("expected sync parent dir error, got %v", err)
 	}
 }

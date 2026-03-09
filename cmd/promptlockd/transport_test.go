@@ -8,13 +8,15 @@ import (
 
 func TestIsLocalAddress(t *testing.T) {
 	cases := map[string]bool{
-		"127.0.0.1:8765": true,
-		"127.0.0.2:8765": true,
-		"localhost:8765": true,
-		"[::1]:8765":     true,
-		"::1":            true,
-		"0.0.0.0:8765":   false,
-		"10.0.0.5:8765":  false,
+		"127.0.0.1:8765":             true,
+		"127.0.0.2:8765":             true,
+		"localhost:8765":             true,
+		"[::1]:8765":                 true,
+		"::1":                        true,
+		"127.evil.example:8765":      false,
+		"127.localhost.invalid:8765": false,
+		"0.0.0.0:8765":               false,
+		"10.0.0.5:8765":              false,
 	}
 	for in, want := range cases {
 		if got := isLocalAddress(in); got != want {
@@ -82,6 +84,11 @@ func TestValidateTransportSafety_NoAuthNonLocalTCP(t *testing.T) {
 	cfg.Address = "[::1]:8765"
 	if err := validateTransportSafety(cfg, "", ""); err != nil {
 		t.Fatalf("expected IPv6 loopback unauthenticated TCP to pass, got %v", err)
+	}
+
+	cfg.Address = "127.evil.example:8765"
+	if err := validateTransportSafety(cfg, "", ""); err == nil {
+		t.Fatalf("expected non-IP 127.* hostname to fail non-local unauthenticated TCP check")
 	}
 }
 

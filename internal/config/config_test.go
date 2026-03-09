@@ -59,3 +59,38 @@ func TestSecretSourceDefaultsNormalize(t *testing.T) {
 		t.Fatalf("expected default auth store encryption key env, got %q", cfg.Auth.StoreEncryptionKeyEnv)
 	}
 }
+
+func TestLoadHardenedProfileWithNonIP127HostnameDoesNotDefaultUnixSocket(t *testing.T) {
+	d := t.TempDir()
+	p := filepath.Join(d, "cfg-hardened-nonlocal.json")
+	data := `{"security_profile":"hardened","address":"127.evil.example:8765","unix_socket":""}`
+	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UnixSocket != "" {
+		t.Fatalf("expected unix socket to remain empty for non-IP 127.* hostname, got %q", cfg.UnixSocket)
+	}
+	if cfg.Auth.AllowPlaintextSecretReturn {
+		t.Fatalf("expected hardened profile settings to be applied after load")
+	}
+}
+
+func TestLoadHardenedProfileWithLoopbackAddressDefaultsUnixSocket(t *testing.T) {
+	d := t.TempDir()
+	p := filepath.Join(d, "cfg-hardened-local.json")
+	data := `{"security_profile":"hardened","address":"127.0.0.1:8765","unix_socket":""}`
+	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UnixSocket == "" {
+		t.Fatalf("expected hardened loopback config to default unix socket")
+	}
+}

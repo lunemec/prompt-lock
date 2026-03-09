@@ -32,5 +32,5 @@ Include:
 
 ## Scope notes
 
-Current project scope includes non-production defaults and in-memory stores for some components.
+PromptLock is currently experimental and pre-1.0, with active production-readiness hardening underway. Current scope includes non-production defaults and in-memory stores for some components.
 Please include deployment profile details (`security_profile`, transport mode, auth settings) in reports.

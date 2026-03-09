@@ -14,6 +14,14 @@ This is the canonical run-to-run handoff file for agents. Read it together with 
 - Any newly discovered gaps should be opened only in `docs/plans/BACKLOG.md`.
 
 ## Recently completed
+- Storage fsync JSON reports now carry provenance metadata (`schema_version`, `generated_at`, `generated_by`, `hostname`) and validator gates now fail when metadata is missing or malformed.
+- Tagged GitHub release workflow now enforces `storage-fsync-release-gate` before packaging and publishes the generated fsync JSON report artifact.
+- Added storage fsync report validator command (`cmd/promptlock-storage-fsync-validate`) and Make release/readiness gates (`storage-fsync-validate`, `storage-fsync-release-gate`) that fail closed when any mount result is not `ok=true`.
+- Added storage durability preflight command (`cmd/promptlock-storage-fsync-check`) with JSON reporting and Make workflows (`storage-fsync-preflight`, `storage-fsync-report`) for mount-level file+directory `fsync` validation and evidence capture.
+- Hardened-profile local-address detection now matches transport safety parsing (hostname/IP aware) so non-IP `127.*` hostnames do not trigger local unix-socket defaults, with regression tests.
+- Operations docs now explicitly call out parent-directory `fsync` requirements for persistence durability-gate recovery workflows.
+- Transport safety local-address checks now fail closed for non-IP hostnames prefixed with `127.` (for example `127.evil.example`), with regression tests.
+- Auth-store and request/lease state atomic persistence paths now fsync parent directories after rename, with fail-closed regression tests.
 - Production deployment guardrails were hardened with explicit dev-profile opt-in, encrypted auth-store persistence enforcement for non-dev, and durable request/lease state persistence support.
 - Auth-store atomic persistence now uses secure unique temp files to prevent tmp-path symlink clobbering and concurrent tmp collision races.
 - Persistence write failures now fail closed via durability gate behavior with explicit audit signaling and `503` responses on mutating auth/lease paths.

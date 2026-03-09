@@ -21,6 +21,9 @@ jobs:
         run: |
           make validate-final
           make production-readiness-gate
+          STATE_DIR="${RUNNER_TEMP}/promptlock-release-state"
+          AUDIT_DIR="${RUNNER_TEMP}/promptlock-release-audit"
+          make storage-fsync-release-gate MOUNT_DIRS="${STATE_DIR},${AUDIT_DIR}" FSYNC_REPORT=reports/storage-fsync-report-release-ci.json
 
       - name: Build artifacts
         run: |
@@ -32,4 +35,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: promptlock-${{ github.ref_name }}
-          path: dist/*.tar.gz
+          path: |
+            dist/*.tar.gz
+            reports/storage-fsync-report-release-ci.json

@@ -132,9 +132,9 @@ cat docs/operations/REAL-E2E-HOST-CONTAINER.md
 This repository is primarily **agent-generated code and documentation**, following the same agent-first workflow style as the `codex-docker` project.
 
 ## Important
-This is a draft prototype for flow design and integration testing, not a production-grade secret manager.
+This repository is currently **experimental** for flow design and integration testing, with an explicit goal of becoming production-ready.
 
-Current implementation uses in-memory request/lease/auth/session stores by default unless configured with durable host-backed state files. For production, use hardened deployment controls, encrypted auth persistence (`auth.store_encryption_key_env`), durable request/lease state persistence (`state_store_file`), and external secret backend adapters.
+Current implementation uses in-memory request/lease/auth/session stores by default unless configured with durable host-backed state files. For production-targeted use, configure hardened deployment controls, encrypted auth persistence (`auth.store_encryption_key_env`), durable request/lease state persistence (`state_store_file`), and external secret backend adapters.
 
 Startup guardrails now enforce fail-closed production posture: non-dev profiles require durable state files and non-`in_memory` secret source; dev profile startup requires explicit opt-in (`PROMPTLOCK_ALLOW_DEV_PROFILE=1`).
 

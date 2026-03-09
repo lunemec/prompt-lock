@@ -24,6 +24,19 @@ type persistedState struct {
 	Leases   map[string]domain.Lease        `json:"leases"`
 }
 
+var syncParentDir = func(path string) error {
+	dir := filepath.Dir(path)
+	dirFile, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open parent dir %s: %w", dir, err)
+	}
+	defer dirFile.Close()
+	if err := dirFile.Sync(); err != nil {
+		return fmt.Errorf("sync parent dir %s: %w", dir, err)
+	}
+	return nil
+}
+
 func NewStore() *Store {
 	return &Store{
 		requests: map[string]domain.LeaseRequest{},
@@ -164,6 +177,9 @@ func (s *Store) SaveStateToFile(path string) error {
 		return err
 	}
 	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	if err := syncParentDir(path); err != nil {
 		return err
 	}
 	cleanup = false

@@ -63,6 +63,12 @@ For external HTTP-backed secret retrieval, set `secret_source.type` to `external
 - `store_encryption_key_env` configures which environment variable supplies the auth-store encryption key. In non-dev profiles, `store_file` requires this key and startup fails when it is missing.
 - `state_store_file` (optional) enables durable request/lease state persistence to a host path.
 - Persistence writes now fail closed: if auth-store or request/lease state persistence fails at runtime, PromptLock closes a durability gate, audit-logs the failure, and mutating auth/lease endpoints return `503 Service Unavailable`.
+- Persistence writes fsync both data files and parent directories after atomic rename. Use host storage/filesystems that support directory sync semantics for crash-consistent metadata updates.
+- Use `make storage-fsync-preflight MOUNT_DIR=/path/to/mount` to validate mount behavior before rollout.
+- For multi-mount evidence capture, use `make storage-fsync-report MOUNT_DIRS=/path/a,/path/b`.
+- Validate report JSON via `make storage-fsync-validate FSYNC_REPORT=reports/storage-fsync-report.json` (fails if malformed or if any mount reports `ok=false`).
+- Report validation also checks provenance metadata fields: `schema_version`, `generated_at` (RFC3339), `generated_by`, and `hostname`.
+- For release/readiness, use one-shot gate `make storage-fsync-release-gate MOUNT_DIRS=/path/a,/path/b FSYNC_REPORT=reports/storage-fsync-report.json`.
 - For hardened local deployments, prefer `unix_socket` and keep TCP on localhost only.
 - CLI clients can target unix socket with `--broker-unix-socket` / `PROMPTLOCK_BROKER_UNIX_SOCKET`.
 - If auth is enabled and TCP is non-local without unix socket or TLS, broker fails to start unless `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is set.
