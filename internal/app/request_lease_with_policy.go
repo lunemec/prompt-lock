@@ -36,6 +36,7 @@ func (s Service) RequestLeaseWithPolicy(agentID, taskID, reason string, ttl int,
 			return RequestLeaseResult{}, err
 		}
 		if reused {
+			s.auditRequestReusedActiveLease(agentID, taskID, input, reusableLease)
 			return RequestLeaseResult{Lease: reusableLease, Reused: true}, nil
 		}
 	}
@@ -45,10 +46,12 @@ func (s Service) RequestLeaseWithPolicy(agentID, taskID, reason string, ttl int,
 		return RequestLeaseResult{}, err
 	}
 	if countPendingRequestsForAgent(agentID, pending) >= policy.MaxPendingPerAgent {
+		s.auditRequestThrottledPendingCap(agentID, taskID, input, policy.IdenticalRequestCooldown)
 		return RequestLeaseResult{}, NewRequestThrottleError(RequestThrottleReasonPendingCap, policy.IdenticalRequestCooldown)
 	}
 
 	if retryAfter, throttled := s.equivalentRequestCooldown(input, pending, policy.IdenticalRequestCooldown); throttled {
+		s.auditRequestThrottledCooldown(agentID, taskID, input, retryAfter)
 		return RequestLeaseResult{}, NewRequestThrottleError(RequestThrottleReasonCooldown, retryAfter)
 	}
 
