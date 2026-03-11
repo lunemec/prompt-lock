@@ -41,7 +41,7 @@ func TestLeaseFlow(t *testing.T) {
 		NewLeaseTok: func() string { return "lease_test" },
 	}
 
-	req, err := svc.RequestLease("agent1", "task1", "test", 5, []string{"github_token"}, "fp1", "wd1")
+	req, err := svc.RequestLease("agent1", "task1", "test", 5, []string{"github_token"}, "fp1", "wd1", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestRequestLeaseWithPolicyReusesEquivalentActiveLease(t *testing.T) {
 		NewLeaseTok: func() string { return "lease_new" },
 	}
 
-	result, err := svc.RequestLeaseWithPolicy("agent1", "task1", "test", 5, []string{" npm_token ", "github_token", "github_token"}, "fp1", "wd1")
+	result, err := svc.RequestLeaseWithPolicy("agent1", "task1", "test", 5, []string{" npm_token ", "github_token", "github_token"}, "fp1", "wd1", "", "")
 	if err != nil {
 		t.Fatalf("request lease with policy: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestRequestLeaseWithPolicyCreatesPendingWhenNoActiveEquivalentLease(t *test
 		NewLeaseTok: func() string { return "lease_new" },
 	}
 
-	result, err := svc.RequestLeaseWithPolicy("agent1", "task1", "test", 5, []string{"github_token"}, "fp1", "wd1")
+	result, err := svc.RequestLeaseWithPolicy("agent1", "task1", "test", 5, []string{"github_token"}, "fp1", "wd1", "", "")
 	if err != nil {
 		t.Fatalf("request lease with policy: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestRequestLeaseWithPolicyThrottlesWhenPendingCapReached(t *testing.T) {
 		NewLeaseTok:  func() string { return "lease_new" },
 	}
 
-	_, err := svc.RequestLeaseWithPolicy("agent1", "task3", "third", 5, []string{"slack_token"}, "fp3", "wd3")
+	_, err := svc.RequestLeaseWithPolicy("agent1", "task3", "third", 5, []string{"slack_token"}, "fp3", "wd3", "", "")
 	if err == nil {
 		t.Fatalf("expected pending-cap throttle error")
 	}
@@ -294,7 +294,7 @@ func TestRequestLeaseWithPolicyThrottlesEquivalentRequestWithinCooldown(t *testi
 		NewLeaseTok:  func() string { return "lease_new" },
 	}
 
-	_, err := svc.RequestLeaseWithPolicy("agent1", "task2", "repeat", 5, []string{" npm_token ", "github_token"}, "fp1", "wd1")
+	_, err := svc.RequestLeaseWithPolicy("agent1", "task2", "repeat", 5, []string{" npm_token ", "github_token"}, "fp1", "wd1", "", "")
 	if err == nil {
 		t.Fatalf("expected cooldown throttle error")
 	}
@@ -358,7 +358,7 @@ func TestRequestLeaseWithPolicyChecksPendingCapBeforeCooldown(t *testing.T) {
 		NewLeaseTok:  func() string { return "lease_new" },
 	}
 
-	_, err := svc.RequestLeaseWithPolicy("agent1", "task2", "repeat", 5, []string{"github_token"}, "fp1", "wd1")
+	_, err := svc.RequestLeaseWithPolicy("agent1", "task2", "repeat", 5, []string{"github_token"}, "fp1", "wd1", "", "")
 	if err == nil {
 		t.Fatalf("expected pending-cap throttle error")
 	}

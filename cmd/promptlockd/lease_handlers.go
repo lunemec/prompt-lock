@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/lunemec/promptlock/internal/app"
 	"github.com/lunemec/promptlock/internal/core/ports"
@@ -46,7 +47,17 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDurabilityReady(w) {
 		return
 	}
-	var req leaseReq
+	var req struct {
+		AgentID            string   `json:"agent_id"`
+		TaskID             string   `json:"task_id"`
+		Reason             string   `json:"reason"`
+		TTLMinutes         int      `json:"ttl_minutes"`
+		Secrets            []string `json:"secrets"`
+		CommandFingerprint string   `json:"command_fingerprint"`
+		WorkdirFingerprint string   `json:"workdir_fingerprint"`
+		EnvPath            string   `json:"env_path"`
+		EnvPathCanonical   string   `json:"env_path_canonical"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeMappedError(w, ErrBadRequest, err.Error())
 		return
@@ -54,7 +65,19 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	if req.TTLMinutes == 0 {
 		req.TTLMinutes = s.svc.Policy.DefaultTTLMinutes
 	}
-	result, err := s.svc.RequestLeaseWithPolicy(req.AgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint)
+	req.CommandFingerprint = strings.TrimSpace(req.CommandFingerprint)
+	if req.CommandFingerprint == "" {
+		writeMappedError(w, ErrBadRequest, "command_fingerprint required")
+		return
+	}
+	req.WorkdirFingerprint = strings.TrimSpace(req.WorkdirFingerprint)
+	if req.WorkdirFingerprint == "" {
+		writeMappedError(w, ErrBadRequest, "workdir_fingerprint required")
+		return
+	}
+	req.EnvPath = strings.TrimSpace(req.EnvPath)
+	req.EnvPathCanonical = strings.TrimSpace(req.EnvPathCanonical)
+	result, err := s.svc.RequestLeaseWithPolicy(req.AgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint, req.EnvPath, req.EnvPathCanonical)
 	if err != nil {
 		var throttleErr *app.RequestThrottleError
 		if errors.As(err, &throttleErr) {

@@ -30,7 +30,7 @@ func (s Service) now() time.Time {
 	return s.Now().UTC()
 }
 
-func (s Service) RequestLease(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint, workdirFingerprint string) (domain.LeaseRequest, error) {
+func (s Service) RequestLease(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint, workdirFingerprint, envPath, envPathCanonical string) (domain.LeaseRequest, error) {
 	if err := s.Policy.ValidateRequest(ttl, secrets); err != nil {
 		return domain.LeaseRequest{}, err
 	}
@@ -43,6 +43,8 @@ func (s Service) RequestLease(agentID, taskID, reason string, ttl int, secrets [
 		Secrets:            append([]string{}, secrets...),
 		CommandFingerprint: commandFingerprint,
 		WorkdirFingerprint: workdirFingerprint,
+		EnvPath:            envPath,
+		EnvPathCanonical:   envPathCanonical,
 		Status:             domain.RequestPending,
 		CreatedAt:          s.now(),
 	}

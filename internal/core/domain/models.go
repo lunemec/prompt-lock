@@ -19,6 +19,8 @@ type LeaseRequest struct {
 	Secrets            []string
 	CommandFingerprint string
 	WorkdirFingerprint string
+	EnvPath            string
+	EnvPathCanonical   string
 	Status             RequestStatus
 	CreatedAt          time.Time
 }

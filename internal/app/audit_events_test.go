@@ -42,7 +42,7 @@ func TestRequestLeaseWithPolicyAuditsActiveLeaseReuse(t *testing.T) {
 		CommandFingerprint: "fp1",
 		WorkdirFingerprint: "wd1",
 	}
-	result, err := svc.RequestLeaseWithPolicy("agent1", "task1", "reuse", 5, input.Secrets, input.CommandFingerprint, input.WorkdirFingerprint)
+	result, err := svc.RequestLeaseWithPolicy("agent1", "task1", "reuse", 5, input.Secrets, input.CommandFingerprint, input.WorkdirFingerprint, "", "")
 	if err != nil {
 		t.Fatalf("request lease with policy: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestRequestLeaseWithPolicyAuditsPendingCapThrottle(t *testing.T) {
 		NewLeaseTok:  func() string { return "lease_new" },
 	}
 
-	_, err := svc.RequestLeaseWithPolicy("agent1", "task3", "third", 5, []string{"slack_token"}, "fp3", "wd3")
+	_, err := svc.RequestLeaseWithPolicy("agent1", "task3", "third", 5, []string{"slack_token"}, "fp3", "wd3", "", "")
 	if err == nil {
 		t.Fatalf("expected throttle error")
 	}
@@ -160,7 +160,7 @@ func TestRequestLeaseWithPolicyAuditsCooldownThrottle(t *testing.T) {
 		NewLeaseTok:  func() string { return "lease_new" },
 	}
 
-	_, err := svc.RequestLeaseWithPolicy("agent1", "task2", "repeat", 5, []string{"npm_token", "github_token"}, "fp1", "wd1")
+	_, err := svc.RequestLeaseWithPolicy("agent1", "task2", "repeat", 5, []string{"npm_token", "github_token"}, "fp1", "wd1", "", "")
 	if err == nil {
 		t.Fatalf("expected cooldown throttle error")
 	}

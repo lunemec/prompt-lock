@@ -29,6 +29,8 @@ type requestBody struct {
 	Secrets            []string `json:"secrets"`
 	CommandFingerprint string   `json:"command_fingerprint"`
 	WorkdirFingerprint string   `json:"workdir_fingerprint"`
+	EnvPath            string   `json:"env_path,omitempty"`
+	EnvPathCanonical   string   `json:"env_path_canonical,omitempty"`
 }
 
 type capabilities struct {
@@ -110,6 +112,7 @@ func runExec(args []string) {
 	reason := fs.String("reason", "execute command", "reason")
 	ttl := fs.Int("ttl", 5, "ttl minutes")
 	intent := fs.String("intent", "", "intent name")
+	envPath := fs.String("env-path", "", "optional .env candidate path for approval context")
 	secretsCSV := fs.String("secrets", "", "comma-separated secret names")
 	autoApprove := fs.Bool("auto-approve", false, "approve immediately (demo only; requires PROMPTLOCK_DEV_MODE=1)")
 	waitApprove := fs.Duration("wait-approve", 2*time.Minute, "max time to wait for external approval")
@@ -169,7 +172,16 @@ func runExec(args []string) {
 	if err != nil {
 		fatal(err)
 	}
-	reqID, err := requestLease(*conn.Broker, *conn.BrokerUnix, *sessionToken, requestBody{AgentID: *agent, TaskID: *task, Reason: *reason, TTLMinutes: *ttl, Secrets: secrets, CommandFingerprint: fingerprint, WorkdirFingerprint: wdfp})
+	reqID, err := requestLease(*conn.Broker, *conn.BrokerUnix, *sessionToken, requestBody{
+		AgentID:            *agent,
+		TaskID:             *task,
+		Reason:             *reason,
+		TTLMinutes:         *ttl,
+		Secrets:            secrets,
+		CommandFingerprint: fingerprint,
+		WorkdirFingerprint: wdfp,
+		EnvPath:            strings.TrimSpace(*envPath),
+	})
 	if err != nil {
 		fatal(err)
 	}
@@ -485,15 +497,21 @@ func waitForApproval(broker, brokerUnix, sessionToken, requestID string, timeout
 	}
 }
 
+type pendingItem struct {
+	ID                 string   `json:"ID"`
+	AgentID            string   `json:"AgentID"`
+	TaskID             string   `json:"TaskID"`
+	Reason             string   `json:"Reason"`
+	TTLMinutes         int      `json:"TTLMinutes"`
+	Secrets            []string `json:"Secrets"`
+	CommandFingerprint string   `json:"CommandFingerprint"`
+	WorkdirFingerprint string   `json:"WorkdirFingerprint"`
+	EnvPath            string   `json:"EnvPath"`
+	EnvPathCanonical   string   `json:"EnvPathCanonical"`
+}
+
 type pendingResponse struct {
-	Pending []struct {
-		ID         string   `json:"ID"`
-		AgentID    string   `json:"AgentID"`
-		TaskID     string   `json:"TaskID"`
-		Reason     string   `json:"Reason"`
-		TTLMinutes int      `json:"TTLMinutes"`
-		Secrets    []string `json:"Secrets"`
-	} `json:"pending"`
+	Pending []pendingItem `json:"pending"`
 }
 
 func runApproveQueue(args []string) {
@@ -526,9 +544,7 @@ func runApproveQueue(args []string) {
 			fatal(err)
 		}
 		for _, it := range items {
-			fmt.Printf("\nRequest %s | agent=%s task=%s ttl=%d\n", it.ID, it.AgentID, it.TaskID, it.TTLMinutes)
-			fmt.Printf("Reason: %s\n", it.Reason)
-			fmt.Printf("Secrets: %s\n", strings.Join(it.Secrets, ", "))
+			printPendingDecisionContext(it)
 			fmt.Print("Approve? [y]es / [n]o / [s]kip: ")
 			var ans string
 			_, _ = fmt.Fscanln(os.Stdin, &ans)
@@ -572,7 +588,7 @@ func runApproveList(args []string) {
 		return
 	}
 	for _, it := range items {
-		fmt.Printf("%s | agent=%s task=%s ttl=%d | secrets=%s | reason=%s\n", it.ID, it.AgentID, it.TaskID, it.TTLMinutes, strings.Join(it.Secrets, ","), it.Reason)
+		fmt.Println(formatPendingListLine(it))
 	}
 }
 
@@ -610,14 +626,7 @@ func runApproveDeny(args []string) {
 	fmt.Println("denied", requestID)
 }
 
-func listPending(broker, brokerUnix, operatorToken string) ([]struct {
-	ID         string   `json:"ID"`
-	AgentID    string   `json:"AgentID"`
-	TaskID     string   `json:"TaskID"`
-	Reason     string   `json:"Reason"`
-	TTLMinutes int      `json:"TTLMinutes"`
-	Secrets    []string `json:"Secrets"`
-}, error) {
+func listPending(broker, brokerUnix, operatorToken string) ([]pendingItem, error) {
 	resp, err := getAuth(broker, brokerUnix, "/v1/requests/pending", operatorToken)
 	if err != nil {
 		return nil, err
@@ -631,6 +640,40 @@ func listPending(broker, brokerUnix, operatorToken string) ([]struct {
 		return nil, err
 	}
 	return out.Pending, nil
+}
+
+func printPendingDecisionContext(it pendingItem) {
+	fmt.Printf("\nRequest %s | agent=%s task=%s ttl=%d\n", it.ID, it.AgentID, it.TaskID, it.TTLMinutes)
+	fmt.Printf("Reason: %s\n", it.Reason)
+	fmt.Printf("Secrets: %s\n", strings.Join(it.Secrets, ", "))
+	fmt.Printf("Command FP: %s\n", it.CommandFingerprint)
+	fmt.Printf("Workdir FP: %s\n", it.WorkdirFingerprint)
+	if strings.TrimSpace(it.EnvPath) != "" {
+		fmt.Printf("Env Path: %s\n", it.EnvPath)
+	}
+	if strings.TrimSpace(it.EnvPathCanonical) != "" {
+		fmt.Printf("Env Path Canonical: %s\n", it.EnvPathCanonical)
+	}
+}
+
+func formatPendingListLine(it pendingItem) string {
+	line := fmt.Sprintf("%s | agent=%s task=%s ttl=%d | secrets=%s | reason=%s | command_fp=%s | workdir_fp=%s",
+		it.ID,
+		it.AgentID,
+		it.TaskID,
+		it.TTLMinutes,
+		strings.Join(it.Secrets, ","),
+		it.Reason,
+		it.CommandFingerprint,
+		it.WorkdirFingerprint,
+	)
+	if strings.TrimSpace(it.EnvPath) != "" {
+		line += " | env_path=" + it.EnvPath
+	}
+	if strings.TrimSpace(it.EnvPathCanonical) != "" {
+		line += " | env_path_canonical=" + it.EnvPathCanonical
+	}
+	return line
 }
 
 func deny(broker, brokerUnix, operatorToken, requestID, reason string) error {
