@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -34,6 +36,51 @@ type capabilities struct {
 	AllowPlaintextSecretReturn bool `json:"allow_plaintext_secret_return"`
 }
 
+const (
+	brokerTLSCAFileEnv         = "PROMPTLOCK_BROKER_TLS_CA_FILE"
+	brokerTLSClientCertFileEnv = "PROMPTLOCK_BROKER_TLS_CLIENT_CERT_FILE"
+	brokerTLSClientKeyFileEnv  = "PROMPTLOCK_BROKER_TLS_CLIENT_KEY_FILE"
+	brokerTLSServerNameEnv     = "PROMPTLOCK_BROKER_TLS_SERVER_NAME"
+)
+
+type brokerTLSOptions struct {
+	CAFile         string
+	ClientCertFile string
+	ClientKeyFile  string
+	ServerName     string
+}
+
+type brokerFlags struct {
+	Broker              *string
+	BrokerUnix          *string
+	BrokerTLSCAFile     *string
+	BrokerTLSClientCert *string
+	BrokerTLSClientKey  *string
+	BrokerTLSServerName *string
+}
+
+var activeBrokerTLSOptions = brokerTLSOptions{}
+
+func registerBrokerFlags(fs *flag.FlagSet) brokerFlags {
+	return brokerFlags{
+		Broker:              fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL"),
+		BrokerUnix:          fs.String("broker-unix-socket", getenv("PROMPTLOCK_BROKER_UNIX_SOCKET", ""), "broker unix socket path"),
+		BrokerTLSCAFile:     fs.String("broker-tls-ca-file", getenv(brokerTLSCAFileEnv, ""), "custom CA file for HTTPS broker TLS verification"),
+		BrokerTLSClientCert: fs.String("broker-tls-client-cert-file", getenv(brokerTLSClientCertFileEnv, ""), "client certificate file for HTTPS mTLS"),
+		BrokerTLSClientKey:  fs.String("broker-tls-client-key-file", getenv(brokerTLSClientKeyFileEnv, ""), "client private key file for HTTPS mTLS"),
+		BrokerTLSServerName: fs.String("broker-tls-server-name", getenv(brokerTLSServerNameEnv, ""), "expected TLS server name for HTTPS broker"),
+	}
+}
+
+func (f brokerFlags) applyTLSOptions() {
+	activeBrokerTLSOptions = brokerTLSOptions{
+		CAFile:         strings.TrimSpace(*f.BrokerTLSCAFile),
+		ClientCertFile: strings.TrimSpace(*f.BrokerTLSClientCert),
+		ClientKeyFile:  strings.TrimSpace(*f.BrokerTLSClientKey),
+		ServerName:     strings.TrimSpace(*f.BrokerTLSServerName),
+	}
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|approve-queue|audit-verify|auth> [flags]")
@@ -56,8 +103,7 @@ func main() {
 
 func runExec(args []string) {
 	fs := flag.NewFlagSet("exec", flag.ExitOnError)
-	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
-	brokerUnix := fs.String("broker-unix-socket", getenv("PROMPTLOCK_BROKER_UNIX_SOCKET", ""), "broker unix socket path")
+	conn := registerBrokerFlags(fs)
 	agent := fs.String("agent", "agent", "agent id")
 	task := fs.String("task", "task", "task id")
 	sessionToken := fs.String("session-token", getenv("PROMPTLOCK_SESSION_TOKEN", ""), "agent session token")
@@ -71,6 +117,7 @@ func runExec(args []string) {
 	allowRisky := fs.Bool("allow-risky-command", false, "allow risky commands (env/printenv/proc environ reads)")
 	brokerExec := fs.Bool("broker-exec", false, "execute command via broker /v1/leases/execute")
 	fs.Parse(args)
+	conn.applyTLSOptions()
 
 	cmdArgs := fs.Args()
 	sep := indexOf(cmdArgs, "--")
@@ -89,7 +136,7 @@ func runExec(args []string) {
 
 	secrets := []string{}
 	if *intent != "" {
-		resolved, err := resolveIntent(*broker, *brokerUnix, *sessionToken, *intent)
+		resolved, err := resolveIntent(*conn.Broker, *conn.BrokerUnix, *sessionToken, *intent)
 		if err != nil {
 			fatal(err)
 		}
@@ -106,7 +153,7 @@ func runExec(args []string) {
 		fatal(fmt.Errorf("no secrets resolved; use --intent or --secrets"))
 	}
 
-	caps, err := brokerCapabilities(*broker, *brokerUnix)
+	caps, err := brokerCapabilities(*conn.Broker, *conn.BrokerUnix)
 	if err == nil {
 		if err := validateExecCapabilityPreconditions(caps, *sessionToken, *brokerExec); err != nil {
 			fatal(err)
@@ -122,7 +169,7 @@ func runExec(args []string) {
 	if err != nil {
 		fatal(err)
 	}
-	reqID, err := requestLease(*broker, *brokerUnix, *sessionToken, requestBody{AgentID: *agent, TaskID: *task, Reason: *reason, TTLMinutes: *ttl, Secrets: secrets, CommandFingerprint: fingerprint, WorkdirFingerprint: wdfp})
+	reqID, err := requestLease(*conn.Broker, *conn.BrokerUnix, *sessionToken, requestBody{AgentID: *agent, TaskID: *task, Reason: *reason, TTLMinutes: *ttl, Secrets: secrets, CommandFingerprint: fingerprint, WorkdirFingerprint: wdfp})
 	if err != nil {
 		fatal(err)
 	}
@@ -132,19 +179,19 @@ func runExec(args []string) {
 		if getenv("PROMPTLOCK_DEV_MODE", "") != "1" {
 			fatal(fmt.Errorf("--auto-approve is disabled unless PROMPTLOCK_DEV_MODE=1"))
 		}
-		lease, err = approve(*broker, *brokerUnix, getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), reqID, *ttl)
+		lease, err = approve(*conn.Broker, *conn.BrokerUnix, getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), reqID, *ttl)
 		if err != nil {
 			fatal(err)
 		}
 	} else {
-		lease, err = waitForApproval(*broker, *brokerUnix, *sessionToken, reqID, *waitApprove, *pollInterval)
+		lease, err = waitForApproval(*conn.Broker, *conn.BrokerUnix, *sessionToken, reqID, *waitApprove, *pollInterval)
 		if err != nil {
 			fatal(err)
 		}
 	}
 
 	if *brokerExec {
-		exitCode, output, err := executeWithSecret(*broker, *brokerUnix, *sessionToken, lease, *intent, cmdArgs, secrets, fingerprint, wdfp)
+		exitCode, output, err := executeWithSecret(*conn.Broker, *conn.BrokerUnix, *sessionToken, lease, *intent, cmdArgs, secrets, fingerprint, wdfp)
 		if err != nil {
 			fatal(err)
 		}
@@ -156,7 +203,7 @@ func runExec(args []string) {
 
 	env := os.Environ()
 	for _, s := range secrets {
-		v, err := accessSecret(*broker, *brokerUnix, *sessionToken, lease, s, fingerprint, wdfp)
+		v, err := accessSecret(*conn.Broker, *conn.BrokerUnix, *sessionToken, lease, s, fingerprint, wdfp)
 		if err != nil {
 			fatal(err)
 		}
@@ -233,7 +280,11 @@ func postJSONAuth(baseURL, unixSocket, path, bearer string, in any, out any) err
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
-	resp, err := httpClient(unixSocket).Do(req)
+	client, err := httpClient(baseURL, unixSocket)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -252,7 +303,11 @@ func getAuth(baseURL, unixSocket, path, bearer string) (*http.Response, error) {
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
-	return httpClient(unixSocket).Do(req)
+	client, err := httpClient(baseURL, unixSocket)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
 }
 
 func buildURL(baseURL, path string) string {
@@ -262,16 +317,66 @@ func buildURL(baseURL, path string) string {
 	return strings.TrimRight(baseURL, "/") + path
 }
 
-func httpClient(unixSocket string) *http.Client {
-	if unixSocket == "" {
-		return http.DefaultClient
+func httpClient(baseURL, unixSocket string) (*http.Client, error) {
+	opts := activeBrokerTLSOptions
+	if unixSocket != "" {
+		if opts.CAFile != "" || opts.ClientCertFile != "" || opts.ClientKeyFile != "" || opts.ServerName != "" {
+			return nil, fmt.Errorf("broker tls options are not supported with --broker-unix-socket")
+		}
+		tr := &http.Transport{}
+		tr.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", unixSocket)
+		}
+		return &http.Client{Transport: tr}, nil
 	}
-	tr := &http.Transport{}
-	tr.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
-		var d net.Dialer
-		return d.DialContext(ctx, "unix", unixSocket)
+
+	usesTLSOverrides := opts.CAFile != "" || opts.ClientCertFile != "" || opts.ClientKeyFile != "" || opts.ServerName != ""
+	if !usesTLSOverrides {
+		return http.DefaultClient, nil
 	}
-	return &http.Client{Transport: tr}
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(baseURL)), "https://") {
+		return nil, fmt.Errorf("broker tls options require an https broker URL")
+	}
+
+	tlsConfig, err := buildBrokerTLSConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig}}, nil
+}
+
+func buildBrokerTLSConfig(opts brokerTLSOptions) (*tls.Config, error) {
+	if opts.ClientCertFile != "" && opts.ClientKeyFile == "" {
+		return nil, fmt.Errorf("broker tls client cert requires --broker-tls-client-key-file")
+	}
+	if opts.ClientKeyFile != "" && opts.ClientCertFile == "" {
+		return nil, fmt.Errorf("broker tls client key requires --broker-tls-client-cert-file")
+	}
+
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	if opts.ServerName != "" {
+		tlsConfig.ServerName = opts.ServerName
+	}
+	if opts.CAFile != "" {
+		caPEM, err := os.ReadFile(opts.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read broker tls ca file %s: %w", opts.CAFile, err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("parse broker tls ca file %s: no certificates found", opts.CAFile)
+		}
+		tlsConfig.RootCAs = pool
+	}
+	if opts.ClientCertFile != "" && opts.ClientKeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(opts.ClientCertFile, opts.ClientKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load broker tls client certificate/key: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+	}
+	return tlsConfig, nil
 }
 
 func fatal(err error) {
@@ -407,16 +512,16 @@ func runApproveQueue(args []string) {
 	}
 
 	fs := flag.NewFlagSet("approve-queue", flag.ExitOnError)
-	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
-	brokerUnix := fs.String("broker-unix-socket", getenv("PROMPTLOCK_BROKER_UNIX_SOCKET", ""), "broker unix socket path")
+	conn := registerBrokerFlags(fs)
 	poll := fs.Duration("poll-interval", 3*time.Second, "poll interval")
 	defaultTTL := fs.Int("ttl", 5, "approval ttl override")
 	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	once := fs.Bool("once", false, "process one pass and exit")
 	fs.Parse(args)
+	conn.applyTLSOptions()
 
 	for {
-		items, err := listPending(*broker, *brokerUnix, *operatorToken)
+		items, err := listPending(*conn.Broker, *conn.BrokerUnix, *operatorToken)
 		if err != nil {
 			fatal(err)
 		}
@@ -429,14 +534,14 @@ func runApproveQueue(args []string) {
 			_, _ = fmt.Fscanln(os.Stdin, &ans)
 			switch strings.ToLower(strings.TrimSpace(ans)) {
 			case "y", "yes":
-				_, err := approve(*broker, *brokerUnix, *operatorToken, it.ID, *defaultTTL)
+				_, err := approve(*conn.Broker, *conn.BrokerUnix, *operatorToken, it.ID, *defaultTTL)
 				if err != nil {
 					fmt.Println("approve failed:", err)
 				} else {
 					fmt.Println("approved")
 				}
 			case "n", "no":
-				if err := deny(*broker, *brokerUnix, *operatorToken, it.ID, "denied by operator"); err != nil {
+				if err := deny(*conn.Broker, *conn.BrokerUnix, *operatorToken, it.ID, "denied by operator"); err != nil {
 					fmt.Println("deny failed:", err)
 				} else {
 					fmt.Println("denied")
@@ -454,11 +559,11 @@ func runApproveQueue(args []string) {
 
 func runApproveList(args []string) {
 	fs := flag.NewFlagSet("approve-queue list", flag.ExitOnError)
-	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
-	brokerUnix := fs.String("broker-unix-socket", getenv("PROMPTLOCK_BROKER_UNIX_SOCKET", ""), "broker unix socket path")
+	conn := registerBrokerFlags(fs)
 	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	fs.Parse(args)
-	items, err := listPending(*broker, *brokerUnix, *operatorToken)
+	conn.applyTLSOptions()
+	items, err := listPending(*conn.Broker, *conn.BrokerUnix, *operatorToken)
 	if err != nil {
 		fatal(err)
 	}
@@ -473,16 +578,16 @@ func runApproveList(args []string) {
 
 func runApproveAllow(args []string) {
 	fs := flag.NewFlagSet("approve-queue allow", flag.ExitOnError)
-	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
-	brokerUnix := fs.String("broker-unix-socket", getenv("PROMPTLOCK_BROKER_UNIX_SOCKET", ""), "broker unix socket path")
+	conn := registerBrokerFlags(fs)
 	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	ttl := fs.Int("ttl", 5, "approval ttl override")
 	fs.Parse(args)
+	conn.applyTLSOptions()
 	if fs.NArg() < 1 {
 		fatal(fmt.Errorf("usage: promptlock approve-queue allow [--broker URL] [--ttl N] <request_id>"))
 	}
 	requestID := fs.Arg(0)
-	if _, err := approve(*broker, *brokerUnix, *operatorToken, requestID, *ttl); err != nil {
+	if _, err := approve(*conn.Broker, *conn.BrokerUnix, *operatorToken, requestID, *ttl); err != nil {
 		fatal(err)
 	}
 	fmt.Println("approved", requestID)
@@ -490,16 +595,16 @@ func runApproveAllow(args []string) {
 
 func runApproveDeny(args []string) {
 	fs := flag.NewFlagSet("approve-queue deny", flag.ExitOnError)
-	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
-	brokerUnix := fs.String("broker-unix-socket", getenv("PROMPTLOCK_BROKER_UNIX_SOCKET", ""), "broker unix socket path")
+	conn := registerBrokerFlags(fs)
 	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	reason := fs.String("reason", "denied by operator", "deny reason")
 	fs.Parse(args)
+	conn.applyTLSOptions()
 	if fs.NArg() < 1 {
 		fatal(fmt.Errorf("usage: promptlock approve-queue deny [--broker URL] [--reason TEXT] <request_id>"))
 	}
 	requestID := fs.Arg(0)
-	if err := deny(*broker, *brokerUnix, *operatorToken, requestID, *reason); err != nil {
+	if err := deny(*conn.Broker, *conn.BrokerUnix, *operatorToken, requestID, *reason); err != nil {
 		fatal(err)
 	}
 	fmt.Println("denied", requestID)
@@ -589,7 +694,7 @@ func executeWithSecret(broker, brokerUnix, sessionToken, lease, intent string, c
 
 func runAuth(args []string) {
 	if len(args) == 0 {
-		fatal(fmt.Errorf("usage: promptlock auth <bootstrap|pair|mint> [flags]"))
+		fatal(fmt.Errorf("usage: promptlock auth <bootstrap|pair|mint|login> [flags]"))
 	}
 	switch args[0] {
 	case "bootstrap":
@@ -598,27 +703,101 @@ func runAuth(args []string) {
 		runAuthPair(args[1:])
 	case "mint":
 		runAuthMint(args[1:])
+	case "login":
+		runAuthLogin(args[1:])
 	default:
-		fatal(fmt.Errorf("usage: promptlock auth <bootstrap|pair|mint> [flags]"))
+		fatal(fmt.Errorf("usage: promptlock auth <bootstrap|pair|mint|login> [flags]"))
 	}
+}
+
+type authBootstrapResult struct {
+	BootstrapToken string    `json:"bootstrap_token"`
+	ExpiresAt      time.Time `json:"expires_at"`
+}
+
+type authPairResult struct {
+	GrantID           string    `json:"grant_id"`
+	IdleExpiresAt     time.Time `json:"idle_expires_at"`
+	AbsoluteExpiresAt time.Time `json:"absolute_expires_at"`
+}
+
+type authMintResult struct {
+	SessionToken string    `json:"session_token"`
+	ExpiresAt    time.Time `json:"expires_at"`
+}
+
+type authLoginResult struct {
+	SessionToken string    `json:"session_token"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	GrantID      string    `json:"grant_id"`
+}
+
+func authBootstrap(broker, brokerUnix, operatorToken, agentID, containerID string) (authBootstrapResult, error) {
+	var out authBootstrapResult
+	if err := postJSONAuth(broker, brokerUnix, "/v1/auth/bootstrap/create", operatorToken, map[string]string{"agent_id": agentID, "container_id": containerID}, &out); err != nil {
+		return authBootstrapResult{}, err
+	}
+	if strings.TrimSpace(out.BootstrapToken) == "" {
+		return authBootstrapResult{}, fmt.Errorf("empty bootstrap_token")
+	}
+	return out, nil
+}
+
+func authPair(broker, brokerUnix, token, containerID string) (authPairResult, error) {
+	var out authPairResult
+	if err := postJSONAuth(broker, brokerUnix, "/v1/auth/pair/complete", "", map[string]string{"token": token, "container_id": containerID}, &out); err != nil {
+		return authPairResult{}, err
+	}
+	if strings.TrimSpace(out.GrantID) == "" {
+		return authPairResult{}, fmt.Errorf("empty grant_id")
+	}
+	return out, nil
+}
+
+func authMint(broker, brokerUnix, grantID string) (authMintResult, error) {
+	var out authMintResult
+	if err := postJSONAuth(broker, brokerUnix, "/v1/auth/session/mint", "", map[string]string{"grant_id": grantID}, &out); err != nil {
+		return authMintResult{}, err
+	}
+	if strings.TrimSpace(out.SessionToken) == "" {
+		return authMintResult{}, fmt.Errorf("empty session_token")
+	}
+	return out, nil
+}
+
+func authLogin(broker, brokerUnix, operatorToken, agentID, containerID string) (authLoginResult, error) {
+	bootstrap, err := authBootstrap(broker, brokerUnix, operatorToken, agentID, containerID)
+	if err != nil {
+		return authLoginResult{}, fmt.Errorf("bootstrap step failed: %w", err)
+	}
+	pair, err := authPair(broker, brokerUnix, bootstrap.BootstrapToken, containerID)
+	if err != nil {
+		return authLoginResult{}, fmt.Errorf("pair step failed: %w", err)
+	}
+	mint, err := authMint(broker, brokerUnix, pair.GrantID)
+	if err != nil {
+		return authLoginResult{}, fmt.Errorf("mint step failed: %w", err)
+	}
+	return authLoginResult{
+		SessionToken: mint.SessionToken,
+		ExpiresAt:    mint.ExpiresAt,
+		GrantID:      pair.GrantID,
+	}, nil
 }
 
 func runAuthBootstrap(args []string) {
 	fs := flag.NewFlagSet("auth bootstrap", flag.ExitOnError)
-	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
-	brokerUnix := fs.String("broker-unix-socket", getenv("PROMPTLOCK_BROKER_UNIX_SOCKET", ""), "broker unix socket path")
+	conn := registerBrokerFlags(fs)
 	opToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	agent := fs.String("agent", "", "agent id")
 	container := fs.String("container", "", "container id")
 	fs.Parse(args)
+	conn.applyTLSOptions()
 	if strings.TrimSpace(*opToken) == "" || strings.TrimSpace(*agent) == "" || strings.TrimSpace(*container) == "" {
 		fatal(fmt.Errorf("--operator-token, --agent and --container are required"))
 	}
-	var out struct {
-		BootstrapToken string    `json:"bootstrap_token"`
-		ExpiresAt      time.Time `json:"expires_at"`
-	}
-	if err := postJSONAuth(*broker, *brokerUnix, "/v1/auth/bootstrap/create", *opToken, map[string]string{"agent_id": *agent, "container_id": *container}, &out); err != nil {
+	out, err := authBootstrap(*conn.Broker, *conn.BrokerUnix, *opToken, *agent, *container)
+	if err != nil {
 		fatal(err)
 	}
 	writeJSONStdout(map[string]any{"bootstrap_token": out.BootstrapToken, "expires_at": out.ExpiresAt})
@@ -626,20 +805,16 @@ func runAuthBootstrap(args []string) {
 
 func runAuthPair(args []string) {
 	fs := flag.NewFlagSet("auth pair", flag.ExitOnError)
-	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
-	brokerUnix := fs.String("broker-unix-socket", getenv("PROMPTLOCK_BROKER_UNIX_SOCKET", ""), "broker unix socket path")
+	conn := registerBrokerFlags(fs)
 	token := fs.String("token", "", "bootstrap token")
 	container := fs.String("container", "", "container id")
 	fs.Parse(args)
+	conn.applyTLSOptions()
 	if strings.TrimSpace(*token) == "" || strings.TrimSpace(*container) == "" {
 		fatal(fmt.Errorf("--token and --container are required"))
 	}
-	var out struct {
-		GrantID           string    `json:"grant_id"`
-		IdleExpiresAt     time.Time `json:"idle_expires_at"`
-		AbsoluteExpiresAt time.Time `json:"absolute_expires_at"`
-	}
-	if err := postJSONAuth(*broker, *brokerUnix, "/v1/auth/pair/complete", "", map[string]string{"token": *token, "container_id": *container}, &out); err != nil {
+	out, err := authPair(*conn.Broker, *conn.BrokerUnix, *token, *container)
+	if err != nil {
 		fatal(err)
 	}
 	writeJSONStdout(map[string]any{"grant_id": out.GrantID, "idle_expires_at": out.IdleExpiresAt, "absolute_expires_at": out.AbsoluteExpiresAt})
@@ -647,21 +822,40 @@ func runAuthPair(args []string) {
 
 func runAuthMint(args []string) {
 	fs := flag.NewFlagSet("auth mint", flag.ExitOnError)
-	broker := fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL")
-	brokerUnix := fs.String("broker-unix-socket", getenv("PROMPTLOCK_BROKER_UNIX_SOCKET", ""), "broker unix socket path")
+	conn := registerBrokerFlags(fs)
 	grant := fs.String("grant", "", "grant id")
 	fs.Parse(args)
+	conn.applyTLSOptions()
 	if strings.TrimSpace(*grant) == "" {
 		fatal(fmt.Errorf("--grant is required"))
 	}
-	var out struct {
-		SessionToken string    `json:"session_token"`
-		ExpiresAt    time.Time `json:"expires_at"`
-	}
-	if err := postJSONAuth(*broker, *brokerUnix, "/v1/auth/session/mint", "", map[string]string{"grant_id": *grant}, &out); err != nil {
+	out, err := authMint(*conn.Broker, *conn.BrokerUnix, *grant)
+	if err != nil {
 		fatal(err)
 	}
 	writeJSONStdout(map[string]any{"session_token": out.SessionToken, "expires_at": out.ExpiresAt})
+}
+
+func runAuthLogin(args []string) {
+	fs := flag.NewFlagSet("auth login", flag.ExitOnError)
+	conn := registerBrokerFlags(fs)
+	opToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
+	agent := fs.String("agent", "", "agent id")
+	container := fs.String("container", "", "container id")
+	fs.Parse(args)
+	conn.applyTLSOptions()
+	if strings.TrimSpace(*opToken) == "" || strings.TrimSpace(*agent) == "" || strings.TrimSpace(*container) == "" {
+		fatal(fmt.Errorf("--operator-token, --agent and --container are required"))
+	}
+	out, err := authLogin(*conn.Broker, *conn.BrokerUnix, *opToken, *agent, *container)
+	if err != nil {
+		fatal(err)
+	}
+	writeJSONStdout(map[string]any{
+		"session_token": out.SessionToken,
+		"expires_at":    out.ExpiresAt,
+		"grant_id":      out.GrantID,
+	})
 }
 
 func writeJSONStdout(v any) {
