@@ -15,7 +15,9 @@ type Config struct {
 	UnixSocket          string              `json:"unix_socket"`
 	AuditPath           string              `json:"audit_path"`
 	StateStoreFile      string              `json:"state_store_file"`
+	StateStore          StateStoreConfig    `json:"state_store"`
 	Policy              PolicyConfig        `json:"policy"`
+	RequestPolicy       RequestPolicyConfig `json:"request_policy"`
 	Auth                AuthConfig          `json:"auth"`
 	ExecutionPolicy     ExecutionPolicy     `json:"execution_policy"`
 	HostOpsPolicy       HostOpsPolicy       `json:"host_ops_policy"`
@@ -47,9 +49,11 @@ func Default() Config {
 		AuditPath:           "/tmp/promptlock-audit.jsonl",
 		Intents:             IntentMap{},
 		Auth:                defaultAuthConfig(),
+		StateStore:          defaultStateStoreConfig(),
 		ExecutionPolicy:     defaultExecutionPolicy(),
 		HostOpsPolicy:       defaultHostOpsPolicy(),
 		NetworkEgressPolicy: defaultNetworkEgressPolicy(),
+		RequestPolicy:       defaultRequestPolicyConfig(),
 		TLS:                 defaultTLSConfig(),
 		SecretSource:        defaultSecretSourceConfig(),
 		Policy: PolicyConfig{
@@ -96,6 +100,15 @@ func (c *Config) normalize() {
 	if c.SecretSource.Type == "" {
 		c.SecretSource.Type = "in_memory"
 	}
+	if c.StateStore.Type == "" {
+		c.StateStore.Type = "file"
+	}
+	if strings.TrimSpace(c.StateStore.ExternalAuthTokenEnv) == "" {
+		c.StateStore.ExternalAuthTokenEnv = "PROMPTLOCK_EXTERNAL_STATE_TOKEN"
+	}
+	if c.StateStore.ExternalTimeoutSec <= 0 {
+		c.StateStore.ExternalTimeoutSec = 10
+	}
 	if strings.TrimSpace(c.Auth.StoreEncryptionKeyEnv) == "" {
 		c.Auth.StoreEncryptionKeyEnv = "PROMPTLOCK_AUTH_STORE_KEY"
 	}
@@ -118,6 +131,12 @@ func (c *Config) normalize() {
 		}
 	default:
 		c.SecretSource.InMemoryHardened = "warn"
+	}
+	if c.RequestPolicy.IdenticalRequestCooldownSeconds <= 0 {
+		c.RequestPolicy.IdenticalRequestCooldownSeconds = 60
+	}
+	if c.RequestPolicy.MaxPendingPerAgent <= 0 {
+		c.RequestPolicy.MaxPendingPerAgent = 2
 	}
 }
 

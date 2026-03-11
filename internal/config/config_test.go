@@ -94,3 +94,57 @@ func TestLoadHardenedProfileWithLoopbackAddressDefaultsUnixSocket(t *testing.T) 
 		t.Fatalf("expected hardened loopback config to default unix socket")
 	}
 }
+
+func TestDefaultRequestPolicyConfig(t *testing.T) {
+	cfg := Default()
+	if cfg.RequestPolicy.IdenticalRequestCooldownSeconds != 60 {
+		t.Fatalf("expected cooldown default of 60 seconds, got %d", cfg.RequestPolicy.IdenticalRequestCooldownSeconds)
+	}
+	if cfg.RequestPolicy.MaxPendingPerAgent != 2 {
+		t.Fatalf("expected max pending per agent default of 2, got %d", cfg.RequestPolicy.MaxPendingPerAgent)
+	}
+	if !cfg.RequestPolicy.EnableActiveLeaseReuse {
+		t.Fatalf("expected active lease reuse to default to enabled")
+	}
+}
+
+func TestLoadRequestPolicyConfigOverrides(t *testing.T) {
+	d := t.TempDir()
+	p := filepath.Join(d, "cfg-request-policy.json")
+	data := `{"request_policy":{"identical_request_cooldown_seconds":120,"max_pending_per_agent":4,"enable_active_lease_reuse":false}}`
+	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RequestPolicy.IdenticalRequestCooldownSeconds != 120 {
+		t.Fatalf("expected cooldown override of 120 seconds, got %d", cfg.RequestPolicy.IdenticalRequestCooldownSeconds)
+	}
+	if cfg.RequestPolicy.MaxPendingPerAgent != 4 {
+		t.Fatalf("expected max pending override of 4, got %d", cfg.RequestPolicy.MaxPendingPerAgent)
+	}
+	if cfg.RequestPolicy.EnableActiveLeaseReuse {
+		t.Fatalf("expected active lease reuse override to be disabled")
+	}
+}
+
+func TestLoadRequestPolicyConfigNormalizesInvalidNumericValues(t *testing.T) {
+	d := t.TempDir()
+	p := filepath.Join(d, "cfg-request-policy-normalize.json")
+	data := `{"request_policy":{"identical_request_cooldown_seconds":0,"max_pending_per_agent":0}}`
+	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RequestPolicy.IdenticalRequestCooldownSeconds != 60 {
+		t.Fatalf("expected cooldown to normalize to 60 seconds, got %d", cfg.RequestPolicy.IdenticalRequestCooldownSeconds)
+	}
+	if cfg.RequestPolicy.MaxPendingPerAgent != 2 {
+		t.Fatalf("expected max pending to normalize to 2, got %d", cfg.RequestPolicy.MaxPendingPerAgent)
+	}
+}
