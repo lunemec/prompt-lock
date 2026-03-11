@@ -51,16 +51,20 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	if req.TTLMinutes == 0 {
 		req.TTLMinutes = s.svc.Policy.DefaultTTLMinutes
 	}
-	created, err := s.svc.RequestLease(req.AgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint)
+	result, err := s.svc.RequestLeaseWithPolicy(req.AgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint)
 	if err != nil {
 		writeMappedError(w, ErrBadRequest, err.Error())
+		return
+	}
+	if result.Reused {
+		writeJSON(w, map[string]any{"request_id": result.Lease.RequestID, "status": "reused", "lease_token": result.Lease.Token, "expires_at": result.Lease.ExpiresAt})
 		return
 	}
 	if err := s.persistRequestLeaseState(); err != nil {
 		writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
 		return
 	}
-	writeJSON(w, map[string]any{"request_id": created.ID, "status": created.Status})
+	writeJSON(w, map[string]any{"request_id": result.Request.ID, "status": result.Request.Status})
 }
 
 func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {

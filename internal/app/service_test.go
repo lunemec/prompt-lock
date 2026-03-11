@@ -113,3 +113,92 @@ func TestAccessSecretBackendFailureIsAuditedAndDeterministic(t *testing.T) {
 		t.Fatalf("expected secret_backend_error audit event")
 	}
 }
+
+func TestRequestLeaseWithPolicyReusesEquivalentActiveLease(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	_ = store.SaveLease(domain.Lease{
+		Token:              "lease_active",
+		RequestID:          "req_existing",
+		AgentID:            "agent1",
+		TaskID:             "task-old",
+		Secrets:            []string{"github_token", "npm_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		ExpiresAt:          now.Add(10 * time.Minute),
+	})
+
+	svc := Service{
+		Policy:   domain.DefaultPolicy(),
+		Requests: store,
+		Leases:   store,
+		Secrets:  store,
+		Audit:    &auditBuf{},
+		Now:      func() time.Time { return now },
+		NewRequestID: func() string {
+			return "req_new"
+		},
+		NewLeaseTok: func() string { return "lease_new" },
+	}
+
+	result, err := svc.RequestLeaseWithPolicy("agent1", "task1", "test", 5, []string{" npm_token ", "github_token", "github_token"}, "fp1", "wd1")
+	if err != nil {
+		t.Fatalf("request lease with policy: %v", err)
+	}
+	if !result.Reused {
+		t.Fatalf("expected equivalent active lease to be reused")
+	}
+	if result.Lease.Token != "lease_active" {
+		t.Fatalf("expected reused lease token lease_active, got %q", result.Lease.Token)
+	}
+	if result.Request.ID != "" {
+		t.Fatalf("expected no new request when reusing active lease, got %q", result.Request.ID)
+	}
+
+	pending, err := store.ListPendingRequests()
+	if err != nil {
+		t.Fatalf("list pending requests: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected no pending requests when lease is reused, got %d", len(pending))
+	}
+}
+
+func TestRequestLeaseWithPolicyCreatesPendingWhenNoActiveEquivalentLease(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	svc := Service{
+		Policy:   domain.DefaultPolicy(),
+		Requests: store,
+		Leases:   store,
+		Secrets:  store,
+		Audit:    &auditBuf{},
+		Now:      func() time.Time { return now },
+		NewRequestID: func() string {
+			return "req_new"
+		},
+		NewLeaseTok: func() string { return "lease_new" },
+	}
+
+	result, err := svc.RequestLeaseWithPolicy("agent1", "task1", "test", 5, []string{"github_token"}, "fp1", "wd1")
+	if err != nil {
+		t.Fatalf("request lease with policy: %v", err)
+	}
+	if result.Reused {
+		t.Fatalf("expected new pending request when no reusable lease exists")
+	}
+	if result.Request.ID != "req_new" {
+		t.Fatalf("expected created request id req_new, got %q", result.Request.ID)
+	}
+	if result.Request.Status != domain.RequestPending {
+		t.Fatalf("expected pending request status, got %q", result.Request.Status)
+	}
+
+	pending, err := store.ListPendingRequests()
+	if err != nil {
+		t.Fatalf("list pending requests: %v", err)
+	}
+	if len(pending) != 1 || pending[0].ID != "req_new" {
+		t.Fatalf("expected created request to be pending, got %#v", pending)
+	}
+}

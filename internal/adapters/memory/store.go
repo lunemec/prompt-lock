@@ -109,6 +109,16 @@ func (s *Store) GetLeaseByRequestID(requestID string) (domain.Lease, error) {
 	return domain.Lease{}, errors.New("lease not found for request")
 }
 
+func (s *Store) ListLeases() ([]domain.Lease, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]domain.Lease, 0, len(s.leases))
+	for _, lease := range s.leases {
+		out = append(out, cloneLease(lease))
+	}
+	return out, nil
+}
+
 func (s *Store) GetSecret(name string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
