@@ -2,8 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strconv"
 
+	"github.com/lunemec/promptlock/internal/app"
 	"github.com/lunemec/promptlock/internal/core/ports"
 )
 
@@ -53,7 +56,14 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.svc.RequestLeaseWithPolicy(req.AgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint)
 	if err != nil {
-		writeMappedError(w, ErrBadRequest, err.Error())
+		var throttleErr *app.RequestThrottleError
+		if errors.As(err, &throttleErr) {
+			w.Header().Set("Retry-After", strconv.Itoa(throttleErr.RetryAfterSeconds()))
+			writeMappedError(w, ErrRateLimited, throttleErr.Error())
+			return
+		}
+		kind, msg := stateStoreMutationError(err)
+		writeMappedError(w, kind, msg)
 		return
 	}
 	if result.Reused {

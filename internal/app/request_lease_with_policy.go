@@ -1,6 +1,11 @@
 package app
 
-import "github.com/lunemec/promptlock/internal/core/domain"
+import (
+	"strings"
+	"time"
+
+	"github.com/lunemec/promptlock/internal/core/domain"
+)
 
 type RequestLeaseResult struct {
 	Request domain.LeaseRequest
@@ -16,14 +21,17 @@ func (s Service) RequestLeaseWithPolicy(agentID, taskID, reason string, ttl int,
 	if err := s.Policy.ValidateRequest(ttl, secrets); err != nil {
 		return RequestLeaseResult{}, err
 	}
+
 	policy := DefaultRequestPolicy()
+	input := RequestPolicyInput{
+		AgentID:            agentID,
+		Secrets:            secrets,
+		CommandFingerprint: commandFingerprint,
+		WorkdirFingerprint: workdirFingerprint,
+	}
+
 	if policy.EnableActiveLeaseReuse {
-		reusableLease, reused, err := s.findEquivalentActiveLease(RequestPolicyInput{
-			AgentID:            agentID,
-			Secrets:            secrets,
-			CommandFingerprint: commandFingerprint,
-			WorkdirFingerprint: workdirFingerprint,
-		})
+		reusableLease, reused, err := s.findEquivalentActiveLease(input)
 		if err != nil {
 			return RequestLeaseResult{}, err
 		}
@@ -31,6 +39,19 @@ func (s Service) RequestLeaseWithPolicy(agentID, taskID, reason string, ttl int,
 			return RequestLeaseResult{Lease: reusableLease, Reused: true}, nil
 		}
 	}
+
+	pending, err := s.Requests.ListPendingRequests()
+	if err != nil {
+		return RequestLeaseResult{}, err
+	}
+	if countPendingRequestsForAgent(agentID, pending) >= policy.MaxPendingPerAgent {
+		return RequestLeaseResult{}, NewRequestThrottleError(RequestThrottleReasonPendingCap, policy.IdenticalRequestCooldown)
+	}
+
+	if retryAfter, throttled := s.equivalentRequestCooldown(input, pending, policy.IdenticalRequestCooldown); throttled {
+		return RequestLeaseResult{}, NewRequestThrottleError(RequestThrottleReasonCooldown, retryAfter)
+	}
+
 	created, err := s.RequestLease(agentID, taskID, reason, ttl, secrets, commandFingerprint, workdirFingerprint)
 	if err != nil {
 		return RequestLeaseResult{}, err
@@ -66,4 +87,54 @@ func (s Service) findEquivalentActiveLease(input RequestPolicyInput) (domain.Lea
 	}
 
 	return domain.Lease{}, false, nil
+}
+
+func countPendingRequestsForAgent(agentID string, pending []domain.LeaseRequest) int {
+	target := strings.TrimSpace(agentID)
+	count := 0
+	for _, req := range pending {
+		if strings.TrimSpace(req.AgentID) == target {
+			count++
+		}
+	}
+	return count
+}
+
+func (s Service) equivalentRequestCooldown(input RequestPolicyInput, pending []domain.LeaseRequest, cooldown time.Duration) (time.Duration, bool) {
+	if cooldown <= 0 {
+		return 0, false
+	}
+
+	now := s.now()
+	target := input.EquivalenceKey()
+	maxRetryAfter := time.Duration(0)
+	for _, req := range pending {
+		candidate := RequestPolicyInput{
+			AgentID:            req.AgentID,
+			Secrets:            req.Secrets,
+			CommandFingerprint: req.CommandFingerprint,
+			WorkdirFingerprint: req.WorkdirFingerprint,
+		}
+		if candidate.EquivalenceKey() != target {
+			continue
+		}
+
+		elapsed := now.Sub(req.CreatedAt)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		if elapsed >= cooldown {
+			continue
+		}
+
+		retryAfter := cooldown - elapsed
+		if retryAfter > maxRetryAfter {
+			maxRetryAfter = retryAfter
+		}
+	}
+
+	if maxRetryAfter <= 0 {
+		return 0, false
+	}
+	return maxRetryAfter, true
 }

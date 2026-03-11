@@ -202,3 +202,172 @@ func TestRequestLeaseWithPolicyCreatesPendingWhenNoActiveEquivalentLease(t *test
 		t.Fatalf("expected created request to be pending, got %#v", pending)
 	}
 }
+
+func TestRequestLeaseWithPolicyThrottlesWhenPendingCapReached(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	_ = store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_1",
+		AgentID:            "agent1",
+		TaskID:             "task_1",
+		Reason:             "first",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now.Add(-20 * time.Second),
+	})
+	_ = store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_2",
+		AgentID:            "agent1",
+		TaskID:             "task_2",
+		Reason:             "second",
+		TTLMinutes:         5,
+		Secrets:            []string{"npm_token"},
+		CommandFingerprint: "fp2",
+		WorkdirFingerprint: "wd2",
+		Status:             domain.RequestPending,
+		CreatedAt:          now.Add(-10 * time.Second),
+	})
+
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      store,
+		Audit:        &auditBuf{},
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_new" },
+		NewLeaseTok:  func() string { return "lease_new" },
+	}
+
+	_, err := svc.RequestLeaseWithPolicy("agent1", "task3", "third", 5, []string{"slack_token"}, "fp3", "wd3")
+	if err == nil {
+		t.Fatalf("expected pending-cap throttle error")
+	}
+
+	var throttleErr *RequestThrottleError
+	if !errors.As(err, &throttleErr) {
+		t.Fatalf("expected RequestThrottleError, got %v", err)
+	}
+	if throttleErr.Reason != RequestThrottleReasonPendingCap {
+		t.Fatalf("expected pending-cap throttle reason, got %q", throttleErr.Reason)
+	}
+	if throttleErr.RetryAfter != 60*time.Second {
+		t.Fatalf("expected retry-after 60s for pending-cap, got %s", throttleErr.RetryAfter)
+	}
+
+	pending, err := store.ListPendingRequests()
+	if err != nil {
+		t.Fatalf("list pending requests: %v", err)
+	}
+	if len(pending) != 2 {
+		t.Fatalf("expected pending queue unchanged on throttle, got %d", len(pending))
+	}
+}
+
+func TestRequestLeaseWithPolicyThrottlesEquivalentRequestWithinCooldown(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	_ = store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_1",
+		AgentID:            "agent1",
+		TaskID:             "task_1",
+		Reason:             "first",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token", "npm_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now.Add(-15 * time.Second),
+	})
+
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      store,
+		Audit:        &auditBuf{},
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_new" },
+		NewLeaseTok:  func() string { return "lease_new" },
+	}
+
+	_, err := svc.RequestLeaseWithPolicy("agent1", "task2", "repeat", 5, []string{" npm_token ", "github_token"}, "fp1", "wd1")
+	if err == nil {
+		t.Fatalf("expected cooldown throttle error")
+	}
+
+	var throttleErr *RequestThrottleError
+	if !errors.As(err, &throttleErr) {
+		t.Fatalf("expected RequestThrottleError, got %v", err)
+	}
+	if throttleErr.Reason != RequestThrottleReasonCooldown {
+		t.Fatalf("expected cooldown throttle reason, got %q", throttleErr.Reason)
+	}
+	if throttleErr.RetryAfter != 45*time.Second {
+		t.Fatalf("expected retry-after 45s for cooldown, got %s", throttleErr.RetryAfter)
+	}
+
+	pending, err := store.ListPendingRequests()
+	if err != nil {
+		t.Fatalf("list pending requests: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected pending queue unchanged on cooldown throttle, got %d", len(pending))
+	}
+}
+
+func TestRequestLeaseWithPolicyChecksPendingCapBeforeCooldown(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	_ = store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_1",
+		AgentID:            "agent1",
+		TaskID:             "task_1",
+		Reason:             "first",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now.Add(-10 * time.Second),
+	})
+	_ = store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_2",
+		AgentID:            "agent1",
+		TaskID:             "task_2",
+		Reason:             "second",
+		TTLMinutes:         5,
+		Secrets:            []string{"npm_token"},
+		CommandFingerprint: "fp2",
+		WorkdirFingerprint: "wd2",
+		Status:             domain.RequestPending,
+		CreatedAt:          now.Add(-40 * time.Second),
+	})
+
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      store,
+		Audit:        &auditBuf{},
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_new" },
+		NewLeaseTok:  func() string { return "lease_new" },
+	}
+
+	_, err := svc.RequestLeaseWithPolicy("agent1", "task2", "repeat", 5, []string{"github_token"}, "fp1", "wd1")
+	if err == nil {
+		t.Fatalf("expected pending-cap throttle error")
+	}
+
+	var throttleErr *RequestThrottleError
+	if !errors.As(err, &throttleErr) {
+		t.Fatalf("expected RequestThrottleError, got %v", err)
+	}
+	if throttleErr.Reason != RequestThrottleReasonPendingCap {
+		t.Fatalf("expected pending-cap to win when both checks match, got %q", throttleErr.Reason)
+	}
+}
