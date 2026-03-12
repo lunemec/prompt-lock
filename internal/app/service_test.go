@@ -371,3 +371,58 @@ func TestRequestLeaseWithPolicyChecksPendingCapBeforeCooldown(t *testing.T) {
 		t.Fatalf("expected pending-cap to win when both checks match, got %q", throttleErr.Reason)
 	}
 }
+
+func TestRequestLeaseWithPolicyDoesNotReuseActiveLeaseWhenEnvPathProvided(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	_ = store.SaveLease(domain.Lease{
+		Token:              "lease_active",
+		RequestID:          "req_existing",
+		AgentID:            "agent1",
+		TaskID:             "task-old",
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		ExpiresAt:          now.Add(10 * time.Minute),
+	})
+
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      store,
+		Audit:        &auditBuf{},
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_new_env" },
+		NewLeaseTok:  func() string { return "lease_new_env" },
+	}
+
+	result, err := svc.RequestLeaseWithPolicy(
+		"agent1",
+		"task-new",
+		"requires env path confirmation",
+		5,
+		[]string{"github_token"},
+		"fp1",
+		"wd1",
+		"./.env",
+		"/workspace/project/.env",
+	)
+	if err != nil {
+		t.Fatalf("request lease with env path: %v", err)
+	}
+	if result.Reused {
+		t.Fatalf("expected env-path request to require fresh approval instead of active-lease reuse")
+	}
+	if result.Request.ID != "req_new_env" {
+		t.Fatalf("expected new pending request, got %#v", result.Request)
+	}
+
+	pending, err := store.ListPendingRequests()
+	if err != nil {
+		t.Fatalf("list pending requests: %v", err)
+	}
+	if len(pending) != 1 || pending[0].ID != "req_new_env" {
+		t.Fatalf("expected one new pending request, got %#v", pending)
+	}
+}

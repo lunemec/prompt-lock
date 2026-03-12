@@ -13,14 +13,15 @@ import (
 type Clock func() time.Time
 
 type Service struct {
-	Policy       domain.Policy
-	Requests     ports.RequestStore
-	Leases       ports.LeaseStore
-	Secrets      ports.SecretStore
-	Audit        ports.AuditSink
-	Now          Clock
-	NewRequestID func() string
-	NewLeaseTok  func() string
+	Policy         domain.Policy
+	Requests       ports.RequestStore
+	Leases         ports.LeaseStore
+	Secrets        ports.SecretStore
+	EnvPathSecrets ports.EnvPathSecretStore
+	Audit          ports.AuditSink
+	Now            Clock
+	NewRequestID   func() string
+	NewLeaseTok    func() string
 }
 
 func (s Service) now() time.Time {
@@ -114,7 +115,7 @@ func (s Service) AccessSecret(leaseToken, secretName, commandFingerprint, workdi
 			reason = "unknown_secret_backend_error"
 		}
 		_ = s.Audit.Write(ports.AuditEvent{Event: "secret_backend_error", Timestamp: s.now(), AgentID: lease.AgentID, TaskID: lease.TaskID, RequestID: lease.RequestID, LeaseToken: lease.Token, Secret: secretName, Metadata: map[string]string{"reason": reason}})
-		return "", errors.New("secret backend unavailable")
+		return "", ErrSecretBackendUnavailable
 	}
 	_ = s.Audit.Write(ports.AuditEvent{Event: "secret_access", Timestamp: s.now(), AgentID: lease.AgentID, TaskID: lease.TaskID, RequestID: lease.RequestID, LeaseToken: lease.Token, Secret: secretName})
 	return val, nil

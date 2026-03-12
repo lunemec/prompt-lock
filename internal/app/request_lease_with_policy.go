@@ -29,8 +29,9 @@ func (s Service) RequestLeaseWithPolicy(agentID, taskID, reason string, ttl int,
 		CommandFingerprint: commandFingerprint,
 		WorkdirFingerprint: workdirFingerprint,
 	}
+	envPathRequested := strings.TrimSpace(envPath) != ""
 
-	if policy.EnableActiveLeaseReuse {
+	if policy.EnableActiveLeaseReuse && !envPathRequested {
 		reusableLease, reused, err := s.findEquivalentActiveLease(input)
 		if err != nil {
 			return RequestLeaseResult{}, err

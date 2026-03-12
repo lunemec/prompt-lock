@@ -28,7 +28,8 @@ func (s *server) handleRequestStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	req, err := s.svc.Requests.GetRequest(requestID)
 	if err != nil {
-		writeMappedError(w, ErrNotFound, err.Error())
+		kind, msg := stateStoreReadError(err)
+		writeMappedError(w, kind, msg)
 		return
 	}
 	writeJSON(w, map[string]any{"request_id": req.ID, "status": req.Status})
@@ -77,6 +78,19 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	req.EnvPath = strings.TrimSpace(req.EnvPath)
 	req.EnvPathCanonical = strings.TrimSpace(req.EnvPathCanonical)
+	if req.EnvPath != "" {
+		envPathStore, err := s.ensureEnvPathSecretStore()
+		if err != nil {
+			writeMappedError(w, ErrServiceUnavailable, err.Error())
+			return
+		}
+		canonicalPath, err := envPathStore.Canonicalize(req.EnvPath)
+		if err != nil {
+			writeMappedError(w, ErrBadRequest, err.Error())
+			return
+		}
+		req.EnvPathCanonical = canonicalPath
+	}
 	result, err := s.svc.RequestLeaseWithPolicy(req.AgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint, req.EnvPath, req.EnvPathCanonical)
 	if err != nil {
 		var throttleErr *app.RequestThrottleError
@@ -122,7 +136,8 @@ func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	lease, err := s.svc.ApproveRequest(requestID, req.TTLMinutes)
 	if err != nil {
-		writeMappedError(w, ErrBadRequest, err.Error())
+		kind, msg := stateStoreMutationError(err)
+		writeMappedError(w, kind, msg)
 		return
 	}
 	if err := s.persistRequestLeaseState(); err != nil {
@@ -130,6 +145,11 @@ func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	at, aid := actorFromRequest(r)
+	if approvedReq, readErr := s.svc.Requests.GetRequest(requestID); readErr == nil {
+		if strings.TrimSpace(approvedReq.EnvPath) != "" {
+			s.svc.AuditEnvPathConfirmed(approvedReq.AgentID, approvedReq.TaskID, approvedReq.ID, approvedReq.EnvPath, approvedReq.EnvPathCanonical)
+		}
+	}
 	_ = s.svc.Audit.Write(ports.AuditEvent{Event: "operator_approved_request", Timestamp: s.now(), ActorType: at, ActorID: aid, RequestID: requestID, LeaseToken: lease.Token})
 	writeJSON(w, map[string]any{"status": "approved", "lease_token": lease.Token, "expires_at": lease.ExpiresAt})
 }
@@ -157,7 +177,8 @@ func (s *server) handleAccess(w http.ResponseWriter, r *http.Request) {
 	}
 	v, err := s.svc.AccessSecret(req.LeaseToken, req.Secret, req.CommandFingerprint, req.WorkdirFingerprint)
 	if err != nil {
-		writeMappedError(w, ErrForbidden, err.Error())
+		kind, msg := stateStoreAccessError(err)
+		writeMappedError(w, kind, msg)
 		return
 	}
 	writeJSON(w, map[string]any{"secret": req.Secret, "value": v})

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/lunemec/promptlock/internal/core/ports"
 )
@@ -33,12 +34,16 @@ func (s *server) handleDeny(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	denied, err := s.svc.DenyRequest(requestID, req.Reason)
 	if err != nil {
-		writeMappedError(w, ErrBadRequest, err.Error())
+		kind, msg := stateStoreMutationError(err)
+		writeMappedError(w, kind, msg)
 		return
 	}
 	if err := s.persistRequestLeaseState(); err != nil {
 		writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
 		return
+	}
+	if strings.TrimSpace(denied.EnvPath) != "" {
+		s.svc.AuditEnvPathRejected(denied.AgentID, denied.TaskID, denied.ID, denied.EnvPath, denied.EnvPathCanonical, req.Reason)
 	}
 	at, aid := actorFromRequest(r)
 	_ = s.svc.Audit.Write(ports.AuditEvent{Event: "operator_denied_request", Timestamp: s.now(), ActorType: at, ActorID: aid, RequestID: requestID, Metadata: map[string]string{"reason": req.Reason}})

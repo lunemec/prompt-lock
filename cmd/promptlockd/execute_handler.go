@@ -56,15 +56,29 @@ func (s *server) handleExecute(w http.ResponseWriter, r *http.Request) {
 		writeMappedError(w, ErrForbidden, withPolicyHint(err.Error()))
 		return
 	}
+	if _, err := s.ensureEnvPathSecretStore(); err != nil {
+		writeMappedError(w, ErrServiceUnavailable, err.Error())
+		return
+	}
 
 	env := os.Environ()
+	resolved, err := s.svc.ResolveExecutionSecrets(req.LeaseToken, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint)
+	if err != nil {
+		kind, msg := stateStoreAccessError(err)
+		writeMappedError(w, kind, msg)
+		return
+	}
 	for _, sec := range req.Secrets {
-		v, err := s.svc.AccessSecret(req.LeaseToken, sec, req.CommandFingerprint, req.WorkdirFingerprint)
-		if err != nil {
-			writeMappedError(w, ErrForbidden, err.Error())
+		name := strings.TrimSpace(sec)
+		if name == "" {
+			continue
+		}
+		v, ok := resolved[name]
+		if !ok {
+			writeMappedError(w, ErrForbidden, "secret resolution mismatch")
 			return
 		}
-		env = append(env, strings.ToUpper(sec)+"="+v)
+		env = append(env, strings.ToUpper(name)+"="+v)
 	}
 
 	timeoutSec := s.controlPolicy().ClampTimeout(req.TimeoutSec)

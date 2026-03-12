@@ -41,7 +41,7 @@ func (s *Store) Resolve(envPath string, requestedKeys []string) (map[string]stri
 	if err != nil {
 		return nil, "", err
 	}
-	canonicalTarget, err := s.resolveTargetPath(envPath)
+	canonicalTarget, err := s.Canonicalize(envPath)
 	if err != nil {
 		return nil, "", err
 	}
@@ -74,6 +74,24 @@ func (s *Store) Resolve(envPath string, requestedKeys []string) (map[string]stri
 		return nil, "", fmt.Errorf("requested keys missing from env file: %s", strings.Join(missing, ", "))
 	}
 	return resolved, canonicalTarget, nil
+}
+
+func (s *Store) Canonicalize(envPath string) (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("env-path store is nil")
+	}
+	canonicalTarget, err := s.resolveTargetPath(envPath)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(canonicalTarget)
+	if err != nil {
+		return "", fmt.Errorf("stat env file %q: %w", canonicalTarget, err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("env path %q is a directory", canonicalTarget)
+	}
+	return canonicalTarget, nil
 }
 
 func (s *Store) resolveTargetPath(envPath string) (string, error) {

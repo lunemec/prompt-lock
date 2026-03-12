@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +67,12 @@ func TestHandleRequestRejectsMissingWorkdirFingerprint(t *testing.T) {
 func TestHandlePendingRequestsIncludesEnvPathContext(t *testing.T) {
 	now := time.Now().UTC()
 	s := newRequestContextServer(now)
-	req := httptest.NewRequest(http.MethodPost, "/v1/leases/request", bytes.NewBufferString(`{"agent_id":"a1","task_id":"t1","reason":"r","ttl_minutes":5,"secrets":["github_token"],"command_fingerprint":"cmd-1","workdir_fingerprint":"wd-1","env_path":"./.env","env_path_canonical":"/workspace/project/.env"}`))
+	root := t.TempDir()
+	t.Setenv("PROMPTLOCK_ENV_PATH_ROOT", root)
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("github_token=test\n"), 0o600); err != nil {
+		t.Fatalf("write env file: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/leases/request", bytes.NewBufferString(`{"agent_id":"a1","task_id":"t1","reason":"r","ttl_minutes":5,"secrets":["github_token"],"command_fingerprint":"cmd-1","workdir_fingerprint":"wd-1","env_path":"./.env","env_path_canonical":"should-be-overridden"}`))
 	w := httptest.NewRecorder()
 	s.handleRequest(w, req)
 	if w.Code != http.StatusOK {
@@ -98,7 +105,7 @@ func TestHandlePendingRequestsIncludesEnvPathContext(t *testing.T) {
 	if got := item["EnvPath"]; got != "./.env" {
 		t.Fatalf("expected env path in pending item, got %#v", got)
 	}
-	if got := item["EnvPathCanonical"]; got != "/workspace/project/.env" {
+	if got := item["EnvPathCanonical"]; got != filepath.Join(root, ".env") {
 		t.Fatalf("expected canonical env path in pending item, got %#v", got)
 	}
 }

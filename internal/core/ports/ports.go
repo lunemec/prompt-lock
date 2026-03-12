@@ -23,6 +23,11 @@ type SecretStore interface {
 	GetSecret(name string) (string, error)
 }
 
+type EnvPathSecretStore interface {
+	Canonicalize(envPath string) (string, error)
+	Resolve(envPath string, requestedKeys []string) (map[string]string, string, error)
+}
+
 type AuditSink interface {
 	Write(event AuditEvent) error
 }
