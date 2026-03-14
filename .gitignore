@@ -9,6 +9,27 @@ __pycache__/
 *.tmp
 **/*.tmp
 .DS_Store
+
+# Local editor settings
+.idea/
+.vscode/
+
+# Local env and secret material
+.env
+.env.local
+.env.*.local
+*.sops.env
+
+# Repo-local Go caches and test/build artifacts
+.gocache/
+.gomodcache/
+.tmp/
+coverage.out
+*.coverprofile
+*.test
+*.prof
+*.pprof
+
 reports/*.json
 dist/
 .goreleaser-dist/
