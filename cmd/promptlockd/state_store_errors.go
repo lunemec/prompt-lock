@@ -14,6 +14,9 @@ func stateStoreReadError(err error) (error, string) {
 	if errors.Is(err, ports.ErrStoreUnavailable) {
 		return ErrServiceUnavailable, stateStoreUnavailableMessage
 	}
+	if errors.Is(err, app.ErrRequestNotOwned) || errors.Is(err, app.ErrLeaseNotOwned) {
+		return ErrForbidden, err.Error()
+	}
 	return ErrNotFound, err.Error()
 }
 
@@ -40,6 +43,9 @@ func stateStoreAccessError(err error) (error, string) {
 	}
 	if errors.Is(err, ports.ErrStoreUnavailable) {
 		return ErrServiceUnavailable, stateStoreUnavailableMessage
+	}
+	if errors.Is(err, app.ErrRequestNotOwned) || errors.Is(err, app.ErrLeaseNotOwned) {
+		return ErrForbidden, err.Error()
 	}
 	return ErrForbidden, err.Error()
 }

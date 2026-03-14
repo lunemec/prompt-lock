@@ -5,28 +5,58 @@ on:
   push:
     branches: ["master", "main"]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install security linters
+      - name: Load toolchain versions
         run: |
-          python -m pip install --upgrade pip
-          pip install bandit
+          while IFS= read -r line; do
+            case "$line" in
+              ''|\#*) continue ;;
+              *) echo "$line" >> "$GITHUB_ENV" ;;
+            esac
+          done < .toolchain.env
 
-      - name: Final validation gate
-        run: make validate-final
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
 
-      - name: Security static analysis (bandit)
-        run: bandit -q -r scripts
+      - name: Go version
+        run: go version
 
-      - name: Changelog gate
-        run: make validate-changelog
+      - name: Release-readiness core gate
+        run: make release-readiness-gate-core
+
+      - name: Vulnerability check
+        run: make vulncheck
+
+      - name: Docker E2E compose
+        run: make e2e-compose
+
+      - name: Leak guard
+        run: make leak-guard
+
+      - name: MCP conformance report
+        run: make mcp-conformance-report
+
+      - name: Upload CI reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-reports
+          path: reports/mcp-conformance.json
+          if-no-files-found: ignore

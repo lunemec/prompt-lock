@@ -25,7 +25,10 @@
   - broker-exec preferred mode
   - plaintext return can be disabled
   - command policy allow/deny
-  - output limits + redaction
+  - exact executable allowlist checks
+  - broker-managed executable resolution from trusted search directories
+  - minimal child-process environment plus leased secrets only
+  - hardened default output suppression; redaction is best-effort log hygiene only
   - audit events
 
 ### A2) Role confusion (agent calls operator endpoints)
@@ -40,12 +43,21 @@
   - localhost default bind
   - unix socket option
   - startup guard for non-local TCP with auth
+  - CLI fails closed when expected local role sockets are missing instead of silently downgrading to localhost TCP
 
 ### A4) Tampering with audit records
 - Risk: hide malicious actions.
 - Controls:
   - host-side audit path
   - hash-chain records
+
+### A6) Agent-controlled `.env` path confusion
+- Risk: agent points approval flow at an unexpected `.env` file or a symlink/traversal target.
+- Controls:
+  - broker canonicalizes `env_path` against `PROMPTLOCK_ENV_PATH_ROOT`
+  - traversal and symlink escape rejection
+  - watch UI shows both requested and canonical path
+  - execute-time canonical-path revalidation before reading secrets
 
 ### A5) Stale long-lived sessions
 - Risk: forgotten credentials remain valid.

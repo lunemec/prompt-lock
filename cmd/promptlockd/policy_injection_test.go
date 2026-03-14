@@ -9,12 +9,20 @@ import (
 
 type mockPolicy struct{}
 
-func (mockPolicy) ValidateExecuteRequest(string, app.ExecuteRequest) error { return fmt.Errorf("blocked-by-mock") }
-func (mockPolicy) ValidateExecuteCommand([]string) error                    { return nil }
-func (mockPolicy) ValidateNetworkEgress([]string, string) error             { return nil }
-func (mockPolicy) ValidateHostDockerCommand([]string) error                 { return nil }
-func (mockPolicy) ApplyOutputSecurity(in string) string                     { return in }
-func (mockPolicy) ClampTimeout(requested int) int                           { return requested }
+func (mockPolicy) ValidateExecuteRequest(string, app.ExecuteRequest) error {
+	return fmt.Errorf("blocked-by-mock")
+}
+func (mockPolicy) ValidateExecuteCommand([]string) error { return nil }
+func (mockPolicy) ResolveExecuteCommand(cmd []string) (app.ResolvedCommand, error) {
+	return app.ResolvedCommand{Path: "go", Args: append([]string{}, cmd[1:]...), SearchPath: "/usr/bin"}, nil
+}
+func (mockPolicy) ValidateNetworkEgress([]string, string) error { return nil }
+func (mockPolicy) ValidateHostDockerCommand([]string) error     { return nil }
+func (mockPolicy) ResolveHostDockerCommand(cmd []string) (app.ResolvedCommand, error) {
+	return app.ResolvedCommand{Path: "docker", Args: append([]string{}, cmd[1:]...), SearchPath: "/usr/bin"}, nil
+}
+func (mockPolicy) ApplyOutputSecurity(in string) string { return in }
+func (mockPolicy) ClampTimeout(requested int) int       { return requested }
 
 func TestControlPolicyCanBeInjected(t *testing.T) {
 	s := &server{policyEngine: mockPolicy{}}

@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,5 +54,65 @@ func TestCheckpointRoundTrip(t *testing.T) {
 	}
 	if got != "abc123" {
 		t.Fatalf("unexpected checkpoint: %q", got)
+	}
+}
+
+func TestVerifyFileAnchoredAllowsAppendAfterCheckpoint(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "audit.jsonl")
+	s, err := NewFileSink(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Write(ports.AuditEvent{Event: "e1", Timestamp: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	firstHash, _, err := VerifyFile(p)
+	if err != nil {
+		t.Fatalf("verify after first record: %v", err)
+	}
+	if err := s.Write(ports.AuditEvent{Event: "e2", Timestamp: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	lastHash, count, err := VerifyFileAnchored(p, firstHash)
+	if err != nil {
+		t.Fatalf("expected anchored verify success after append, got %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("record count = %d, want 2", count)
+	}
+	if lastHash == firstHash {
+		t.Fatalf("expected appended chain to advance past checkpoint hash")
+	}
+}
+
+func TestVerifyFileAnchoredRejectsMissingCheckpoint(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "audit.jsonl")
+	s, err := NewFileSink(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Write(ports.AuditEvent{Event: "e1", Timestamp: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := VerifyFileAnchored(p, "missing-hash"); err == nil {
+		t.Fatalf("expected missing checkpoint hash to fail")
+	}
+}
+
+func TestWriteCheckpointFailsWhenParentDirSyncFails(t *testing.T) {
+	orig := syncCheckpointParentDir
+	t.Cleanup(func() { syncCheckpointParentDir = orig })
+	syncCheckpointParentDir = func(string) error {
+		return errors.New("dir sync failed")
+	}
+
+	if err := WriteCheckpoint(filepath.Join(t.TempDir(), "checkpoint.txt"), "abc123"); err == nil {
+		t.Fatalf("expected parent dir sync failure")
 	}
 }

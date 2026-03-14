@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -96,6 +97,74 @@ func TestMCPStdioInitializeAndToolsList(t *testing.T) {
 	}
 }
 
+func TestMCPInitializeNotificationAndToolsCallSequence(t *testing.T) {
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/intents/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{"secrets": []string{"github_token"}})
+		case r.URL.Path == "/v1/leases/request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"request_id": "r-seq"})
+		case r.URL.Path == "/v1/requests/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "approved"})
+		case r.URL.Path == "/v1/leases/by-request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"lease_token": "l-seq"})
+		case r.URL.Path == "/v1/leases/execute":
+			_ = json.NewEncoder(w).Encode(map[string]any{"exit_code": 0, "stdout_stderr": "sequence-ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer broker.Close()
+
+	_, writeLine, readJSON := launchMCP(t, map[string]string{
+		"PROMPTLOCK_BROKER_URL":    broker.URL,
+		"PROMPTLOCK_SESSION_TOKEN": "s1",
+	})
+
+	writeLine(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	initResp := readJSON()
+	if initResp["error"] != nil {
+		t.Fatalf("initialize returned error: %+v", initResp)
+	}
+
+	// notification must not emit a response that would get ahead of the next request response.
+	writeLine(`{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}`)
+
+	writeLine(`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
+	listResp := readJSON()
+	if got, ok := listResp["id"].(float64); !ok || int(got) != 2 {
+		t.Fatalf("expected tools/list response id=2 (notification should be silent), got %+v", listResp)
+	}
+	if listResp["error"] != nil {
+		t.Fatalf("tools/list returned error: %+v", listResp)
+	}
+
+	writeLine(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}`)
+	callResp := readJSON()
+	if got, ok := callResp["id"].(float64); !ok || int(got) != 3 {
+		t.Fatalf("expected tools/call response id=3, got %+v", callResp)
+	}
+	if callResp["error"] != nil {
+		t.Fatalf("tools/call returned error: %+v", callResp)
+	}
+	res, ok := callResp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("invalid tools/call result: %+v", callResp)
+	}
+	content, ok := res["content"].([]any)
+	if !ok || len(content) == 0 {
+		t.Fatalf("missing tools/call content: %+v", callResp)
+	}
+	item, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("invalid tools/call content shape: %+v", callResp)
+	}
+	text, _ := item["text"].(string)
+	if !strings.Contains(text, "exit=0") || !strings.Contains(text, "sequence-ok") {
+		t.Fatalf("unexpected tools/call text: %q", text)
+	}
+}
+
 func TestMCPToolsCallExecuteWithIntentRoundtrip(t *testing.T) {
 	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -153,11 +222,11 @@ func TestMCPToolsCallRealBrokerE2E(t *testing.T) {
 			"enable_auth": false,
 		},
 		"execution_policy": map[string]any{
-			"allowlist_prefixes":  []string{"bash"},
-			"denylist_substrings": []string{"printenv"},
-			"max_output_bytes":    65536,
-			"default_timeout_sec": 30,
-			"max_timeout_sec":     60,
+			"exact_match_executables": []string{"bash"},
+			"denylist_substrings":     []string{"printenv"},
+			"max_output_bytes":        65536,
+			"default_timeout_sec":     30,
+			"max_timeout_sec":         60,
 		},
 		"secrets": []map[string]string{{"name": "github_token", "value": "E2E_OK"}},
 		"intents": map[string][]string{"run_tests": {"github_token"}},
@@ -289,6 +358,246 @@ func TestMCPToolsCallTimeoutPath(t *testing.T) {
 	}
 }
 
+func TestMCPToolsCallCancelledByNotification(t *testing.T) {
+	var cancelCalls atomic.Int64
+	var statusCalls atomic.Int64
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/intents/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{"secrets": []string{"github_token"}})
+		case "/v1/leases/request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"request_id": "r-cancel"})
+		case "/v1/requests/status":
+			statusCalls.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "pending"})
+		case "/v1/leases/cancel":
+			cancelCalls.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"request_id": "r-cancel", "status": "denied"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer broker.Close()
+
+	_, writeLine, readJSON := launchMCP(t, map[string]string{
+		"PROMPTLOCK_BROKER_URL":           broker.URL,
+		"PROMPTLOCK_SESSION_TOKEN":        "s1",
+		"PROMPTLOCK_APPROVAL_TIMEOUT_SEC": "30",
+	})
+
+	writeLine(`{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}`)
+	waitAtomicAtLeast(t, &statusCalls, 1, 5*time.Second, "approval polling status call before cancellation")
+	writeLine(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":31}}`)
+
+	msg := readJSON()
+	if got, ok := msg["id"].(float64); !ok || int(got) != 31 {
+		t.Fatalf("expected cancelled response id=31, got %+v", msg)
+	}
+	errObj, ok := msg["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected cancellation error object, got %+v", msg)
+	}
+	if int(errObj["code"].(float64)) != -32000 {
+		t.Fatalf("expected -32000 cancellation error code, got %+v", errObj)
+	}
+	msgText, _ := errObj["message"].(string)
+	if !strings.Contains(strings.ToLower(msgText), "cancel") {
+		t.Fatalf("expected cancellation message, got %q", msgText)
+	}
+	if cancelCalls.Load() < 1 {
+		t.Fatalf("expected broker cancel endpoint call, got %d", cancelCalls.Load())
+	}
+}
+
+func TestMCPToolsCallCancelledByNotificationStringID(t *testing.T) {
+	var cancelCalls atomic.Int64
+	var statusCalls atomic.Int64
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/intents/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{"secrets": []string{"github_token"}})
+		case "/v1/leases/request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"request_id": "r-cancel-string"})
+		case "/v1/requests/status":
+			statusCalls.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "pending"})
+		case "/v1/leases/cancel":
+			cancelCalls.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"request_id": "r-cancel-string", "status": "denied"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer broker.Close()
+
+	_, writeLine, readJSON := launchMCP(t, map[string]string{
+		"PROMPTLOCK_BROKER_URL":           broker.URL,
+		"PROMPTLOCK_SESSION_TOKEN":        "s1",
+		"PROMPTLOCK_APPROVAL_TIMEOUT_SEC": "30",
+	})
+
+	writeLine(`{"jsonrpc":"2.0","id":"req-31","method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}`)
+	waitAtomicAtLeast(t, &statusCalls, 1, 5*time.Second, "approval polling status call before cancellation")
+	writeLine(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"req-31"}}`)
+
+	msg := readJSON()
+	if got, ok := msg["id"].(string); !ok || got != "req-31" {
+		t.Fatalf("expected cancelled response id=req-31, got %+v", msg)
+	}
+	errObj, ok := msg["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected cancellation error object, got %+v", msg)
+	}
+	if int(errObj["code"].(float64)) != -32000 {
+		t.Fatalf("expected -32000 cancellation error code, got %+v", errObj)
+	}
+	msgText, _ := errObj["message"].(string)
+	if !strings.Contains(strings.ToLower(msgText), "cancel") {
+		t.Fatalf("expected cancellation message, got %q", msgText)
+	}
+	if cancelCalls.Load() < 1 {
+		t.Fatalf("expected broker cancel endpoint call, got %d", cancelCalls.Load())
+	}
+}
+
+func TestMCPToolsCallCancelledCleanupFailureWarns(t *testing.T) {
+	var cancelCalls atomic.Int64
+	var statusCalls atomic.Int64
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/intents/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{"secrets": []string{"github_token"}})
+		case "/v1/leases/request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"request_id": "r-cancel-warn"})
+		case "/v1/requests/status":
+			statusCalls.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "pending"})
+		case "/v1/leases/cancel":
+			cancelCalls.Add(1)
+			http.Error(w, "state backend unavailable", http.StatusServiceUnavailable)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer broker.Close()
+
+	cmd := exec.Command("go", "run", ".")
+	cmd.Dir = "."
+	cmd.Env = append(os.Environ(),
+		"PROMPTLOCK_BROKER_URL="+broker.URL,
+		"PROMPTLOCK_SESSION_TOKEN=s1",
+		"PROMPTLOCK_APPROVAL_TIMEOUT_SEC=30",
+	)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+
+	stderrLines := make(chan string, 32)
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			stderrLines <- scanner.Text()
+		}
+		close(stderrLines)
+	}()
+
+	_, _ = stdin.Write([]byte(`{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}` + "\n"))
+	waitAtomicAtLeast(t, &statusCalls, 1, 5*time.Second, "approval polling status call before cancellation")
+	_, _ = stdin.Write([]byte(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":41}}` + "\n"))
+
+	respReader := bufio.NewReader(stdout)
+	readDone := make(chan rpcMsg, 1)
+	readErr := make(chan error, 1)
+	go func() {
+		line, err := respReader.ReadString('\n')
+		if err != nil {
+			readErr <- err
+			return
+		}
+		var msg rpcMsg
+		if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &msg); err != nil {
+			readErr <- err
+			return
+		}
+		readDone <- msg
+	}()
+
+	var msg rpcMsg
+	select {
+	case msg = <-readDone:
+	case err := <-readErr:
+		t.Fatal(err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for cancellation response")
+	}
+	if got, ok := msg["id"].(float64); !ok || int(got) != 41 {
+		t.Fatalf("expected cancellation response id=41, got %+v", msg)
+	}
+	if msg["error"] == nil {
+		t.Fatalf("expected cancellation error payload, got %+v", msg)
+	}
+	if cancelCalls.Load() < 1 {
+		t.Fatalf("expected broker cancel endpoint call, got %d", cancelCalls.Load())
+	}
+
+	warnFound := false
+	timeout := time.After(2 * time.Second)
+	for !warnFound {
+		select {
+		case line, ok := <-stderrLines:
+			if !ok {
+				if !warnFound {
+					t.Fatal("expected cleanup warning on stderr, got channel closed")
+				}
+				return
+			}
+			if strings.Contains(line, "failed to cancel pending request") && strings.Contains(line, "r-cancel-warn") {
+				warnFound = true
+			}
+		case <-timeout:
+			t.Fatal("timeout waiting for cleanup warning on stderr")
+		}
+	}
+}
+
+func TestMCPToolsCallNotificationIgnoredNoSideEffects(t *testing.T) {
+	var backendCalls atomic.Int64
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backendCalls.Add(1)
+		http.NotFound(w, r)
+	}))
+	defer broker.Close()
+
+	_, writeLine, readJSON := launchMCP(t, map[string]string{
+		"PROMPTLOCK_BROKER_URL":    broker.URL,
+		"PROMPTLOCK_SESSION_TOKEN": "s1",
+	})
+
+	writeLine(`{"jsonrpc":"2.0","method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}`)
+	writeLine(`{"jsonrpc":"2.0","id":77,"method":"ping","params":{}}`)
+
+	msg := readJSON()
+	if got, ok := msg["id"].(float64); !ok || int(got) != 77 {
+		t.Fatalf("expected ping response id=77 after tools/call notification, got %+v", msg)
+	}
+	if backendCalls.Load() != 0 {
+		t.Fatalf("expected tools/call notification to be ignored, backend calls=%d", backendCalls.Load())
+	}
+}
+
 func TestMCPToolsCallMissingSessionToken(t *testing.T) {
 	_, writeLine, readJSON := launchMCP(t, map[string]string{})
 	writeLine(`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}`)
@@ -386,4 +695,16 @@ func waitBroker(t *testing.T, base string) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("broker did not become ready: %s", base)
+}
+
+func waitAtomicAtLeast(t *testing.T, counter *atomic.Int64, min int64, timeout time.Duration, what string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if counter.Load() >= min {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for %s", what)
 }

@@ -24,5 +24,6 @@
 
 ## Security notes
 - Pairing grant is sensitive and must live in tmpfs, not persistent workspace.
+- After pair-complete, `grant_id` is currently a bearer credential for session minting; the broker does not re-check `container_id` at mint time.
 - Use strict endpoint authorization; no implicit trust of container-local callers.
-- Consider unix socket + mTLS or signed bearer credentials depending deployment mode.
+- Supported local transport is Unix sockets with endpoint and token authorization on top.

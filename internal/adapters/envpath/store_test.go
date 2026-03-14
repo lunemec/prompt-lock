@@ -98,12 +98,16 @@ func TestResolveReturnsOnlyRequestedKeysWithinRoot(t *testing.T) {
 		t.Fatalf("new store: %v", err)
 	}
 
-	resolved, canonicalPath, err := store.Resolve("secrets/.env", []string{"github_token", "npm_token"})
+	resolved, resolvedCanonicalPath, err := store.Resolve("secrets/.env", []string{"github_token", "npm_token"})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if canonicalPath != envFile {
-		t.Fatalf("expected canonical path %q, got %q", envFile, canonicalPath)
+	expectedCanonicalPath, err := canonicalPath(envFile)
+	if err != nil {
+		t.Fatalf("canonicalize env file: %v", err)
+	}
+	if resolvedCanonicalPath != expectedCanonicalPath {
+		t.Fatalf("expected canonical path %q, got %q", expectedCanonicalPath, resolvedCanonicalPath)
 	}
 
 	expected := map[string]string{

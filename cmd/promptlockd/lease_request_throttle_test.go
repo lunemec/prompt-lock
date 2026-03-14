@@ -87,6 +87,50 @@ func TestHandleRequestReturns429WhenPendingCapReached(t *testing.T) {
 	}
 }
 
+func TestHandleRequestHonorsCustomPendingCap(t *testing.T) {
+	now := time.Date(2026, 3, 11, 0, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req-1",
+		AgentID:            "agent-1",
+		TaskID:             "task-1",
+		Reason:             "first",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp-1",
+		WorkdirFingerprint: "wd-1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now.Add(-20 * time.Second),
+	})
+
+	s := &server{
+		svc: app.Service{
+			Policy:        domain.DefaultPolicy(),
+			RequestPolicy: app.RequestPolicy{IdenticalRequestCooldown: 60 * time.Second, MaxPendingPerAgent: 1, EnableActiveLeaseReuse: true},
+			Requests:      store,
+			Leases:        store,
+			Secrets:       store,
+			Audit:         unavailableTestAudit{},
+			Now:           func() time.Time { return now },
+			NewRequestID:  func() string { return "req-new" },
+			NewLeaseTok:   func() string { return "lease-new" },
+		},
+		authEnabled:         false,
+		authCfg:             config.AuthConfig{EnableAuth: false},
+		stateStoreFile:      "/non-empty",
+		stateStorePersister: persistShouldNotBeCalled{},
+		now:                 func() time.Time { return now },
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/leases/request", bytes.NewBufferString(`{"agent_id":"agent-1","task_id":"task-2","reason":"second","ttl_minutes":5,"secrets":["npm_token"],"command_fingerprint":"fp-2","workdir_fingerprint":"wd-2"}`))
+	w := httptest.NewRecorder()
+	s.handleRequest(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 for custom pending-cap throttle, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestHandleRequestReturns429WithRetryAfterForCooldown(t *testing.T) {
 	now := time.Date(2026, 3, 11, 0, 0, 0, 0, time.UTC)
 	store := memory.NewStore()

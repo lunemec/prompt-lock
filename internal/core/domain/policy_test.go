@@ -13,4 +13,7 @@ func TestPolicyValidateRequest(t *testing.T) {
 	if err := p.ValidateRequest(5, nil); err == nil {
 		t.Fatalf("expected empty secrets failure")
 	}
+	if err := p.ValidateRequest(5, []string{"PATH"}); err == nil {
+		t.Fatalf("expected reserved secret name failure")
+	}
 }

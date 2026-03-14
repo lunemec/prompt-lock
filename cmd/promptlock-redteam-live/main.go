@@ -85,7 +85,7 @@ func run(outPath, profile string) (report, int) {
 			"rate_limit_max_attempts":       100,
 		},
 		"execution_policy": map[string]any{
-			"allowlist_prefixes": []string{"curl", "go", "python", "git", "npm", "node", "make", "pytest"},
+			"exact_match_executables": []string{"curl", "go", "python", "git", "npm", "node", "make", "pytest"},
 			"denylist_substrings": []string{
 				"printenv", "/proc/", "environ",
 			},

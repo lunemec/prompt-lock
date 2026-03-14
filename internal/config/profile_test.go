@@ -18,6 +18,8 @@ func TestApplyHardenedProfile(t *testing.T) {
 	cfg.ExecutionPolicy.DefaultTimeoutSec = 120
 	cfg.ExecutionPolicy.MaxOutputBytes = 65536
 	cfg.UnixSocket = ""
+	cfg.AgentUnixSocket = ""
+	cfg.OperatorUnixSocket = ""
 	cfg.Auth.AllowPlaintextSecretReturn = true
 
 	cfg.applyProfile()
@@ -35,7 +37,7 @@ func TestApplyHardenedProfile(t *testing.T) {
 		t.Fatalf("expected hardened profile output mode none, got %q", cfg.ExecutionPolicy.OutputSecurityMode)
 	}
 	for _, disallowed := range []string{"bash", "sh", "zsh"} {
-		for _, allowed := range cfg.ExecutionPolicy.AllowlistPrefixes {
+		for _, allowed := range cfg.ExecutionPolicy.ExactMatchExecutables {
 			if allowed == disallowed {
 				t.Fatalf("did not expect %q in hardened allowlist", disallowed)
 			}
@@ -54,23 +56,11 @@ func TestApplyHardenedProfile(t *testing.T) {
 	if !foundSmuggleGuard {
 		t.Fatalf("expected hardened denylist to include command-smuggling guards")
 	}
-	if cfg.UnixSocket == "" {
-		t.Fatalf("expected unix socket default in hardened profile")
+	if cfg.AgentUnixSocket == "" || cfg.OperatorUnixSocket == "" {
+		t.Fatalf("expected agent and operator unix socket defaults in hardened profile, got agent=%q operator=%q", cfg.AgentUnixSocket, cfg.OperatorUnixSocket)
 	}
-}
-
-func TestApplyHardenedProfileWithTLSEnabledDoesNotForceUnixSocket(t *testing.T) {
-	cfg := Default()
-	cfg.SecurityProfile = "hardened"
-	cfg.TLS.Enable = true
-	cfg.TLS.CertFile = "/tmp/cert.pem"
-	cfg.TLS.KeyFile = "/tmp/key.pem"
-	cfg.UnixSocket = ""
-
-	cfg.applyProfile()
-
 	if cfg.UnixSocket != "" {
-		t.Fatalf("expected unix socket to remain empty when tls is enabled, got %q", cfg.UnixSocket)
+		t.Fatalf("expected legacy unix socket to remain empty in dual-socket hardened default, got %q", cfg.UnixSocket)
 	}
 }
 
@@ -79,9 +69,11 @@ func TestApplyHardenedProfileWithNonLocalTCPDoesNotForceUnixSocket(t *testing.T)
 	cfg.SecurityProfile = "hardened"
 	cfg.Address = "0.0.0.0:8765"
 	cfg.UnixSocket = ""
+	cfg.AgentUnixSocket = ""
+	cfg.OperatorUnixSocket = ""
 	cfg.applyProfile()
-	if cfg.UnixSocket != "" {
-		t.Fatalf("expected unix socket to remain empty for non-local tcp, got %q", cfg.UnixSocket)
+	if cfg.UnixSocket != "" || cfg.AgentUnixSocket != "" || cfg.OperatorUnixSocket != "" {
+		t.Fatalf("expected unix sockets to remain empty for non-local tcp, got legacy=%q agent=%q operator=%q", cfg.UnixSocket, cfg.AgentUnixSocket, cfg.OperatorUnixSocket)
 	}
 }
 
@@ -90,9 +82,26 @@ func TestApplyHardenedProfileWithNonIP127HostnameDoesNotForceUnixSocket(t *testi
 	cfg.SecurityProfile = "hardened"
 	cfg.Address = "127.evil.example:8765"
 	cfg.UnixSocket = ""
+	cfg.AgentUnixSocket = ""
+	cfg.OperatorUnixSocket = ""
 	cfg.applyProfile()
-	if cfg.UnixSocket != "" {
-		t.Fatalf("expected unix socket to remain empty for non-IP 127.* hostname, got %q", cfg.UnixSocket)
+	if cfg.UnixSocket != "" || cfg.AgentUnixSocket != "" || cfg.OperatorUnixSocket != "" {
+		t.Fatalf("expected unix sockets to remain empty for non-IP 127.* hostname, got legacy=%q agent=%q operator=%q", cfg.UnixSocket, cfg.AgentUnixSocket, cfg.OperatorUnixSocket)
+	}
+}
+
+func TestApplyHardenedProfilePreservesExplicitLegacyUnixSocket(t *testing.T) {
+	cfg := Default()
+	cfg.SecurityProfile = "hardened"
+	cfg.UnixSocket = "/tmp/promptlock.sock"
+
+	cfg.applyProfile()
+
+	if cfg.UnixSocket != "/tmp/promptlock.sock" {
+		t.Fatalf("expected explicit legacy unix socket to be preserved, got %q", cfg.UnixSocket)
+	}
+	if cfg.AgentUnixSocket != "" || cfg.OperatorUnixSocket != "" {
+		t.Fatalf("expected dual sockets to remain empty in legacy single-socket mode, got agent=%q operator=%q", cfg.AgentUnixSocket, cfg.OperatorUnixSocket)
 	}
 }
 

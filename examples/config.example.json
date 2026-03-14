@@ -1,9 +1,16 @@
 {
   "security_profile": "hardened",
   "address": "127.0.0.1:8765",
-  "unix_socket": "/tmp/promptlock.sock",
+  "agent_unix_socket": "/tmp/promptlock-agent.sock",
+  "operator_unix_socket": "/tmp/promptlock-operator.sock",
   "audit_path": "/var/log/promptlock/audit.jsonl",
   "state_store_file": "/var/lib/promptlock/state-store.json",
+  "state_store": {
+    "type": "file",
+    "external_url": "https://state.example.internal",
+    "external_auth_token_env": "PROMPTLOCK_EXTERNAL_STATE_TOKEN",
+    "external_timeout_sec": 10
+  },
   "policy": {
     "default_ttl_minutes": 5,
     "min_ttl_minutes": 1,
@@ -25,9 +32,9 @@
     "store_encryption_key_env": "PROMPTLOCK_AUTH_STORE_KEY"
   },
   "execution_policy": {
-    "allowlist_prefixes": ["npm", "node", "go", "python", "pytest", "make", "git"],
+    "exact_match_executables": ["npm", "node", "go", "python", "pytest", "make", "git"],
     "denylist_substrings": ["printenv", "/proc/", "environ"],
-    "output_security_mode": "redacted",
+    "output_security_mode": "none",
     "max_output_bytes": 65536,
     "default_timeout_sec": 120,
     "max_timeout_sec": 600
@@ -49,13 +56,6 @@
       "install_deps": ["registry.npmjs.org", "pypi.org"]
     },
     "deny_substrings": ["169.254.169.254", "metadata.google.internal", "localhost", "127.0.0.1"]
-  },
-  "tls": {
-    "enable": false,
-    "cert_file": "/etc/promptlock/tls/server.crt",
-    "key_file": "/etc/promptlock/tls/server.key",
-    "client_ca_file": "/etc/promptlock/tls/clients-ca.crt",
-    "require_client_cert": false
   },
   "secret_source": {
     "type": "env",

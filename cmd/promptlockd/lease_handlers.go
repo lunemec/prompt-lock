@@ -21,12 +21,19 @@ func (s *server) handleRequestStatus(w http.ResponseWriter, r *http.Request) {
 		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !s.requireDurabilityReady(w) {
+		return
+	}
 	requestID := r.URL.Query().Get("request_id")
 	if requestID == "" {
 		writeMappedError(w, ErrBadRequest, "request_id required")
 		return
 	}
-	req, err := s.svc.Requests.GetRequest(requestID)
+	_, actorID := actorFromRequest(r)
+	if !s.authEnabled {
+		actorID = ""
+	}
+	req, err := s.svc.RequestStatusByAgent(requestID, actorID)
 	if err != nil {
 		kind, msg := stateStoreReadError(err)
 		writeMappedError(w, kind, msg)
@@ -91,7 +98,16 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		req.EnvPathCanonical = canonicalPath
 	}
-	result, err := s.svc.RequestLeaseWithPolicy(req.AgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint, req.EnvPath, req.EnvPathCanonical)
+	effectiveAgentID := strings.TrimSpace(req.AgentID)
+	if s.authEnabled {
+		_, sessionAgentID := actorFromRequest(r)
+		if effectiveAgentID != "" && effectiveAgentID != sessionAgentID {
+			writeMappedError(w, ErrForbidden, "agent_id does not match authenticated session")
+			return
+		}
+		effectiveAgentID = sessionAgentID
+	}
+	result, err := s.svc.RequestLeaseWithPolicy(effectiveAgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint, req.EnvPath, req.EnvPathCanonical)
 	if err != nil {
 		var throttleErr *app.RequestThrottleError
 		if errors.As(err, &throttleErr) {
@@ -133,7 +149,10 @@ func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req approveReq
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := decodeOptionalJSONBody(r, &req); err != nil {
+		writeMappedError(w, ErrBadRequest, err.Error())
+		return
+	}
 	lease, err := s.svc.ApproveRequest(requestID, req.TTLMinutes)
 	if err != nil {
 		kind, msg := stateStoreMutationError(err)
@@ -164,6 +183,9 @@ func (s *server) handleAccess(w http.ResponseWriter, r *http.Request) {
 		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !s.requireDurabilityReady(w) {
+		return
+	}
 	if !s.authCfg.AllowPlaintextSecretReturn {
 		at, aid := actorFromRequest(r)
 		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "plaintext_secret_access_blocked", Timestamp: s.now(), ActorType: at, ActorID: aid})
@@ -175,7 +197,11 @@ func (s *server) handleAccess(w http.ResponseWriter, r *http.Request) {
 		writeMappedError(w, ErrBadRequest, err.Error())
 		return
 	}
-	v, err := s.svc.AccessSecret(req.LeaseToken, req.Secret, req.CommandFingerprint, req.WorkdirFingerprint)
+	_, actorID := actorFromRequest(r)
+	if !s.authEnabled {
+		actorID = ""
+	}
+	v, err := s.svc.AccessSecretByAgent(actorID, req.LeaseToken, req.Secret, req.CommandFingerprint, req.WorkdirFingerprint)
 	if err != nil {
 		kind, msg := stateStoreAccessError(err)
 		writeMappedError(w, kind, msg)

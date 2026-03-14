@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -31,6 +30,9 @@ func (s *server) handleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodPost {
 		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.requireDurabilityReady(w) {
 		return
 	}
 	var req executeReq
@@ -61,42 +63,37 @@ func (s *server) handleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	env := os.Environ()
-	resolved, err := s.svc.ResolveExecutionSecrets(req.LeaseToken, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint)
+	_, actorID := actorFromRequest(r)
+	if !s.authEnabled {
+		actorID = ""
+	}
+	resolved, err := s.svc.ResolveExecutionSecretsByAgent(actorID, req.LeaseToken, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint)
 	if err != nil {
 		kind, msg := stateStoreAccessError(err)
 		writeMappedError(w, kind, msg)
 		return
 	}
-	for _, sec := range req.Secrets {
-		name := strings.TrimSpace(sec)
-		if name == "" {
-			continue
-		}
-		v, ok := resolved[name]
-		if !ok {
-			writeMappedError(w, ErrForbidden, "secret resolution mismatch")
-			return
-		}
-		env = append(env, strings.ToUpper(name)+"="+v)
-	}
 
 	timeoutSec := s.controlPolicy().ClampTimeout(req.TimeoutSec)
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, req.Command[0], req.Command[1:]...)
-	cmd.Env = env
-	out, err := cmd.CombinedOutput()
-	code := 0
+	resolvedCommand, err := s.controlPolicy().ResolveExecuteCommand(req.Command)
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			code = ee.ExitCode()
-		} else {
-			writeMappedError(w, ErrInternal, err.Error())
-			return
-		}
+		writeMappedError(w, ErrForbidden, withPolicyHint(err.Error()))
+		return
 	}
-	outStr := s.controlPolicy().ApplyOutputSecurity(string(out))
+	cmd := exec.CommandContext(ctx, resolvedCommand.Path, resolvedCommand.Args...)
+	if len(req.Command) > 0 {
+		cmd.Args[0] = req.Command[0]
+	}
+	cmd.Env = buildBrokerExecutionEnv(resolved, resolvedCommand.SearchPath)
+	captureLimit := effectiveOutputCaptureLimit(s.execPolicy.OutputSecurityMode, s.execPolicy.MaxOutputBytes)
+	out, code, err := runCommandWithBoundedOutput(cmd, captureLimit)
+	if err != nil {
+		writeMappedError(w, ErrInternal, err.Error())
+		return
+	}
+	outStr := s.controlPolicy().ApplyOutputSecurity(out)
 	if max := s.execPolicy.MaxOutputBytes; max > 0 && len(outStr) > max {
 		outStr = outStr[:max]
 	}

@@ -11,7 +11,7 @@ func withPolicyHint(msg string) string {
 	case strings.Contains(m, "raw shell wrappers"):
 		hint = "use direct tool command (go/npm/python/git) instead of bash/sh wrapper"
 	case strings.Contains(m, "not allowed by execution policy"):
-		hint = "check execution_policy.allowlist_prefixes in config"
+		hint = "check execution_policy.exact_match_executables in config"
 	case strings.Contains(m, "denied by policy substring"):
 		hint = "remove denied token or adjust policy denylist consciously"
 	case strings.Contains(m, "network egress") || strings.Contains(m, "domain"):

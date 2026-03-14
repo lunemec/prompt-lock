@@ -1,33 +1,20 @@
 # BACKLOG
 
-Updated: 2026-03-09
+Updated: 2026-03-14
 
-This is the canonical list of open work. Initiative docs may hold detail, but status should stay aligned here.
+This is the canonical list of open work. Initiative docs may hold detail, but status should stay aligned here. Completed work belongs in `ACTIVE-PLAN.md`, initiative/checklist docs, or archived plan history rather than this file.
 
 ## Open items
-- None.
-
-## Completed in current worktree
-- `PROD-001` — `security_profile=dev` startup now requires explicit opt-in (`PROMPTLOCK_ALLOW_DEV_PROFILE=1`), reducing accidental insecure deployment.
-- `PROD-002` — Added durable request/lease state persistence (`state_store_file`) with atomic file save/load support in the in-memory adapter.
-- `PROD-003` — Added encrypted auth-store persistence support with non-dev startup enforcement for `auth.store_file` via `auth.store_encryption_key_env`.
-- `PROD-004` — Added external HTTP secret source adapter (`secret_source.type=external`) with token-env and timeout support.
-- `PROD-005` — Hardened auth-store persistence to use unique temp files for atomic writes, preventing predictable tmp-path symlink clobbering and concurrent tmp collision races.
-- `PROD-006` — Persistence failures now fail closed: auth-store and request/lease state write failures close a durability gate, emit explicit audit events, and return `503 Service Unavailable` for mutating auth/lease endpoints.
-- `PROD-007` — Transport safety local-address classification now rejects non-IP hostnames that only start with `127.` (for example `127.evil.example`) so non-local TCP is not misclassified as loopback.
-- `PROD-008` — Atomic auth and request/lease persistence now fsync parent directories after rename to harden crash-consistency of directory-entry updates.
-- `PROD-009` — Hardened-profile local-address detection now uses hostname/IP loopback parsing (not `127.` prefix matching), preventing non-IP `127.*` hostnames from being treated as local.
-- `DOC-003` — Operations docs now document parent-directory `fsync` requirements and durability-gate recovery expectations for persistence storage.
-- `OPS-001` — Added storage durability preflight command (`promptlock-storage-fsync-check`) with JSON reporting and Make workflows (`storage-fsync-preflight`, `storage-fsync-report`) for validating mount-level file+directory `fsync` support and capturing rollout evidence.
-- `OPS-002` — Added fsync report validator command (`promptlock-storage-fsync-validate`) and release/readiness Make gates (`storage-fsync-validate`, `storage-fsync-release-gate`) that fail when report JSON is malformed or any mount check reports `ok=false`.
-- `OPS-003` — Storage fsync reports now include provenance metadata (`schema_version`, `generated_at`, `generated_by`, `hostname`) and validator tooling enforces those fields before release/readiness gates pass.
-- `REL-002` — Tagged GitHub release workflow now runs `storage-fsync-release-gate` before packaging and uploads the generated fsync report artifact for release evidence.
-- `E2E-001` — Real host-and-container smoke harness now binds hardened mode to non-local TCP by default (`BROKER_BIND_HOST=0.0.0.0`), emits actionable readiness diagnostics, and writes machine-readable report output.
-- `E2E-002` — Deny-path real-flow verification now passes in the same smoke harness, including explicit audit assertion for `operator_denied_request` with request id and reason.
-- `DX-001` — Hygiene portability remediation is now guarded by `scripts/validate_hygiene_portability.sh` and executed by `make hygiene`/`make ci`, preventing reintroduction of GNU-only `find -regextype`.
-- `DOC-001` — Added canonical command/endpoint/token matrix at `docs/operations/CLI-ENDPOINT-CONTRACT-MATRIX.md`.
-- `DOC-002` — Standardized remediation guidance in runbooks and improved CLI error propagation so HTTP response bodies (for example `request_id required`, `secret backend unavailable`) are preserved in user-facing errors with test coverage.
-- `BETA-001` — Expanded MCP conformance coverage for target-client profiles (string IDs, null params, and `id:null` error-envelope checks for parse/batch errors) and updated compatibility docs.
-- `REL-001` — Release packaging now uses pinned GoReleaser builds (`.goreleaser.yaml` + `scripts/release-package.sh`) while keeping `make release-package VERSION=...` as the canonical workflow.
-- Production-readiness P0/P1/P2 scope remains complete in `docs/plans/initiatives/PRODUCTION-READINESS.md`.
-- Go-first tooling migration remains complete in `docs/plans/initiatives/GO-FIRST-TOOLING-MIGRATION.md`.
+- `SEC-017` Fail closed when mandatory audit writes fail, or explicitly narrow the mandatory-audit claims. Current request/auth/access/execute flows ignore `Audit.Write` failures after mutating state or returning secrets, so privileged actions still succeed after the audit sink stops being durable.
+- `SEC-018` Restore actual tamper evidence for `audit-verify`. `internal/adapters/audit/verify.go` unmarshals each line into `auditRecord` before recomputing the hash, so unknown JSON fields are ignored and an attacker can change stored bytes without breaking verification.
+- `SEC-019` Make audit sink startup fail closed and single-writer safe. `internal/adapters/audit/file.go` ignores `readLastHash` errors and does not lock `audit_path`, so PromptLock starts on malformed audit logs and concurrent writers can silently corrupt the chain.
+- `SEC-020` Strip broker ambient environment from `POST /v1/host/docker/execute` child processes and add regression coverage. `handleHostDockerExecute` leaves `cmd.Env` unset, so Docker commands inherit broker secrets, tokens, and PATH even though the docs claim broker child processes use only a minimal baseline environment.
+- `SEC-021` Harden CLI auth credential handling for `auth login` and `auth docker-run`. `auth login` prints bearer `grant_id` plus `session_token` to stdout, and `auth docker-run` passes `PROMPTLOCK_SESSION_TOKEN=...` on the `docker run` command line while the docs present it as the secure hardened helper path.
+- `AUTH-005` Make `POST /v1/auth/revoke` fail closed when no revoke target is supplied, and align the request field naming with actual behavior. The handler currently returns `{"status":"revoked"}` and emits `auth_revoked` even when both `grant_id` and `session_id` are empty; `session_id` is also the bearer session token, not a separate opaque ID.
+- `AUTH-006` Extend auth abuse throttling to pairing/session-mint bearer endpoints or narrow the docs that claim auth endpoint throttling covers the auth surface. `/v1/auth/pair/complete` and `/v1/auth/session/mint` bypass `enforceAuthRateLimit`, but the architecture/config docs describe `/v1/auth/*` and `rate_limit_*` as auth endpoint abuse protection.
+- `API-005` Reject malformed non-scalar JSON-RPC request IDs in the MCP adapter. `cmd/promptlock-mcp` currently accepts object, array, and boolean `id` values as valid requests instead of failing closed with `-32600`; add request-shape validation and conformance coverage for malformed IDs across initialize, tool-call, and cancellation paths.
+- `MCP-001` Align the MCP adapter transport story with the supported hardened dual-socket deployment. `cmd/promptlock-mcp` currently talks to the broker only through `PROMPTLOCK_BROKER_URL`, defaults to `http://127.0.0.1:8765`, and has no Unix-socket or role-aware broker selection, so it cannot use the documented local-only hardened deployment without reintroducing TCP.
+- `QA-004` Align release/readiness automation and hardened smoke claims with the supported hardened dual-socket deployment. Tagged release validation still exercises a dev-profile, auth-disabled, insecure-TCP compose path; `make real-e2e-smoke` still starts hardened mode with `PROMPTLOCK_ALLOW_INSECURE_TCP=1` and no Unix sockets; and `security-redteam-live-hardened` still injects removed TLS config even though hardened-smoke docs claim it covers the supported path.
+- `QA-005` Add vulnerability scanning to the tagged release gate or narrow the docs that describe `make release-readiness-gate` as the full or release-quality validation path. Tagged release CI currently omits `make vulncheck` even though PR CI runs it separately.
+- `DOC-005` Retire or relabel stale helper and demo surfaces that no longer match the current broker contract or supported operator flow. `README.md`, `examples/workflow.md`, `scripts/secretctl.sh`, `scripts/human-approve.sh`, and `docs/operations/WRAPPER-EXEC.md` still advertise localhost-TCP, plaintext, or mock-broker helpers as if they were current, and the shipped mock-broker workflow is broken because the approval helper targets the real broker query-parameter endpoint while `cmd/promptlock-mock-broker` still expects `/v1/leases/{request_id}/approve`.
+- `CFG-009` Clean the canonical example configs so they show only enforced behavior. `docs/operations/CONFIG.md`, `docs/operations/REAL-E2E-HOST-CONTAINER.md`, and `examples/config.example.json` still include dead backend settings for inactive `state_store` or `secret_source` modes, and the hardened example config still advertises Docker compose verbs that hardened mode overrides to `config` and `ps`.

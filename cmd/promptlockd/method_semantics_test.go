@@ -25,3 +25,13 @@ func TestHostDockerMethodMismatchReturns405(t *testing.T) {
 		t.Fatalf("expected 405, got %d", w.Code)
 	}
 }
+
+func TestCancelMethodMismatchReturns405(t *testing.T) {
+	s := &server{authEnabled: false}
+	req := httptest.NewRequest(http.MethodGet, "/v1/leases/cancel?request_id=req-1", nil)
+	w := httptest.NewRecorder()
+	s.handleCancel(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", w.Code)
+	}
+}

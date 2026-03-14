@@ -9,9 +9,8 @@ make hardened-smoke
 ```
 
 ## What it covers
-1. Transport safety checks including unix-socket and TLS paths.
-2. TLS/mTLS runtime behavior tests (`cmd/promptlockd` transport/runtime tests).
-3. Live hardened broker abuse-path smoke run (`security-redteam-live-hardened`).
+1. Transport safety checks for the supported local hardened path, including dual-socket guardrails and local transport defaults.
+2. Live hardened broker abuse-path smoke run (`security-redteam-live-hardened`).
 
 ## Expected output
 - `Hardened smoke suite passed.`

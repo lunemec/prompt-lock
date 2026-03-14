@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -19,7 +20,7 @@ func TestLoadDefaultsWhenMissing(t *testing.T) {
 func TestLoadFromFile(t *testing.T) {
 	d := t.TempDir()
 	p := filepath.Join(d, "cfg.json")
-	data := `{"address":":9999","tls":{"enable":true,"cert_file":"/tmp/cert.pem","key_file":"/tmp/key.pem"},"policy":{"default_ttl_minutes":7,"min_ttl_minutes":1,"max_ttl_minutes":20,"max_secrets_per_request":3}}`
+	data := `{"address":":9999","policy":{"default_ttl_minutes":7,"min_ttl_minutes":1,"max_ttl_minutes":20,"max_secrets_per_request":3}}`
 	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -30,8 +31,17 @@ func TestLoadFromFile(t *testing.T) {
 	if cfg.Address != ":9999" || cfg.Policy.DefaultTTLMinutes != 7 || cfg.Policy.MaxTTLMinutes != 20 {
 		t.Fatalf("config values not loaded correctly: %+v", cfg)
 	}
-	if !cfg.TLS.Enable || cfg.TLS.CertFile != "/tmp/cert.pem" || cfg.TLS.KeyFile != "/tmp/key.pem" {
-		t.Fatalf("tls values not loaded correctly: %+v", cfg.TLS)
+}
+
+func TestLoadRejectsRemovedTLSConfig(t *testing.T) {
+	d := t.TempDir()
+	p := filepath.Join(d, "cfg-removed-transport.json")
+	data := `{"tls":{"enable":true,"cert_file":"/tmp/cert.pem","key_file":"/tmp/key.pem"}}`
+	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatalf("expected removed tls transport config to be rejected")
 	}
 }
 
@@ -63,7 +73,7 @@ func TestSecretSourceDefaultsNormalize(t *testing.T) {
 func TestLoadHardenedProfileWithNonIP127HostnameDoesNotDefaultUnixSocket(t *testing.T) {
 	d := t.TempDir()
 	p := filepath.Join(d, "cfg-hardened-nonlocal.json")
-	data := `{"security_profile":"hardened","address":"127.evil.example:8765","unix_socket":""}`
+	data := `{"security_profile":"hardened","address":"127.evil.example:8765","unix_socket":"","agent_unix_socket":"","operator_unix_socket":""}`
 	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -71,8 +81,8 @@ func TestLoadHardenedProfileWithNonIP127HostnameDoesNotDefaultUnixSocket(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.UnixSocket != "" {
-		t.Fatalf("expected unix socket to remain empty for non-IP 127.* hostname, got %q", cfg.UnixSocket)
+	if cfg.UnixSocket != "" || cfg.AgentUnixSocket != "" || cfg.OperatorUnixSocket != "" {
+		t.Fatalf("expected unix sockets to remain empty for non-IP 127.* hostname, got legacy=%q agent=%q operator=%q", cfg.UnixSocket, cfg.AgentUnixSocket, cfg.OperatorUnixSocket)
 	}
 	if cfg.Auth.AllowPlaintextSecretReturn {
 		t.Fatalf("expected hardened profile settings to be applied after load")
@@ -82,7 +92,7 @@ func TestLoadHardenedProfileWithNonIP127HostnameDoesNotDefaultUnixSocket(t *test
 func TestLoadHardenedProfileWithLoopbackAddressDefaultsUnixSocket(t *testing.T) {
 	d := t.TempDir()
 	p := filepath.Join(d, "cfg-hardened-local.json")
-	data := `{"security_profile":"hardened","address":"127.0.0.1:8765","unix_socket":""}`
+	data := `{"security_profile":"hardened","address":"127.0.0.1:8765","unix_socket":"","agent_unix_socket":"","operator_unix_socket":""}`
 	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -90,9 +100,122 @@ func TestLoadHardenedProfileWithLoopbackAddressDefaultsUnixSocket(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.UnixSocket == "" {
-		t.Fatalf("expected hardened loopback config to default unix socket")
+	if cfg.AgentUnixSocket == "" || cfg.OperatorUnixSocket == "" {
+		t.Fatalf("expected hardened loopback config to default dual unix sockets, got agent=%q operator=%q", cfg.AgentUnixSocket, cfg.OperatorUnixSocket)
 	}
+	if cfg.UnixSocket != "" {
+		t.Fatalf("expected legacy unix socket to remain empty in dual-socket default, got %q", cfg.UnixSocket)
+	}
+}
+
+func TestLoadHardenedProfilePreservesExplicitExecutionPolicyOverrides(t *testing.T) {
+	d := t.TempDir()
+	p := filepath.Join(d, "cfg-hardened-exec-overrides.json")
+	data := `{
+		"security_profile":"hardened",
+		"address":"0.0.0.0:8765",
+		"execution_policy":{
+			"exact_match_executables":["echo","bash","echo"],
+			"output_security_mode":"redacted"
+		}
+	}`
+	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ExecutionPolicy.OutputSecurityMode != "redacted" {
+		t.Fatalf("expected explicit hardened output mode override to be preserved, got %q", cfg.ExecutionPolicy.OutputSecurityMode)
+	}
+	if !containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, "echo") {
+		t.Fatalf("expected explicit hardened allowlist override to include echo, got %#v", cfg.ExecutionPolicy.ExactMatchExecutables)
+	}
+	for _, required := range []string{"go", "git"} {
+		if !containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, required) {
+			t.Fatalf("expected hardened allowlist to retain %q, got %#v", required, cfg.ExecutionPolicy.ExactMatchExecutables)
+		}
+	}
+	for _, forbidden := range []string{"bash", "sh", "zsh"} {
+		if containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, forbidden) {
+			t.Fatalf("did not expect hardened allowlist to include %q, got %#v", forbidden, cfg.ExecutionPolicy.ExactMatchExecutables)
+		}
+	}
+}
+
+func TestLoadExecutionPolicyExactMatchExecutables(t *testing.T) {
+	d := t.TempDir()
+	p := filepath.Join(d, "cfg-exact-executables.json")
+	data := `{
+		"execution_policy":{
+			"exact_match_executables":["echo","go","echo"]
+		}
+	}`
+	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, "echo") || !containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, "go") {
+		t.Fatalf("expected new execution-policy key to load exact executables, got %#v", cfg.ExecutionPolicy.ExactMatchExecutables)
+	}
+}
+
+func TestLoadExecutionPolicyLegacyAllowlistPrefixesCompatibility(t *testing.T) {
+	d := t.TempDir()
+	p := filepath.Join(d, "cfg-legacy-executables.json")
+	data := `{
+		"execution_policy":{
+			"allowlist_prefixes":["echo","go"]
+		}
+	}`
+	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, "echo") || !containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, "go") {
+		t.Fatalf("expected legacy execution-policy key to backfill exact executables, got %#v", cfg.ExecutionPolicy.ExactMatchExecutables)
+	}
+}
+
+func TestLoadExecutionPolicyExactMatchExecutablesTakePrecedenceOverLegacyKey(t *testing.T) {
+	d := t.TempDir()
+	p := filepath.Join(d, "cfg-exact-executables-precedence.json")
+	data := `{
+		"execution_policy":{
+			"exact_match_executables":["go"],
+			"allowlist_prefixes":["echo"]
+		}
+	}`
+	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, "go") {
+		t.Fatalf("expected new key to populate exact executables, got %#v", cfg.ExecutionPolicy.ExactMatchExecutables)
+	}
+	if containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, "echo") {
+		t.Fatalf("expected legacy key to be ignored when exact_match_executables is present, got %#v", cfg.ExecutionPolicy.ExactMatchExecutables)
+	}
+}
+
+func containsStringCI(items []string, needle string) bool {
+	want := strings.ToLower(strings.TrimSpace(needle))
+	for _, item := range items {
+		if strings.ToLower(strings.TrimSpace(item)) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDefaultRequestPolicyConfig(t *testing.T) {

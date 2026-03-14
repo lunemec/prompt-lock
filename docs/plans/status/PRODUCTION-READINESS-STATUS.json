@@ -1,7 +1,7 @@
 {
-  "updated": "2026-03-09",
+  "updated": "2026-03-14",
   "tasks": [
-    {"id": "P0-01", "title": "mTLS phase-2 closure", "priority": "P0", "status": "done", "blocking": true},
+    {"id": "P0-01", "title": "OSS v1 transport scope finalized as local-only hardened dual-socket deployment", "priority": "P0", "status": "done", "blocking": true},
     {"id": "P0-02", "title": "Durable external secret backend integration", "priority": "P0", "status": "done", "blocking": true},
     {"id": "P0-03", "title": "MCP protocol conformance hardening", "priority": "P0", "status": "done", "blocking": true},
     {"id": "P1-01", "title": "Extract auth business logic to app layer", "priority": "P1", "status": "done", "blocking": false},

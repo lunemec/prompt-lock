@@ -1,0 +1,7 @@
+.git
+.agents
+.gocache
+.gomodcache
+.goreleaser-dist
+dist
+reports

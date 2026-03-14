@@ -1,6 +1,9 @@
 package domain
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 type Policy struct {
 	DefaultTTLMinutes int
@@ -27,6 +30,48 @@ func (p Policy) ValidateRequest(ttl int, secrets []string) error {
 	}
 	if len(secrets) > p.MaxSecretsPerReq {
 		return fmt.Errorf("too many secrets requested (max %d)", p.MaxSecretsPerReq)
+	}
+	for _, secret := range secrets {
+		if err := validateSecretName(secret); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var reservedSecretEnvNames = map[string]struct{}{
+	"PATH":              {},
+	"HOME":              {},
+	"TMPDIR":            {},
+	"TMP":               {},
+	"TEMP":              {},
+	"SYSTEMROOT":        {},
+	"COMSPEC":           {},
+	"PATHEXT":           {},
+	"USERPROFILE":       {},
+	"LD_PRELOAD":        {},
+	"LD_LIBRARY_PATH":   {},
+	"DYLD_INSERT_LIBRARIES": {},
+	"DYLD_LIBRARY_PATH": {},
+	"PYTHONPATH":        {},
+	"PYTHONHOME":        {},
+	"GIT_CONFIG":        {},
+	"GIT_CONFIG_GLOBAL": {},
+	"GIT_CONFIG_SYSTEM": {},
+	"GIT_EXEC_PATH":     {},
+	"NODE_OPTIONS":      {},
+	"RUBYOPT":           {},
+	"PERL5OPT":          {},
+}
+
+func validateSecretName(secret string) error {
+	trimmed := strings.TrimSpace(secret)
+	if trimmed == "" {
+		return fmt.Errorf("secret names must be non-empty")
+	}
+	envName := strings.ToUpper(trimmed)
+	if _, reserved := reservedSecretEnvNames[envName]; reserved {
+		return fmt.Errorf("secret name %q is reserved and cannot be leased", trimmed)
 	}
 	return nil
 }

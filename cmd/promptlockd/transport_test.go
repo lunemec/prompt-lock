@@ -30,35 +30,18 @@ func TestValidateTransportSafety(t *testing.T) {
 	cfg.Auth.EnableAuth = true
 	cfg.Address = "0.0.0.0:8765"
 	cfg.UnixSocket = ""
+	cfg.AgentUnixSocket = ""
+	cfg.OperatorUnixSocket = ""
 	if err := validateTransportSafety(cfg, "", ""); err == nil {
 		t.Fatalf("expected transport safety error")
 	}
 	if err := validateTransportSafety(cfg, "1", ""); err != nil {
 		t.Fatalf("expected override success, got %v", err)
 	}
-	cfg.UnixSocket = "/tmp/promptlock.sock"
+	cfg.AgentUnixSocket = "/tmp/promptlock-agent.sock"
+	cfg.OperatorUnixSocket = "/tmp/promptlock-operator.sock"
 	if err := validateTransportSafety(cfg, "", ""); err != nil {
-		t.Fatalf("expected unix socket to satisfy safety, got %v", err)
-	}
-	cfg.UnixSocket = ""
-	cfg.TLS.Enable = true
-	cfg.TLS.CertFile = "/tmp/cert.pem"
-	cfg.TLS.KeyFile = "/tmp/key.pem"
-	if err := validateTransportSafety(cfg, "", ""); err != nil {
-		t.Fatalf("expected tls to satisfy safety, got %v", err)
-	}
-}
-
-func TestValidateTransportSafetyWithTLS(t *testing.T) {
-	cfg := config.Default()
-	cfg.Auth.EnableAuth = true
-	cfg.Address = "0.0.0.0:8765"
-	cfg.UnixSocket = ""
-	cfg.TLS.Enable = true
-	cfg.TLS.CertFile = "/tmp/cert.pem"
-	cfg.TLS.KeyFile = "/tmp/key.pem"
-	if err := validateTransportSafety(cfg, "", ""); err != nil {
-		t.Fatalf("expected tls transport safety success, got %v", err)
+		t.Fatalf("expected dual unix sockets to satisfy safety, got %v", err)
 	}
 }
 
@@ -67,7 +50,8 @@ func TestValidateTransportSafety_NoAuthNonLocalTCP(t *testing.T) {
 	cfg.Auth.EnableAuth = false
 	cfg.Address = "0.0.0.0:8765"
 	cfg.UnixSocket = ""
-	cfg.TLS.Enable = false
+	cfg.AgentUnixSocket = ""
+	cfg.OperatorUnixSocket = ""
 
 	if err := validateTransportSafety(cfg, "", ""); err == nil {
 		t.Fatalf("expected unauthenticated non-local TCP startup to fail")
@@ -89,6 +73,22 @@ func TestValidateTransportSafety_NoAuthNonLocalTCP(t *testing.T) {
 	cfg.Address = "127.evil.example:8765"
 	if err := validateTransportSafety(cfg, "", ""); err == nil {
 		t.Fatalf("expected non-IP 127.* hostname to fail non-local unauthenticated TCP check")
+	}
+}
+
+func TestValidateSocketConfig(t *testing.T) {
+	cfg := config.Default()
+	cfg.UnixSocket = "/tmp/promptlock.sock"
+	cfg.AgentUnixSocket = "/tmp/promptlock-agent.sock"
+	if err := validateSocketConfig(cfg); err == nil {
+		t.Fatalf("expected legacy and dual socket config conflict to fail")
+	}
+
+	cfg = config.Default()
+	cfg.AgentUnixSocket = "/tmp/promptlock.sock"
+	cfg.OperatorUnixSocket = "/tmp/promptlock.sock"
+	if err := validateSocketConfig(cfg); err == nil {
+		t.Fatalf("expected identical dual socket paths to fail")
 	}
 }
 
@@ -132,22 +132,8 @@ func TestValidateSecretSourceSafety(t *testing.T) {
 	if err := validateSecretSourceSafety(cfg); err != nil {
 		t.Fatalf("expected external source with URL and token env to pass, got %v", err)
 	}
-}
-
-func TestValidateTLSConfig(t *testing.T) {
-	cfg := config.Default()
-	cfg.TLS.Enable = true
-	if err := validateTLSConfig(cfg); err == nil {
-		t.Fatalf("expected error for missing cert/key")
-	}
-	cfg.TLS.CertFile = "/tmp/cert.pem"
-	cfg.TLS.KeyFile = "/tmp/key.pem"
-	if err := validateTLSConfig(cfg); err != nil {
-		t.Fatalf("expected tls config success, got %v", err)
-	}
-	cfg.TLS.RequireClientCert = true
-	cfg.TLS.ClientCAFile = ""
-	if err := validateTLSConfig(cfg); err == nil {
-		t.Fatalf("expected error for missing client CA in mTLS mode")
+	cfg.SecretSource.ExternalURL = "ftp://secrets.example.local"
+	if err := validateSecretSourceSafety(cfg); err == nil {
+		t.Fatalf("expected external source with unsupported scheme to fail")
 	}
 }

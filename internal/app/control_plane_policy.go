@@ -12,8 +12,10 @@ import (
 type ControlPlanePolicy interface {
 	ValidateExecuteRequest(securityProfile string, req ExecuteRequest) error
 	ValidateExecuteCommand(cmd []string) error
+	ResolveExecuteCommand(cmd []string) (ResolvedCommand, error)
 	ValidateNetworkEgress(cmd []string, intent string) error
 	ValidateHostDockerCommand(cmd []string) error
+	ResolveHostDockerCommand(cmd []string) (ResolvedCommand, error)
 	ApplyOutputSecurity(in string) string
 	ClampTimeout(requested int) int
 }
@@ -24,12 +26,12 @@ type ExecuteRequest struct {
 }
 
 type DefaultControlPlanePolicy struct {
-	Exec        config.ExecutionPolicy
-	HostOps     config.HostOpsPolicy
-	Network     config.NetworkEgressPolicy
-	OutputMode  string
-	DefaultTO   int
-	MaxTO       int
+	Exec       config.ExecutionPolicy
+	HostOps    config.HostOpsPolicy
+	Network    config.NetworkEgressPolicy
+	OutputMode string
+	DefaultTO  int
+	MaxTO      int
 }
 
 func NewDefaultControlPlanePolicy(exec config.ExecutionPolicy, host config.HostOpsPolicy, netpol config.NetworkEgressPolicy) DefaultControlPlanePolicy {
@@ -62,10 +64,10 @@ func (p DefaultControlPlanePolicy) ValidateExecuteCommand(cmd []string) error {
 	if len(cmd) == 0 {
 		return fmt.Errorf("empty command")
 	}
-	cmd0 := strings.ToLower(strings.TrimSpace(cmd[0]))
+	cmd0 := ExecutableIdentity(cmd[0])
 	allowed := false
-	for _, pref := range p.Exec.AllowlistPrefixes {
-		if strings.HasPrefix(cmd0, strings.ToLower(strings.TrimSpace(pref))) {
+	for _, allowedExec := range p.Exec.ExactMatchExecutables {
+		if cmd0 != "" && cmd0 == ExecutableIdentity(allowedExec) {
 			allowed = true
 			break
 		}
@@ -80,6 +82,13 @@ func (p DefaultControlPlanePolicy) ValidateExecuteCommand(cmd []string) error {
 		}
 	}
 	return nil
+}
+
+func (p DefaultControlPlanePolicy) ResolveExecuteCommand(cmd []string) (ResolvedCommand, error) {
+	if err := p.ValidateExecuteCommand(cmd); err != nil {
+		return ResolvedCommand{}, err
+	}
+	return ResolveExecutionCommand(cmd, p.Exec.CommandSearchPaths)
 }
 
 func (p DefaultControlPlanePolicy) ValidateNetworkEgress(cmd []string, intent string) error {
@@ -159,6 +168,13 @@ func (p DefaultControlPlanePolicy) ValidateHostDockerCommand(cmd []string) error
 		}
 	}
 	return nil
+}
+
+func (p DefaultControlPlanePolicy) ResolveHostDockerCommand(cmd []string) (ResolvedCommand, error) {
+	if err := p.ValidateHostDockerCommand(cmd); err != nil {
+		return ResolvedCommand{}, err
+	}
+	return ResolveExecutionCommand(cmd, p.Exec.CommandSearchPaths)
 }
 
 func (p DefaultControlPlanePolicy) ApplyOutputSecurity(in string) string {
@@ -272,6 +288,10 @@ func extractDomains(cmd []string) []string {
 			add(strings.TrimPrefix(p, "--host="))
 			continue
 		}
+		if host, ok := splitHostPathCandidate(p); ok {
+			add(host)
+			continue
+		}
 		if isDomainLike(p) {
 			add(p)
 		}
@@ -308,6 +328,22 @@ func isDomainLike(s string) bool {
 		return true
 	}
 	return strings.Contains(s, ".")
+}
+
+func splitHostPathCandidate(s string) (string, bool) {
+	trimmed := strings.Trim(strings.TrimSpace(s), "[]")
+	if trimmed == "" || strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, ".") || strings.HasPrefix(trimmed, "-") {
+		return "", false
+	}
+	slash := strings.Index(trimmed, "/")
+	if slash <= 0 {
+		return "", false
+	}
+	host := trimmed[:slash]
+	if isDomainLike(host) {
+		return host, true
+	}
+	return "", false
 }
 
 func isBlockedIPTarget(host string) bool {

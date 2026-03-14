@@ -1,6 +1,6 @@
 # Auth endpoints (foundation)
 
-This is the initial auth foundation for pairing + idle-resilient session minting.
+This is the initial auth foundation for pairing + refreshable session minting.
 
 ## Endpoints
 
@@ -24,6 +24,7 @@ Body:
 ```
 
 Response includes `grant_id` with idle + absolute expiry timestamps.
+Treat `grant_id` as a bearer credential after pair-complete. Current session mint does not re-check `container_id`.
 
 ### 3) Mint short session from grant (agent path)
 `POST /v1/auth/session/mint`
@@ -61,6 +62,7 @@ Examples:
 - `/v1/leases/request`
 - `/v1/requests/status`
 - `/v1/leases/by-request`
+- `/v1/leases/cancel`
 - `/v1/leases/access`
 - `/v1/leases/execute`
 

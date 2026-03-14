@@ -76,12 +76,12 @@ func TestPromptLockV1IntegrationSecurityRegression(t *testing.T) {
 		},
 		authStore: auth.NewStore(),
 		execPolicy: config.ExecutionPolicy{
-			AllowlistPrefixes:  []string{"bash"},
-			DenylistSubstrings: []string{"printenv"},
-			OutputSecurityMode: "raw",
-			MaxOutputBytes:     65536,
-			DefaultTimeoutSec:  30,
-			MaxTimeoutSec:      60,
+			ExactMatchExecutables: []string{"bash"},
+			DenylistSubstrings:    []string{"printenv"},
+			OutputSecurityMode:    "raw",
+			MaxOutputBytes:        65536,
+			DefaultTimeoutSec:     30,
+			MaxTimeoutSec:         60,
 		},
 		now: func() time.Time { return now },
 	}
@@ -120,6 +120,37 @@ func TestPromptLockV1IntegrationSecurityRegression(t *testing.T) {
 	decodeJSONBody(t, mintW, &mintResp)
 	if strings.TrimSpace(mintResp.SessionToken) == "" {
 		t.Fatalf("expected non-empty session token")
+	}
+
+	mintSession := func(agentID, containerID string) string {
+		t.Helper()
+		bootstrapW := callJSONHandler(t, s.handleAuthBootstrapCreate, http.MethodPost, "/v1/auth/bootstrap/create", "operator-token", fmt.Sprintf(`{"agent_id":%q,"container_id":%q}`, agentID, containerID))
+		if bootstrapW.Code != http.StatusOK {
+			t.Fatalf("bootstrap create failed for %s: code=%d body=%s", agentID, bootstrapW.Code, bootstrapW.Body.String())
+		}
+		var bootstrapResp struct {
+			BootstrapToken string `json:"bootstrap_token"`
+		}
+		decodeJSONBody(t, bootstrapW, &bootstrapResp)
+
+		pairW := callJSONHandler(t, s.handleAuthPairComplete, http.MethodPost, "/v1/auth/pair/complete", "", fmt.Sprintf(`{"token":%q,"container_id":%q}`, bootstrapResp.BootstrapToken, containerID))
+		if pairW.Code != http.StatusOK {
+			t.Fatalf("pair complete failed for %s: code=%d body=%s", agentID, pairW.Code, pairW.Body.String())
+		}
+		var pairResp struct {
+			GrantID string `json:"grant_id"`
+		}
+		decodeJSONBody(t, pairW, &pairResp)
+
+		mintW := callJSONHandler(t, s.handleAuthSessionMint, http.MethodPost, "/v1/auth/session/mint", "", fmt.Sprintf(`{"grant_id":%q}`, pairResp.GrantID))
+		if mintW.Code != http.StatusOK {
+			t.Fatalf("session mint failed for %s: code=%d body=%s", agentID, mintW.Code, mintW.Body.String())
+		}
+		var mintResp struct {
+			SessionToken string `json:"session_token"`
+		}
+		decodeJSONBody(t, mintW, &mintResp)
+		return mintResp.SessionToken
 	}
 
 	invalidSessionW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", "invalid-session", `{"agent_id":"agent-1","task_id":"invalid-session","reason":"invalid","ttl_minutes":5,"secrets":["github_token"],"command_fingerprint":"fp-invalid","workdir_fingerprint":"wd-invalid"}`)
@@ -213,7 +244,8 @@ func TestPromptLockV1IntegrationSecurityRegression(t *testing.T) {
 		t.Fatalf("expected 404 for denied request lease lookup, got %d body=%s", denyByRequestW.Code, denyByRequestW.Body.String())
 	}
 
-	reuseCreateW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", mintResp.SessionToken, `{"agent_id":"agent-reuse","task_id":"reuse-1","reason":"first","ttl_minutes":5,"secrets":["npm_token"],"command_fingerprint":"fp-reuse","workdir_fingerprint":"wd-reuse"}`)
+	reuseSession := mintSession("agent-reuse", "container-reuse")
+	reuseCreateW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", reuseSession, `{"agent_id":"agent-reuse","task_id":"reuse-1","reason":"first","ttl_minutes":5,"secrets":["npm_token"],"command_fingerprint":"fp-reuse","workdir_fingerprint":"wd-reuse"}`)
 	if reuseCreateW.Code != http.StatusOK {
 		t.Fatalf("reuse create failed: code=%d body=%s", reuseCreateW.Code, reuseCreateW.Body.String())
 	}
@@ -231,7 +263,7 @@ func TestPromptLockV1IntegrationSecurityRegression(t *testing.T) {
 	}
 	decodeJSONBody(t, reuseApproveW, &reuseApproveResp)
 
-	reuseW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", mintResp.SessionToken, `{"agent_id":"agent-reuse","task_id":"reuse-2","reason":"equivalent","ttl_minutes":5,"secrets":[" npm_token "],"command_fingerprint":"fp-reuse","workdir_fingerprint":"wd-reuse"}`)
+	reuseW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", reuseSession, `{"agent_id":"agent-reuse","task_id":"reuse-2","reason":"equivalent","ttl_minutes":5,"secrets":[" npm_token "],"command_fingerprint":"fp-reuse","workdir_fingerprint":"wd-reuse"}`)
 	if reuseW.Code != http.StatusOK {
 		t.Fatalf("reuse request failed: code=%d body=%s", reuseW.Code, reuseW.Body.String())
 	}
@@ -251,11 +283,12 @@ func TestPromptLockV1IntegrationSecurityRegression(t *testing.T) {
 		t.Fatalf("reuse lease_token = %q, want %q", reuseResp.LeaseToken, reuseApproveResp.LeaseToken)
 	}
 
-	cooldownCreateW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", mintResp.SessionToken, `{"agent_id":"agent-cool","task_id":"cool-1","reason":"first","ttl_minutes":5,"secrets":["github_token","npm_token"],"command_fingerprint":"fp-cool","workdir_fingerprint":"wd-cool"}`)
+	cooldownSession := mintSession("agent-cool", "container-cool")
+	cooldownCreateW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", cooldownSession, `{"agent_id":"agent-cool","task_id":"cool-1","reason":"first","ttl_minutes":5,"secrets":["github_token","npm_token"],"command_fingerprint":"fp-cool","workdir_fingerprint":"wd-cool"}`)
 	if cooldownCreateW.Code != http.StatusOK {
 		t.Fatalf("cooldown create failed: code=%d body=%s", cooldownCreateW.Code, cooldownCreateW.Body.String())
 	}
-	cooldownW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", mintResp.SessionToken, `{"agent_id":"agent-cool","task_id":"cool-2","reason":"repeat","ttl_minutes":5,"secrets":[" npm_token ","github_token"],"command_fingerprint":"fp-cool","workdir_fingerprint":"wd-cool"}`)
+	cooldownW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", cooldownSession, `{"agent_id":"agent-cool","task_id":"cool-2","reason":"repeat","ttl_minutes":5,"secrets":[" npm_token ","github_token"],"command_fingerprint":"fp-cool","workdir_fingerprint":"wd-cool"}`)
 	if cooldownW.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429 for cooldown, got %d body=%s", cooldownW.Code, cooldownW.Body.String())
 	}
@@ -266,15 +299,16 @@ func TestPromptLockV1IntegrationSecurityRegression(t *testing.T) {
 		t.Fatalf("expected cooldown guidance, got %q", cooldownW.Body.String())
 	}
 
-	pendingCapFirstW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", mintResp.SessionToken, `{"agent_id":"agent-cap","task_id":"cap-1","reason":"first","ttl_minutes":5,"secrets":["github_token"],"command_fingerprint":"fp-cap-1","workdir_fingerprint":"wd-cap-1"}`)
+	pendingCapSession := mintSession("agent-cap", "container-cap")
+	pendingCapFirstW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", pendingCapSession, `{"agent_id":"agent-cap","task_id":"cap-1","reason":"first","ttl_minutes":5,"secrets":["github_token"],"command_fingerprint":"fp-cap-1","workdir_fingerprint":"wd-cap-1"}`)
 	if pendingCapFirstW.Code != http.StatusOK {
 		t.Fatalf("pending-cap first request failed: code=%d body=%s", pendingCapFirstW.Code, pendingCapFirstW.Body.String())
 	}
-	pendingCapSecondW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", mintResp.SessionToken, `{"agent_id":"agent-cap","task_id":"cap-2","reason":"second","ttl_minutes":5,"secrets":["npm_token"],"command_fingerprint":"fp-cap-2","workdir_fingerprint":"wd-cap-2"}`)
+	pendingCapSecondW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", pendingCapSession, `{"agent_id":"agent-cap","task_id":"cap-2","reason":"second","ttl_minutes":5,"secrets":["npm_token"],"command_fingerprint":"fp-cap-2","workdir_fingerprint":"wd-cap-2"}`)
 	if pendingCapSecondW.Code != http.StatusOK {
 		t.Fatalf("pending-cap second request failed: code=%d body=%s", pendingCapSecondW.Code, pendingCapSecondW.Body.String())
 	}
-	pendingCapW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", mintResp.SessionToken, `{"agent_id":"agent-cap","task_id":"cap-3","reason":"third","ttl_minutes":5,"secrets":["github_token"],"command_fingerprint":"fp-cap-3","workdir_fingerprint":"wd-cap-3"}`)
+	pendingCapW := callJSONHandler(t, s.handleRequest, http.MethodPost, "/v1/leases/request", pendingCapSession, `{"agent_id":"agent-cap","task_id":"cap-3","reason":"third","ttl_minutes":5,"secrets":["github_token"],"command_fingerprint":"fp-cap-3","workdir_fingerprint":"wd-cap-3"}`)
 	if pendingCapW.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429 for pending cap, got %d body=%s", pendingCapW.Code, pendingCapW.Body.String())
 	}

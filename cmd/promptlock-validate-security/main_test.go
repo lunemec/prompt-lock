@@ -52,3 +52,58 @@ func TestScanSkipsSelfAndPyc(t *testing.T) {
 		t.Fatalf("expected no violations, got %#v", violations)
 	}
 }
+
+func TestScanSkipsReleaseArtifactDirs(t *testing.T) {
+	root := t.TempDir()
+	distPath := filepath.Join(root, "dist", "promptlock-0.2.0.tar.gz")
+	if err := os.MkdirAll(filepath.Dir(distPath), 0o755); err != nil {
+		t.Fatalf("mkdir dist: %v", err)
+	}
+	if err := os.WriteFile(distPath, []byte("binary bytes ... AKIA ..."), 0o644); err != nil {
+		t.Fatalf("write dist: %v", err)
+	}
+
+	goreleaserPath := filepath.Join(root, ".goreleaser-dist", "promptlock-linux-amd64")
+	if err := os.MkdirAll(filepath.Dir(goreleaserPath), 0o755); err != nil {
+		t.Fatalf("mkdir goreleaser: %v", err)
+	}
+	if err := os.WriteFile(goreleaserPath, []byte("binary bytes ... AKIA ..."), 0o644); err != nil {
+		t.Fatalf("write goreleaser: %v", err)
+	}
+
+	violations, err := scan(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("expected no violations from release artifact dirs, got %#v", violations)
+	}
+}
+
+func TestScanSkipsGoCacheDirs(t *testing.T) {
+	root := t.TempDir()
+
+	goCachePath := filepath.Join(root, ".gocache", "binary")
+	if err := os.MkdirAll(filepath.Dir(goCachePath), 0o755); err != nil {
+		t.Fatalf("mkdir .gocache: %v", err)
+	}
+	if err := os.WriteFile(goCachePath, []byte("binary bytes ... ghp_ ..."), 0o644); err != nil {
+		t.Fatalf("write .gocache file: %v", err)
+	}
+
+	goModCachePath := filepath.Join(root, ".gomodcache", "pkg", "mod", "cache.bin")
+	if err := os.MkdirAll(filepath.Dir(goModCachePath), 0o755); err != nil {
+		t.Fatalf("mkdir .gomodcache: %v", err)
+	}
+	if err := os.WriteFile(goModCachePath, []byte("binary bytes ... AKIA ..."), 0o644); err != nil {
+		t.Fatalf("write .gomodcache file: %v", err)
+	}
+
+	violations, err := scan(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("expected no violations from go cache dirs, got %#v", violations)
+	}
+}

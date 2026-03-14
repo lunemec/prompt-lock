@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -23,9 +24,16 @@ type FileSink struct {
 	mu       sync.Mutex
 	f        *os.File
 	lastHash string
+	needSync bool
+}
+
+var syncAuditFile = func(f *os.File) error {
+	return f.Sync()
 }
 
 func NewFileSink(path string) (*FileSink, error) {
+	_, statErr := os.Stat(path)
+	needSync := os.IsNotExist(statErr)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
@@ -34,7 +42,7 @@ func NewFileSink(path string) (*FileSink, error) {
 	if prev, err := readLastHash(path); err == nil {
 		last = prev
 	}
-	return &FileSink{f: f, lastHash: last}, nil
+	return &FileSink{f: f, lastHash: last, needSync: needSync}, nil
 }
 
 func (s *FileSink) Write(event ports.AuditEvent) error {
@@ -56,6 +64,15 @@ func (s *FileSink) Write(event ports.AuditEvent) error {
 	if err := enc.Encode(base); err != nil {
 		return err
 	}
+	if err := syncAuditFile(s.f); err != nil {
+		return err
+	}
+	if s.needSync {
+		if err := syncAuditParentDir(filepath.Dir(s.f.Name())); err != nil {
+			return err
+		}
+		s.needSync = false
+	}
 	s.lastHash = base.Hash
 	return nil
 }
@@ -63,7 +80,7 @@ func (s *FileSink) Write(event ports.AuditEvent) error {
 func (s *FileSink) Close() error { return s.f.Close() }
 
 var tokenLikeRe = regexp.MustCompile(`(?i)\b(boot|grant|sess|lease)_[a-f0-9]{16,}\b`)
-var secretKVRe = regexp.MustCompile(`(?i)\b(api[_-]?key|secret|token)\s*[:=]\s*([^\s,;]+)`) 
+var secretKVRe = regexp.MustCompile(`(?i)\b(api[_-]?key|secret|token)\s*[:=]\s*([^\s,;]+)`)
 
 func sanitizeAuditEvent(e ports.AuditEvent) ports.AuditEvent {
 	if e.LeaseToken != "" {
@@ -132,4 +149,17 @@ func readLastHash(path string) (string, error) {
 		return "", err
 	}
 	return rec.Hash, nil
+}
+
+var syncAuditParentDir = func(path string) error {
+	return syncDir(path)
+}
+
+func syncDir(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }

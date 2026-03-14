@@ -1,4 +1,4 @@
-# 0011 - Agent auth: host pairing + idle-resilient sessions
+# 0011 - Agent auth: host pairing + refreshable sessions
 
 - Status: accepted
 - Date: 2026-03-07
@@ -12,9 +12,9 @@ Use a two-layer credential model:
 1. **Short session token** (minutes)
    - used for normal API calls
    - frequently rotated
-2. **Long-lived pairing grant** (hours/days; host-configurable)
+2. **Long-lived pairing grant** (hours/days; host-configurable bearer credential)
    - minted at host-orchestrated container start via one-time bootstrap
-   - allows silent session re-mint after idle expiry
+   - allows silent session re-mint while the grant itself remains active
    - scoped and revocable
 
 ## Configurable long-run support
@@ -27,7 +27,7 @@ This enables day-scale container runtimes while maintaining bounded credentials.
 
 ## Required controls
 - Bootstrap token is one-time and short-lived.
-- Pairing grant is bound to container identity + agent_id (and optionally workdir fingerprint).
+- Pair-complete validates the bootstrap token against `container_id` + `agent_id`, but subsequent session mint currently uses `grant_id` as a bearer credential rather than re-checking container identity.
 - Pairing grant can mint only agent-role sessions (no operator privileges).
 - Host can revoke grant/session immediately.
 - All pair/mint/refresh/revoke events are audited host-side.
@@ -41,7 +41,7 @@ This enables day-scale container runtimes while maintaining bounded credentials.
 - Mitigation: grant scoping, idle timeout, absolute expiry, revocation, egress controls.
 
 ### Risk: Replay from another container
-- Mitigation: bind grant to container identity/session binding metadata.
+- Current mitigation is limited: `container_id` is checked during pair-complete, but later session mint does not re-validate container identity. Treat `grant_id` as a sensitive bearer credential and store it accordingly.
 
 ### Risk: Silent privilege creep
 - Mitigation: strict role model (agent vs operator), endpoint authorization matrix.

@@ -1,10 +1,12 @@
 # Production Readiness
 
-Decision: **production-readiness gates met** for current P0/P1/P2 scope.
+Decision: **production-readiness gates met** for the completed historical scope captured here.
 
 Status: Completed (2026-03-09).
 
 Canonical open work now lives in `docs/plans/BACKLOG.md`. This file is retained as the detailed record for the completed initiative.
+
+Historical note: the former TCP mTLS closure work described below is no longer part of the supported OSS target. ADR-0028 later removed the retained TCP TLS/mTLS transport path and aligned the project around local-only hardened deployment with dual Unix sockets.
 
 ## Priority model
 - **P0** = production blockers
@@ -13,21 +15,21 @@ Canonical open work now lives in `docs/plans/BACKLOG.md`. This file is retained 
 
 ---
 
-## P0-01 — Close mTLS phase-2 and align docs/tasks
+## P0-01 — Historical transport hardening work before local-only scope narrowing
 - **Area:** Security / transport
 - **Status:** ✅ Completed (2026-03-08)
-- **Problem:** mTLS phase-1 exists, but TODO/docs status is inconsistent and hardening boundaries are unclear.
+- **Problem:** a now-removed non-local TLS transport path previously had inconsistent TODO/docs status and unclear hardening boundaries.
 - **Scope:**
-  - Define explicit mTLS phase-2 acceptance (cipher/TLS minimums, cert reload behavior, profile interactions).
+  - Define explicit transport-phase acceptance (cipher/TLS minimums, cert reload behavior, profile interactions).
   - Update all plan files (`OSS-PUBLISH-TODO`, strict plan, ops docs) to same status model.
-  - Add hardened-profile live harness run that validates mTLS behavior in expected deployment mode.
+  - Add hardened-profile live harness run that validates the then-supported transport behavior in the expected deployment mode.
 - **Strict gates:**
-  - [x] Single source-of-truth task status for mTLS in all planning docs.
-  - [x] Hardened + mTLS startup and rejection paths covered by automated tests.
-  - [x] Operator docs have one canonical mTLS setup flow.
+  - [x] Single source-of-truth task status for transport hardening in all planning docs.
+  - [x] The historical transport startup and rejection paths were covered by automated tests before later removal.
+  - [x] Operator docs had one canonical setup flow before later local-only scope narrowing and removal.
 - **Test scenarios:**
-  1. Hardened profile + mTLS enabled + valid CA/client cert => success.
-  2. Hardened profile + mTLS enabled + missing client cert => denied.
+  1. Historical non-local hardened transport path started successfully with valid credentials.
+  2. Historical non-local hardened transport path rejected missing client credentials.
   3. Hardened profile + malformed CA/cert config => startup fails fast.
 
 ## P0-02 — Durable external secret backend integration (not only in-memory)
@@ -83,7 +85,7 @@ Canonical open work now lives in `docs/plans/BACKLOG.md`. This file is retained 
 - **Status:** ✅ Completed (2026-03-08)
 - **Problem:** Live harness currently runs dev profile for practicality; need hardened-path confidence.
 - **Scope:**
-  - Add dedicated hardened smoke run (unix socket/TLS/mTLS variants).
+  - Add dedicated hardened smoke run for the supported hardened transport path.
   - Include config examples used by smoke tests.
 - **Strict gates:**
   - [x] Hardened smoke test runs in CI profile (full/nightly).
@@ -135,7 +137,7 @@ Canonical open work now lives in `docs/plans/BACKLOG.md`. This file is retained 
 - **Status:** ✅ Completed (2026-03-08)
 - **Scope:**
   - Add “first 30 minutes” deployment checklist and incident quick-reference.
-  - Add rollback playbook for TLS/auth/backend config failures.
+  - Add rollback playbook for transport/auth/backend config failures.
 - **Strict gates:**
   - [x] New operator can deploy hardened profile from docs only.
   - [x] Incident checklist includes verification commands + expected outputs.

@@ -1,19 +1,62 @@
 # ACTIVE PLAN
 
-Updated: 2026-03-09
+Updated: 2026-03-14
 
 This is the canonical run-to-run handoff file for agents. Read it together with `docs/plans/BACKLOG.md` before starting implementation work.
 
 ## Current focus
 - Keep plan state centralized in `ACTIVE-PLAN.md`, `BACKLOG.md`, and initiative/checklist docs.
-- Maintain passing status for `make validate-final`, `make ci-redteam-full`, and `make real-e2e-smoke`.
-- Keep operator-facing docs and MCP compatibility matrix aligned with tested behavior.
+- Address the review-discovered open work in `docs/plans/BACKLOG.md` before treating the release or assurance story as settled, especially `SEC-017` through `SEC-021`, `AUTH-005`, `AUTH-006`, `API-005`, `MCP-001`, `QA-004`, `QA-005`, `DOC-005`, and `CFG-009`.
+- Keep `make validate-final`, `make ci-redteam-full`, and `make real-e2e-smoke` passing.
+- Open any newly discovered gaps only in `docs/plans/BACKLOG.md`.
 
 ## Next focus
-- Release packaging and environment-specific verification passes (for example optional external macOS run confirmation) as needed by maintainers.
+- Make the audit trail claims true in runtime behavior, startup behavior, and verification tooling by fixing `SEC-017`, `SEC-018`, and `SEC-019` before calling the audit path tamper-evident.
+- Strip remaining secret-handling and child-process trust-boundary leaks from host-docker and CLI auth helper paths before presenting them as secure hardened workflows.
+- Restore release-grade validation coverage for the supported hardened dual-socket deployment story, or narrow public support claims until the gates match reality.
+- Tighten MCP malformed-input handling and broker transport selection so protocol conformance fails closed and the adapter no longer depends on hidden localhost TCP defaults.
+- Align MCP, example configs, and demo/operator docs with the supported local-only dual-socket story so the published UX no longer depends on dead or weaker compatibility paths.
+- Prepare the first public pre-1.0 tag and release notes around the supported local-only hardened dual-socket deployment story.
+- Preserve the current local-only security story and assurance gates while new work stays backlog-driven.
 - Any newly discovered gaps should be opened only in `docs/plans/BACKLOG.md`.
 
 ## Recently completed
+- Closed `AUTH-004`, `ARCH-003`, `QA-003`, and `DOC-004` by aligning pairing-grant docs with the current bearer-style mint semantics, extending `make arch-conformance` with behavior-conformance tests, adding `go vet`, pinned `govulncheck`, targeted race coverage, and PR CI Docker E2E, and removing stale prototype wording/planning drift.
+- Closed `SEC-010`, `SEC-011`, `SEC-012`, `CFG-008`, `SEC-013`, `SEC-014`, `SEC-015`, `SEC-016`, `OPS-007`, `DOC-003`, and `API-004` by hardening external secret backends to fail closed in non-dev, honoring configured request policy at runtime, rejecting dangerous secret-derived env names, denying previously unclassified egress target forms, replacing post-buffer truncation with bounded execution capture, fixing audit checkpoint semantics + checkpoint/create durability, narrowing external-state claims to match current semantics, removing silent local socket fallback, documenting the `env_path` trust boundary, and keeping malformed JSON from mutating state.
+- Closed `TRANSPORT-001` by removing retained TCP TLS/mTLS broker transport, removing CLI broker TLS flags/envs, deleting the active mTLS operations doc, and aligning README/ops/ADR content to the local-only Unix-socket transport story.
+- Closed `CFG-007`, `SEC-009`, and `UX-006` by renaming the canonical execution-policy key to `execution_policy.exact_match_executables` with documented legacy-key precedence, adding broker-managed `execution_policy.command_search_paths` resolution plus PATH-shadowing regression coverage, publishing ADR-0027 for the provenance trust model, and making `promptlockd` handle normal compose teardown without the prior `promptlockd-e2e exited with code 2` noise.
+- Closed the remaining strict-review execution gaps by removing ambient env inheritance from broker and local CLI child processes, enforcing exact executable-name allowlist matches, updating docs to describe `redacted` as best-effort only, and strengthening PR CI around `make release-readiness-gate-core`.
+- Tightened agent authz boundaries so lease creation uses the authenticated session agent as the canonical identity, and request/lease status/access/execute paths now enforce session ownership with `403` on cross-agent access attempts.
+- Narrowed the supported OSS deployment story to local-only hardened dual-socket operation and then removed the retained TCP TLS/mTLS transport path instead of keeping it quarantined.
+- Reworked the README into a Docker-first quickstart with one primary copy-paste operator path, a shorter local-dev fallback, and cleaner routing to release/config/security docs for first-time OSS users.
+- Re-verified the public Docker/operator flow against the published docs, fixed the manual host/container walkthrough to include the missing agent-image bootstrap and lab execution-policy allowlist, preserved explicit hardened execution-policy overrides needed by that lab path, and removed misleading compose-smoke `$GITHUB_TOKEN` interpolation warnings before re-running the Docker checks.
+- Docker-backed `make release-readiness-gate` now passes in this environment after fixing the compose smoke topology (explicit dev-profile opt-in, explicit unauthenticated non-local TCP demo override, Alpine-compatible `sh` command path, and Docker context cache exclusions).
+- Normalized env-path canonicalization across request storage and execute-time verification, and aligned env-path tests with platform-specific canonical path forms.
+- Hardened `promptlock-validate-security` to ignore repo-local Go cache directories so `make validate-final` remains reproducible after local Go build/test workflows.
+- Removed stale Python `bandit` dependency from CI, replaced it with `make leak-guard`, and aligned public docs to a consistent pre-1.0 OSS release-candidate posture.
+- Added SOPS-managed key-material loading for runtime/release workflows via shared loader (`internal/sopsenv`), broker startup env preload (`PROMPTLOCK_SOPS_ENV_FILE`), fsync command `--sops-env-file` support, and Make `SOPS_ENV_FILE` wiring with fail-closed required-env enforcement.
+- Added MCP `ping` protocol support with conformance + response-schema test coverage and compatibility matrix updates.
+- Added MCP lifecycle protocol support for `shutdown` and `exit`, including notification no-response termination behavior and response-schema/conformance coverage.
+- Added MCP initialized-lifecycle compatibility handling (`initialized`, `notifications/initialized`) with notification-safe no-op semantics and request-form schema coverage.
+- Added MCP single-session lifecycle sequencing coverage (`initialize`, `notifications/initialized`, `tools/list`, `tools/call`) to guard response-order regressions in target client flows.
+- Added MCP cancellation-lifecycle compatibility handling (`notifications/cancelled`) with notification-safe no-op semantics and request-form schema/conformance coverage.
+- Expanded MCP compatibility with explicit initialize negotiation fields (`protocolVersion`, `capabilities.tools`), added `resources/list` + `prompts/list` empty-list responses for namespace probes, published stricter `execute_with_intent` tool JSON schema constraints, and tightened fail-closed `tools/call` param validation (`-32602` for null/empty/missing-name params; reject non-string command args and non-integer TTL values).
+- Tightened MCP capability advertising to `capabilities.tools` only (keep `resources/list` and `prompts/list` as compatibility handlers without over-advertising unsupported namespaces), and added stderr warning coverage for broker cancel-cleanup propagation failures during `notifications/cancelled`.
+- Implemented active MCP cancellation semantics for `notifications/cancelled` by request id (`requestId`/`id`), including in-flight request tracking and context cancellation through broker resolve/request/status polling paths so aborted `tools/call` requests fail closed promptly.
+- Hardened MCP notification behavior so `tools/call` frames without request `id` are ignored with no broker side effects, with regression coverage to prevent untracked notification-driven execution paths.
+- Added agent-session broker cancellation endpoint (`POST /v1/leases/cancel?request_id=...`) with request-ownership enforcement and wired MCP cancellation to call it as best-effort pending-request cleanup when notifications cancel in-flight tool calls.
+- Wired tagged release workflow to export optional fsync rotation envs (`PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_PREV`, `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEYRING`, `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_OVERLAP_MAX_AGE`) so key-overlap validation is directly usable in CI for common rotation paths.
+- Added `make release-readiness-gate-core` so non-Docker environments can run release-grade validation/fuzz subsets before final compose smoke on Docker-capable runners.
+- Standardized state/secret backend outage handling to fail closed with `503` across request/approve/deny/pending/by-request/access/execute paths, with explicit regression coverage for each endpoint path and external-state happy-path lifecycle coverage.
+- Added a tested broker env-override loader (`applyEnvOverrides`) and aligned canonical example/hardened ops docs with `state_store` block guidance for file vs external state backends.
+- Added distributed request/lease state backend support via `state_store.type=external` (`internal/adapters/externalstate`) with token-env auth, non-dev HTTPS enforcement, and fail-closed `503` handling for backend unavailability.
+- Removed the previously added CLI TLS/mTLS broker transport options so broker-facing commands now support only broker URL and Unix-socket transport selection.
+- Added `make release-readiness-gate` and wired tagged release workflow to run it before fsync attestation + packaging.
+- Audit file sink now fsyncs each appended record to disk to reduce crash-window audit loss.
+- Broker startup now acquires fail-closed single-writer lock files for configured persistence paths to block concurrent state/auth writers.
+- Storage fsync validator now supports key rotation verification via keyring env indirection (`PROMPTLOCK_STORAGE_FSYNC_HMAC_KEYRING`) with explicit overlap-window enforcement (`PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_OVERLAP_MAX_AGE`) so non-primary signatures remain time-bounded and fail closed outside overlap.
+- Storage fsync JSON reports are now cryptographically attested with deterministic HMAC payload signing (`signature.alg`, `signature.key_id`, `signature.value`), and validator gates now fail closed when signatures are missing or invalid.
+- Storage fsync Make/release workflows now require HMAC key material env (`PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY`, `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_ID`) so release/readiness evidence cannot pass with metadata-only provenance.
 - Storage fsync JSON reports now carry provenance metadata (`schema_version`, `generated_at`, `generated_by`, `hostname`) and validator gates now fail when metadata is missing or malformed.
 - Tagged GitHub release workflow now enforces `storage-fsync-release-gate` before packaging and publishes the generated fsync JSON report artifact.
 - Added storage fsync report validator command (`cmd/promptlock-storage-fsync-validate`) and Make release/readiness gates (`storage-fsync-validate`, `storage-fsync-release-gate`) that fail closed when any mount result is not `ok=true`.

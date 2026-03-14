@@ -6,7 +6,9 @@ services:
     container_name: promptlockd-e2e
     environment:
       PROMPTLOCK_CONFIG: /app/config.e2e.json
+      PROMPTLOCK_ALLOW_DEV_PROFILE: "1"
       PROMPTLOCK_ALLOW_INSECURE_TCP: "1"
+      PROMPTLOCK_ALLOW_INSECURE_NOAUTH_TCP: "1"
     volumes:
       - ./deploy/docker/config.e2e.json:/app/config.e2e.json:ro
     ports:
@@ -32,4 +34,4 @@ services:
         --ttl 5
         --auto-approve
         --broker-exec
-        -- bash -lc 'echo -n $GITHUB_TOKEN'
+        -- echo e2e-broker-exec-ok

@@ -5,7 +5,7 @@ Use this checklist to move from compatibility mode to hardened mode.
 ## 1) Auth + transport
 - [ ] `auth.enable_auth=true`
 - [ ] `auth.operator_token` set from host secret source
-- [ ] use `unix_socket` or localhost-only TCP
+- [ ] use `agent_unix_socket` + `operator_unix_socket` for local hardened mode
 - [ ] ensure non-local TCP guard not bypassed
 
 ## 2) Execution mode

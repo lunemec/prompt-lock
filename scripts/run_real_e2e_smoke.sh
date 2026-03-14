@@ -30,7 +30,7 @@ find_pending_request_id() {
   local attempts="${2:-40}"
   local out req
   for _ in $(seq 1 "$attempts"); do
-    out="$(go run ./cmd/promptlock approve-queue list --broker "$BROKER_URL" --operator-token "$OP_TOKEN" 2>/dev/null || true)"
+    out="$(go run ./cmd/promptlock watch list --broker "$BROKER_URL" --operator-token "$OP_TOKEN" 2>/dev/null || true)"
     req="$(printf '%s\n' "$out" | awk -v task="$task" '$1 ~ /^req_/ && index($0, "task=" task " ") > 0 {print $1; exit}')"
     if [[ -n "$req" ]]; then
       echo "$req"
@@ -137,7 +137,7 @@ ALLOW_PID=$!
 ALLOW_DECISION_OK=true
 REQ_ID="$(find_pending_request_id "smoke-allow" 40 || true)"
 if [[ -n "$REQ_ID" ]]; then
-  if ! go run ./cmd/promptlock approve-queue allow --broker "$BROKER_URL" --operator-token "$OP_TOKEN" "$REQ_ID" >/dev/null; then
+  if ! go run ./cmd/promptlock watch allow --broker "$BROKER_URL" --operator-token "$OP_TOKEN" "$REQ_ID" >/dev/null; then
     ALLOW_DECISION_OK=false
   fi
 else
@@ -154,7 +154,7 @@ DENY_PID=$!
 DENY_DECISION_OK=true
 REQ_ID2="$(find_pending_request_id "smoke-deny" 30 || true)"
 if [[ -n "$REQ_ID2" ]]; then
-  if ! go run ./cmd/promptlock approve-queue deny --broker "$BROKER_URL" --operator-token "$OP_TOKEN" --reason "smoke deny" "$REQ_ID2" >/dev/null; then
+  if ! go run ./cmd/promptlock watch deny --broker "$BROKER_URL" --operator-token "$OP_TOKEN" --reason "smoke deny" "$REQ_ID2" >/dev/null; then
     DENY_DECISION_OK=false
   fi
 else

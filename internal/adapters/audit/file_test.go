@@ -3,6 +3,7 @@ package audit
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,5 +116,43 @@ func TestAuditSanitizesSecretKeyValuePatterns(t *testing.T) {
 	src := string(b)
 	if strings.Contains(src, "abc123") || strings.Contains(src, "xyz") || strings.Contains(src, "zzz") {
 		t.Fatalf("expected secret key/value patterns to be redacted, got %s", src)
+	}
+}
+
+func TestWriteFailsWhenSyncFails(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "audit.jsonl")
+	s, err := NewFileSink(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	orig := syncAuditFile
+	t.Cleanup(func() { syncAuditFile = orig })
+	syncAuditFile = func(*os.File) error {
+		return errors.New("sync failed")
+	}
+
+	if err := s.Write(ports.AuditEvent{Event: "x", Timestamp: time.Now().UTC()}); err == nil {
+		t.Fatalf("expected sync failure")
+	}
+}
+
+func TestWriteFailsWhenInitialParentDirSyncFails(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "audit.jsonl")
+	s, err := NewFileSink(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	orig := syncAuditParentDir
+	t.Cleanup(func() { syncAuditParentDir = orig })
+	syncAuditParentDir = func(string) error {
+		return errors.New("dir sync failed")
+	}
+
+	if err := s.Write(ports.AuditEvent{Event: "x", Timestamp: time.Now().UTC()}); err == nil {
+		t.Fatalf("expected parent dir sync failure on initial create")
 	}
 }

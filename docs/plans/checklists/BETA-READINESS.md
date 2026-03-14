@@ -7,7 +7,7 @@
 - [x] Pairing/session foundation with idle + absolute grant limits
 - [x] Transport hardening defaults + unix socket support
 - [x] Audit actor attribution
-- [x] Tamper-evident audit hash chain
+- [x] Local audit hash-chain integrity verification
 - [x] Plaintext secret-return policy gate
 - [x] Broker-exec secure path with execution policy controls
 

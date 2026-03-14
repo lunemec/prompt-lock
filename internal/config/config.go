@@ -2,8 +2,10 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/lunemec/promptlock/internal/core/domain"
@@ -13,6 +15,8 @@ type Config struct {
 	SecurityProfile     string              `json:"security_profile"`
 	Address             string              `json:"address"`
 	UnixSocket          string              `json:"unix_socket"`
+	AgentUnixSocket     string              `json:"agent_unix_socket"`
+	OperatorUnixSocket  string              `json:"operator_unix_socket"`
 	AuditPath           string              `json:"audit_path"`
 	StateStoreFile      string              `json:"state_store_file"`
 	StateStore          StateStoreConfig    `json:"state_store"`
@@ -22,11 +26,19 @@ type Config struct {
 	ExecutionPolicy     ExecutionPolicy     `json:"execution_policy"`
 	HostOpsPolicy       HostOpsPolicy       `json:"host_ops_policy"`
 	NetworkEgressPolicy NetworkEgressPolicy `json:"network_egress_policy"`
-	TLS                 TLSConfig           `json:"tls"`
 	SecretSource        SecretSourceConfig  `json:"secret_source"`
 	Secrets             []SecretEntry       `json:"secrets"`
 	Intents             IntentMap           `json:"intents"`
+
+	executionPolicyExactExecutablesConfigured bool
+	executionPolicyLegacyAllowlistConfigured  bool
+	executionPolicyOutputModeConfigured       bool
 }
+
+const (
+	DefaultAgentUnixSocketPath    = "/tmp/promptlock-agent.sock"
+	DefaultOperatorUnixSocketPath = "/tmp/promptlock-operator.sock"
+)
 
 type PolicyConfig struct {
 	DefaultTTLMinutes int `json:"default_ttl_minutes"`
@@ -46,6 +58,8 @@ func Default() Config {
 		SecurityProfile:     "dev",
 		Address:             "127.0.0.1:8765",
 		UnixSocket:          "",
+		AgentUnixSocket:     "",
+		OperatorUnixSocket:  "",
 		AuditPath:           "/tmp/promptlock-audit.jsonl",
 		Intents:             IntentMap{},
 		Auth:                defaultAuthConfig(),
@@ -54,7 +68,6 @@ func Default() Config {
 		HostOpsPolicy:       defaultHostOpsPolicy(),
 		NetworkEgressPolicy: defaultNetworkEgressPolicy(),
 		RequestPolicy:       defaultRequestPolicyConfig(),
-		TLS:                 defaultTLSConfig(),
 		SecretSource:        defaultSecretSourceConfig(),
 		Policy: PolicyConfig{
 			DefaultTTLMinutes: p.DefaultTTLMinutes,
@@ -80,15 +93,70 @@ func Load(path string) (Config, error) {
 	if len(b) == 0 {
 		return cfg, nil
 	}
+	if err := rejectRemovedTransportConfig(b); err != nil {
+		return Config{}, err
+	}
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return Config{}, err
 	}
+	cfg.markExplicitExecutionPolicyOverrides(b)
+	cfg.resolveExecutionPolicyCompatibility()
 	cfg.applyProfile()
 	cfg.normalize()
 	return cfg, nil
 }
 
+func (c *Config) markExplicitExecutionPolicyOverrides(raw []byte) {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &root); err != nil {
+		return
+	}
+	execRaw, ok := root["execution_policy"]
+	if !ok {
+		return
+	}
+	var exec map[string]json.RawMessage
+	if err := json.Unmarshal(execRaw, &exec); err != nil {
+		return
+	}
+	if _, ok := exec["exact_match_executables"]; ok {
+		c.executionPolicyExactExecutablesConfigured = true
+	}
+	if _, ok := exec["allowlist_prefixes"]; ok {
+		c.executionPolicyLegacyAllowlistConfigured = true
+	}
+	if _, ok := exec["output_security_mode"]; ok {
+		c.executionPolicyOutputModeConfigured = true
+	}
+}
+
+func rejectRemovedTransportConfig(raw []byte) error {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &root); err != nil {
+		return nil
+	}
+	if _, ok := root["tls"]; ok {
+		return fmt.Errorf("tls transport settings are no longer supported; use unix_socket or agent_unix_socket/operator_unix_socket")
+	}
+	return nil
+}
+
+func (c *Config) resolveExecutionPolicyCompatibility() {
+	switch {
+	case c.executionPolicyExactExecutablesConfigured:
+		// New key wins when both are present.
+	case c.executionPolicyLegacyAllowlistConfigured:
+		c.ExecutionPolicy.ExactMatchExecutables = append([]string{}, c.ExecutionPolicy.AllowlistPrefixes...)
+	}
+	c.ExecutionPolicy.AllowlistPrefixes = nil
+}
+
 func (c *Config) normalize() {
+	c.ExecutionPolicy.ExactMatchExecutables = normalizeStringList(c.ExecutionPolicy.ExactMatchExecutables)
+	c.ExecutionPolicy.CommandSearchPaths = normalizePathList(c.ExecutionPolicy.CommandSearchPaths)
+	if len(c.ExecutionPolicy.CommandSearchPaths) == 0 {
+		c.ExecutionPolicy.CommandSearchPaths = defaultCommandSearchPaths()
+	}
 	switch c.ExecutionPolicy.OutputSecurityMode {
 	case "", "redacted", "raw", "none":
 		if c.ExecutionPolicy.OutputSecurityMode == "" {
@@ -153,22 +221,51 @@ func (c *Config) applyProfile() {
 		if c.ExecutionPolicy.DefaultTimeoutSec > 60 {
 			c.ExecutionPolicy.DefaultTimeoutSec = 60
 		}
-		c.ExecutionPolicy.OutputSecurityMode = "none"
+		if !c.executionPolicyOutputModeConfigured {
+			c.ExecutionPolicy.OutputSecurityMode = "none"
+		}
 		if c.ExecutionPolicy.MaxOutputBytes > 32768 {
 			c.ExecutionPolicy.MaxOutputBytes = 32768
 		}
-		c.ExecutionPolicy.AllowlistPrefixes = []string{"npm", "node", "go", "python", "pytest", "make", "git"}
+		hardenedAllowlist := []string{"npm", "node", "go", "python", "pytest", "make", "git"}
+		if c.executionPolicyExecutablesConfigured() {
+			c.ExecutionPolicy.ExactMatchExecutables = mergeUniqueStrings(hardenedAllowlist, c.ExecutionPolicy.ExactMatchExecutables)
+		} else {
+			c.ExecutionPolicy.ExactMatchExecutables = hardenedAllowlist
+		}
+		c.ExecutionPolicy.ExactMatchExecutables = filterDisallowedShells(c.ExecutionPolicy.ExactMatchExecutables)
 		c.ExecutionPolicy.DenylistSubstrings = append(c.ExecutionPolicy.DenylistSubstrings,
 			"&&", "||", ";", "$(", "`")
 		c.HostOpsPolicy.DockerComposeAllowVerbs = []string{"config", "ps"}
 		c.HostOpsPolicy.DockerDenySubstrings = append(c.HostOpsPolicy.DockerDenySubstrings,
 			"&&", "||", ";", "$(", "`")
-		if c.UnixSocket == "" && !c.TLS.Enable && isLocalAddressConfig(c.Address) {
-			c.UnixSocket = "/tmp/promptlock.sock"
+		if !c.hasAnyUnixSocketConfigured() && isLocalAddressConfig(c.Address) {
+			c.AgentUnixSocket = DefaultAgentUnixSocketPath
+			c.OperatorUnixSocket = DefaultOperatorUnixSocketPath
 		}
 	default:
 		return
 	}
+}
+
+func (c Config) executionPolicyExecutablesConfigured() bool {
+	return c.executionPolicyExactExecutablesConfigured || c.executionPolicyLegacyAllowlistConfigured
+}
+
+func (c Config) hasAnyUnixSocketConfigured() bool {
+	return strings.TrimSpace(c.UnixSocket) != "" || strings.TrimSpace(c.AgentUnixSocket) != "" || strings.TrimSpace(c.OperatorUnixSocket) != ""
+}
+
+func (c Config) UsesUnixSocketTransport() bool {
+	return c.hasAnyUnixSocketConfigured()
+}
+
+func (c Config) UsesLegacyUnixSocket() bool {
+	return strings.TrimSpace(c.UnixSocket) != "" && strings.TrimSpace(c.AgentUnixSocket) == "" && strings.TrimSpace(c.OperatorUnixSocket) == ""
+}
+
+func (c Config) UsesDualUnixSockets() bool {
+	return strings.TrimSpace(c.AgentUnixSocket) != "" || strings.TrimSpace(c.OperatorUnixSocket) != ""
 }
 
 func isLocalAddressConfig(addr string) bool {
@@ -190,6 +287,82 @@ func isLocalAddressConfig(addr string) bool {
 		return ip.IsLoopback()
 	}
 	return false
+}
+
+func mergeUniqueStrings(base []string, extras []string) []string {
+	out := append([]string{}, base...)
+	seen := map[string]struct{}{}
+	for _, item := range out {
+		key := strings.ToLower(strings.TrimSpace(item))
+		if key == "" {
+			continue
+		}
+		seen[key] = struct{}{}
+	}
+	for _, item := range extras {
+		trimmed := strings.TrimSpace(item)
+		key := strings.ToLower(trimmed)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		out = append(out, trimmed)
+		seen[key] = struct{}{}
+	}
+	return out
+}
+
+func normalizeStringList(items []string) []string {
+	out := make([]string, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		key := strings.ToLower(trimmed)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		out = append(out, trimmed)
+		seen[key] = struct{}{}
+	}
+	return out
+}
+
+func normalizePathList(items []string) []string {
+	out := make([]string, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		cleaned := filepath.Clean(trimmed)
+		key := strings.ToLower(cleaned)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		out = append(out, cleaned)
+		seen[key] = struct{}{}
+	}
+	return out
+}
+
+func filterDisallowedShells(items []string) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		switch strings.ToLower(trimmed) {
+		case "", "bash", "sh", "zsh":
+			continue
+		default:
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func (c Config) ToPolicy() domain.Policy {

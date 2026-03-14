@@ -11,6 +11,8 @@ Payload:
   "reason": "Run e2e verification",
   "ttl_minutes": 20,
   "secrets": ["github_token", "npm_token"],
+  "env_path": ".env",
+  "env_path_canonical": "/workspace/project/.env",
   "command_fingerprint": "sha256:...",
   "workdir_fingerprint": "sha256:..."
 }
@@ -51,6 +53,19 @@ Payload:
 { "reason": "Scope too broad" }
 ```
 
+### Agent cancel (session-owned pending requests)
+`POST /v1/leases/cancel?request_id=<id>`
+
+Payload:
+```json
+{ "reason": "mcp notification cancelled" }
+```
+
+Notes:
+- Requires agent session auth when auth is enabled.
+- Request must belong to the same agent identity that created it.
+- Cancels only `pending` requests (status is set to `denied`).
+
 ## 3) Approval/status helpers
 - `GET /v1/requests/status?request_id=<id>`
 - `GET /v1/leases/by-request?request_id=<id>`
@@ -83,7 +98,7 @@ Payload:
 ```json
 {
   "lease_token": "lease_...",
-  "command": ["bash", "-lc", "npm test"],
+  "command": ["go", "test", "./..."],
   "secrets": ["github_token", "npm_token"],
   "command_fingerprint": "sha256:...",
   "workdir_fingerprint": "sha256:..."
@@ -98,6 +113,18 @@ Response:
 }
 ```
 
+Notes:
+- Hardened profile requires `intent` and rejects raw shell-wrapper entrypoints such as `bash`, `sh`, and `zsh`.
+- Child processes receive only an explicit minimal baseline environment plus leased secrets; the ambient broker or CLI environment is not forwarded by default.
+- `output_security_mode=redacted` is best-effort masking for log safety only. It is not a strong output-containment or secret-exfiltration boundary. Use `none` when output should be suppressed.
+- When a request carries `env_path`, execution resolves leased secrets from that approved `.env` file instead of the broker process environment. The broker stores both the original path and a canonicalized path, and execute-time secret access fails closed if the canonical path no longer matches.
+
+## `env_path` trust boundary
+- `--env-path` is agent-supplied approval context. The broker canonicalizes it on request and stores both the original and canonical path for operator review.
+- `env_path` is constrained to `PROMPTLOCK_ENV_PATH_ROOT`. Traversal and symlink escapes outside that root are rejected.
+- If `PROMPTLOCK_ENV_PATH_ROOT` is unset, the broker currently falls back to its current working directory. That is only safe when the broker starts from a host-owned directory outside agent-controlled workspace mounts.
+- `env_path` disables active-lease reuse for matching requests because the approved file path becomes part of the trust boundary.
+
 ## Enforcement rules
 - Default deny.
 - Lease must be unexpired.
@@ -111,7 +138,7 @@ This is a critical requirement for production use.
 - Audit records must be written on the host (outside agent workspace/container writable paths).
 - Required events: request created, approved, denied, secret accessed, lease expired/revoked.
 - Records must include: timestamp, agent_id, task_id, requested secrets, decision actor, TTL, and outcome.
-- Audit storage should be append-only or tamper-evident.
+- Audit storage should be host-owned and verifiable through the local hash chain.
 - Agent/container users must not be able to modify or delete historical audit logs.
 
 ## UX policy

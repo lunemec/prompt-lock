@@ -41,16 +41,20 @@ func (s *server) handleHostDockerExecute(w http.ResponseWriter, r *http.Request)
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, req.Command[0], req.Command[1:]...)
-	out, err := cmd.CombinedOutput()
-	exitCode := 0
+	resolvedCommand, err := s.controlPolicy().ResolveHostDockerCommand(req.Command)
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else {
-			writeMappedError(w, ErrInternal, err.Error())
-			return
-		}
+		writeMappedError(w, ErrForbidden, withPolicyHint(err.Error()))
+		return
+	}
+	cmd := exec.CommandContext(ctx, resolvedCommand.Path, resolvedCommand.Args...)
+	if len(req.Command) > 0 {
+		cmd.Args[0] = req.Command[0]
+	}
+	captureLimit := effectiveOutputCaptureLimit("redacted", s.execPolicy.MaxOutputBytes)
+	out, exitCode, err := runCommandWithBoundedOutput(cmd, captureLimit)
+	if err != nil {
+		writeMappedError(w, ErrInternal, err.Error())
+		return
 	}
 
 	at, aid := actorFromRequest(r)
@@ -64,7 +68,11 @@ func (s *server) handleHostDockerExecute(w http.ResponseWriter, r *http.Request)
 			"exit_code": itoa(uint64(exitCode)),
 		},
 	})
-	writeJSON(w, map[string]any{"exit_code": exitCode, "stdout_stderr": redactOutput(string(out))})
+	outStr := redactOutput(out)
+	if max := s.execPolicy.MaxOutputBytes; max > 0 && len(outStr) > max {
+		outStr = outStr[:max]
+	}
+	writeJSON(w, map[string]any{"exit_code": exitCode, "stdout_stderr": outStr})
 }
 
 func (s *server) validateHostDockerCommand(cmd []string) error {

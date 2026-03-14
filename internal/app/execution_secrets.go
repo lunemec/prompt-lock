@@ -3,7 +3,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/lunemec/promptlock/internal/core/domain"
@@ -11,11 +10,15 @@ import (
 )
 
 func (s Service) ResolveExecutionSecrets(leaseToken string, secretNames []string, commandFingerprint, workdirFingerprint string) (map[string]string, error) {
+	return s.ResolveExecutionSecretsByAgent("", leaseToken, secretNames, commandFingerprint, workdirFingerprint)
+}
+
+func (s Service) ResolveExecutionSecretsByAgent(agentID, leaseToken string, secretNames []string, commandFingerprint, workdirFingerprint string) (map[string]string, error) {
 	requested, err := normalizeExecutionSecretNames(secretNames)
 	if err != nil {
 		return nil, err
 	}
-	lease, err := s.Leases.GetLease(leaseToken)
+	lease, err := s.getLeaseOwnedByAgent(leaseToken, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +37,7 @@ func (s Service) ResolveExecutionSecrets(leaseToken string, secretNames []string
 		}
 	}
 
-	request, err := s.Requests.GetRequest(lease.RequestID)
+	request, err := s.getRequestOwnedByAgent(lease.RequestID, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +48,7 @@ func (s Service) ResolveExecutionSecrets(leaseToken string, secretNames []string
 	if strings.TrimSpace(request.EnvPath) == "" {
 		values := map[string]string{}
 		for _, secretName := range requested {
-			value, err := s.AccessSecret(leaseToken, secretName, commandFingerprint, workdirFingerprint)
+			value, err := s.accessSecretForLease(lease, secretName, commandFingerprint, workdirFingerprint)
 			if err != nil {
 				return nil, err
 			}
@@ -63,7 +66,7 @@ func (s Service) resolveEnvPathExecutionSecrets(request domain.LeaseRequest, lea
 		return nil, ErrSecretBackendUnavailable
 	}
 
-	expectedCanonical := filepath.Clean(strings.TrimSpace(request.EnvPathCanonical))
+	expectedCanonical := normalizeEnvPathCanonical(request.EnvPathCanonical)
 	if expectedCanonical == "" {
 		s.AuditEnvPathRejected(request.AgentID, request.TaskID, request.ID, request.EnvPath, request.EnvPathCanonical, "env_path_canonical_missing")
 		return nil, errors.New("env path canonical confirmation required")
@@ -74,7 +77,7 @@ func (s Service) resolveEnvPathExecutionSecrets(request domain.LeaseRequest, lea
 		s.AuditEnvPathRejected(request.AgentID, request.TaskID, request.ID, request.EnvPath, request.EnvPathCanonical, err.Error())
 		return nil, ErrSecretBackendUnavailable
 	}
-	resolvedCanonical = filepath.Clean(strings.TrimSpace(resolvedCanonical))
+	resolvedCanonical = normalizeEnvPathCanonical(resolvedCanonical)
 	if resolvedCanonical == "" || resolvedCanonical != expectedCanonical {
 		s.AuditEnvPathRejected(request.AgentID, request.TaskID, request.ID, request.EnvPath, request.EnvPathCanonical, "env_path_canonical_mismatch")
 		return nil, errors.New("env path canonical mismatch")

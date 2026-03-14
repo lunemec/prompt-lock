@@ -7,17 +7,17 @@ This document shows the canonical CLI-first lab validation flow for PromptLock w
 
 No curl is required in the primary flow.
 
-This is not the hardened production TCP baseline. The current CLI docs do not yet cover direct client-certificate handling, so this walkthrough uses the explicit insecure TCP override for controlled local validation only. For hardened non-local TCP deployments, use [MTLS-HARDENED.md](./MTLS-HARDENED.md) or an authenticated mTLS proxy in front of PromptLock.
+This is the hardened local baseline and the supported OSS deployment shape: PromptLock runs on the host with role-separated Unix sockets, the operator uses the host-only operator socket, and the container gets only the agent socket.
 
 ## Prerequisites
 - Host has PromptLock repo and Go toolchain.
-- Docker can run a container that reaches host (`host.docker.internal`).
+- Host has `jq` installed to parse CLI JSON responses during bootstrap/pair/mint.
 - You have chosen an operator token and container identity.
-- You understand that `PROMPTLOCK_ALLOW_INSECURE_TCP=1` below is for local validation only and must not be used as a production deployment pattern.
+- The `--broker-exec` path runs the approved command on the broker host, not inside the agent container. The container only needs the `promptlock` CLI.
 
 ## Topology guidance
-- Preferred production baseline: `unix_socket` for local-only deployments, or TLS/mTLS for any non-local TCP listener.
-- This walkthrough: hardened policy controls plus explicit insecure TCP override to validate the host-plus-container approval path with the current CLI surface.
+- Supported OSS baseline: dual Unix sockets for local-only hardened deployments.
+- This walkthrough: hardened policy controls plus agent/operator socket separation for local lab verification.
 
 ## 1) Host: start daemon for lab validation
 
@@ -26,10 +26,16 @@ Create config (example):
 ```json
 {
   "security_profile": "hardened",
-  "address": "0.0.0.0:8765",
-  "unix_socket": "",
+  "agent_unix_socket": "/tmp/promptlock-agent.sock",
+  "operator_unix_socket": "/tmp/promptlock-operator.sock",
   "audit_path": "/tmp/promptlock-audit.jsonl",
   "state_store_file": "/tmp/promptlock-state-store.json",
+  "state_store": {
+    "type": "file",
+    "external_url": "https://state.example.internal",
+    "external_auth_token_env": "PROMPTLOCK_EXTERNAL_STATE_TOKEN",
+    "external_timeout_sec": 10
+  },
   "auth": {
     "enable_auth": true,
     "operator_token": "op_real_test_token",
@@ -49,6 +55,14 @@ Create config (example):
     "env_prefix": "PROMPTLOCK_SECRET_",
     "in_memory_hardened": "fail"
   },
+  "execution_policy": {
+    "exact_match_executables": ["echo"],
+    "denylist_substrings": ["&&", "||", ";", "$(", "`"],
+    "output_security_mode": "raw",
+    "max_output_bytes": 65536,
+    "default_timeout_sec": 30,
+    "max_timeout_sec": 60
+  },
   "network_egress_policy": {
     "enabled": true,
     "require_intent_match": true,
@@ -65,44 +79,42 @@ Export host-provided secret and start daemon:
 ```bash
 export PROMPTLOCK_SECRET_GITHUB_TOKEN='demo_github_token_value'
 export PROMPTLOCK_AUTH_STORE_KEY='replace_with_long_random_value'
-PROMPTLOCK_ALLOW_INSECURE_TCP=1 PROMPTLOCK_CONFIG=/tmp/promptlock-real.json go run ./cmd/promptlockd
+PROMPTLOCK_CONFIG=/tmp/promptlock-real.json go run ./cmd/promptlockd
 ```
 
-This startup mode is acceptable only for controlled local testing. If you need a hardened remote-access path, stop here and switch to [MTLS-HARDENED.md](./MTLS-HARDENED.md).
+This startup mode is the preferred hardened local path and the supported OSS release target.
+If you switch to `state_store.type=external`, treat it as a durability/availability adapter rather than a concurrency-safe multi-node coordinator.
+The example `execution_policy` above allowlists the exact executable name `echo` so step 5 can verify broker-exec with a harmless direct command. `echo-helper` or other prefixed names are still rejected. Broker resolution uses the broker-managed `command_search_paths` defaults, so the host only resolves `echo` from trusted system tool directories rather than the broker process `PATH`. The example also overrides hardened output suppression to `raw` only because the approved command prints a fixed non-sensitive string. Keep the hardened default `none` unless visible output is explicitly required.
 
-## 2) Host: run interactive approval queue
+## 2) Host: run interactive watch UI
 
 In a second host terminal:
 
 ```bash
-PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
-PROMPTLOCK_OPERATOR_TOKEN=op_real_test_token \
-go run ./cmd/promptlock approve-queue
+PROMPTLOCK_OPERATOR_TOKEN=op_real_test_token go run ./cmd/promptlock watch
 ```
 
-## 3) Container: obtain session token via CLI auth commands
+## 3) Container: build an agent CLI image
 
-Inside container (or host, if you prefer), run:
+Build the repo image once so the container has the shipped `promptlock` CLI available:
 
 ```bash
-BROKER=http://host.docker.internal:8765
-OP=op_real_test_token
-AGENT=toolbelt-agent
-CID=toolbelt-container-1
-
-BOOT=$(go run ./cmd/promptlock auth bootstrap --broker "$BROKER" --operator-token "$OP" --agent "$AGENT" --container "$CID" | jq -r '.bootstrap_token')
-GRANT=$(go run ./cmd/promptlock auth pair --broker "$BROKER" --token "$BOOT" --container "$CID" | jq -r '.grant_id')
-SESSION=$(go run ./cmd/promptlock auth mint --broker "$BROKER" --grant "$GRANT" | jq -r '.session_token')
-
-echo "$SESSION"
+docker build -t promptlock-agent-lab .
 ```
 
-## 4) Container: request and execute with approval
+## 4) Container: launch via one-command auth wrapper
+
+Run on the host:
 
 ```bash
-PROMPTLOCK_BROKER_URL=http://host.docker.internal:8765 \
-PROMPTLOCK_SESSION_TOKEN="$SESSION" \
-go run ./cmd/promptlock exec \
+go run ./cmd/promptlock auth docker-run \
+  --operator-token op_real_test_token \
+  --agent toolbelt-agent \
+  --container toolbelt-container-1 \
+  --image promptlock-agent-lab \
+  --entrypoint /usr/local/bin/promptlock \
+  -- \
+  exec \
   --agent toolbelt-agent \
   --task real-e2e \
   --intent run_tests \
@@ -114,9 +126,20 @@ go run ./cmd/promptlock exec \
   -- echo "hello from toolbelt"
 ```
 
-Approve request in host `approve-queue` terminal when prompted.
+This wrapper performs `auth login`, injects the fresh session token into the container environment, and then runs `docker run` with the requested image/command.
+In local hardened mode it mounts only the agent socket into the container and leaves the operator socket on the host.
 
-## 5) Verify audit
+## 5) Approve in the host watch UI
+
+Approve the request in the host `watch` terminal when prompted.
+
+Expected output after approval:
+
+```text
+hello from toolbelt
+```
+
+## 6) Verify audit
 
 ```bash
 go run ./cmd/promptlock audit-verify --file /tmp/promptlock-audit.jsonl
@@ -125,10 +148,10 @@ go run ./cmd/promptlock audit-verify --file /tmp/promptlock-audit.jsonl
 Expected: `audit verify ok: ...`
 
 ## Troubleshooting quick map
-- `connection refused`: broker not running/bound on expected host/port.
-- `operator auth required`: wrong/missing operator token for auth bootstrap or queue commands.
+- `connection refused`: broker not running or the expected socket path is missing.
+- `operator auth required`: wrong/missing operator token for auth wrapper or watch commands.
 - `agent session token required`: session token missing for agent commands.
-- `request denied`: operator denied in approval queue.
+- `command "echo" not allowed by execution policy`: the broker config is missing the example `execution_policy.exact_match_executables=["echo"]` block from step 1, or you changed the lab command without updating the allowlist.
+- `request denied`: operator denied in the watch UI.
 - `secret backend unavailable`: secret source backend misconfigured/unavailable.
-- Want a secure non-local TCP deployment instead of this lab path: use [MTLS-HARDENED.md](./MTLS-HARDENED.md).
 - For command-to-endpoint/token mapping and remediation by failure text: use [CLI-ENDPOINT-CONTRACT-MATRIX.md](./CLI-ENDPOINT-CONTRACT-MATRIX.md).

@@ -1,13 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,10 +15,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/lunemec/promptlock/internal/adapters/audit"
+	"github.com/lunemec/promptlock/internal/config"
 )
 
 type requestBody struct {
@@ -38,67 +41,153 @@ type capabilities struct {
 	AllowPlaintextSecretReturn bool `json:"allow_plaintext_secret_return"`
 }
 
+type brokerFlags struct {
+	Broker     *string
+	BrokerUnix *string
+}
+
+var doPostJSONAuth = postJSONAuth
+
+const defaultBrokerURL = "http://127.0.0.1:8765"
+
+type brokerRole string
+
 const (
-	brokerTLSCAFileEnv         = "PROMPTLOCK_BROKER_TLS_CA_FILE"
-	brokerTLSClientCertFileEnv = "PROMPTLOCK_BROKER_TLS_CLIENT_CERT_FILE"
-	brokerTLSClientKeyFileEnv  = "PROMPTLOCK_BROKER_TLS_CLIENT_KEY_FILE"
-	brokerTLSServerNameEnv     = "PROMPTLOCK_BROKER_TLS_SERVER_NAME"
+	brokerRoleAgent    brokerRole = "agent"
+	brokerRoleOperator brokerRole = "operator"
 )
 
-type brokerTLSOptions struct {
-	CAFile         string
-	ClientCertFile string
-	ClientKeyFile  string
-	ServerName     string
+type brokerSelectionInput struct {
+	BaseURL    string
+	UnixSocket string
 }
 
-type brokerFlags struct {
-	Broker              *string
-	BrokerUnix          *string
-	BrokerTLSCAFile     *string
-	BrokerTLSClientCert *string
-	BrokerTLSClientKey  *string
-	BrokerTLSServerName *string
+type brokerSelection struct {
+	BaseURL    string
+	UnixSocket string
 }
 
-var activeBrokerTLSOptions = brokerTLSOptions{}
+type stringSliceFlag []string
+
+func (s *stringSliceFlag) String() string {
+	return strings.Join(*s, ",")
+}
+
+func (s *stringSliceFlag) Set(v string) error {
+	*s = append(*s, v)
+	return nil
+}
 
 func registerBrokerFlags(fs *flag.FlagSet) brokerFlags {
 	return brokerFlags{
-		Broker:              fs.String("broker", getenv("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765"), "broker URL"),
-		BrokerUnix:          fs.String("broker-unix-socket", getenv("PROMPTLOCK_BROKER_UNIX_SOCKET", ""), "broker unix socket path"),
-		BrokerTLSCAFile:     fs.String("broker-tls-ca-file", getenv(brokerTLSCAFileEnv, ""), "custom CA file for HTTPS broker TLS verification"),
-		BrokerTLSClientCert: fs.String("broker-tls-client-cert-file", getenv(brokerTLSClientCertFileEnv, ""), "client certificate file for HTTPS mTLS"),
-		BrokerTLSClientKey:  fs.String("broker-tls-client-key-file", getenv(brokerTLSClientKeyFileEnv, ""), "client private key file for HTTPS mTLS"),
-		BrokerTLSServerName: fs.String("broker-tls-server-name", getenv(brokerTLSServerNameEnv, ""), "expected TLS server name for HTTPS broker"),
+		Broker:     fs.String("broker", "", "broker URL"),
+		BrokerUnix: fs.String("broker-unix-socket", "", "broker unix socket path"),
 	}
 }
 
-func (f brokerFlags) applyTLSOptions() {
-	activeBrokerTLSOptions = brokerTLSOptions{
-		CAFile:         strings.TrimSpace(*f.BrokerTLSCAFile),
-		ClientCertFile: strings.TrimSpace(*f.BrokerTLSClientCert),
-		ClientKeyFile:  strings.TrimSpace(*f.BrokerTLSClientKey),
-		ServerName:     strings.TrimSpace(*f.BrokerTLSServerName),
+func (f brokerFlags) resolve(role brokerRole) (brokerSelection, error) {
+	return resolveBrokerSelection(role, brokerSelectionInput{
+		BaseURL:    strings.TrimSpace(*f.Broker),
+		UnixSocket: strings.TrimSpace(*f.BrokerUnix),
+	})
+}
+
+func resolveBrokerSelection(role brokerRole, in brokerSelectionInput) (brokerSelection, error) {
+	explicitURL := strings.TrimSpace(in.BaseURL)
+	explicitUnix := strings.TrimSpace(in.UnixSocket)
+	if explicitUnix != "" {
+		return brokerSelection{
+			BaseURL:    normalizeBrokerURL(explicitURL),
+			UnixSocket: explicitUnix,
+		}, nil
 	}
+	if compatUnix := strings.TrimSpace(os.Getenv("PROMPTLOCK_BROKER_UNIX_SOCKET")); compatUnix != "" {
+		return brokerSelection{
+			BaseURL:    normalizeBrokerURL(explicitURL),
+			UnixSocket: compatUnix,
+		}, nil
+	}
+	if explicitURL != "" || strings.TrimSpace(os.Getenv("PROMPTLOCK_BROKER_URL")) != "" {
+		return brokerSelection{
+			BaseURL:    normalizeBrokerURL(explicitURL),
+			UnixSocket: "",
+		}, nil
+	}
+	if roleUnix := roleSpecificBrokerUnixSocket(role); roleUnix != "" {
+		if brokerSocketExists(roleUnix) {
+			return brokerSelection{
+				BaseURL:    normalizeBrokerURL(explicitURL),
+				UnixSocket: roleUnix,
+			}, nil
+		}
+		return brokerSelection{}, fmt.Errorf("%s broker unix socket not found at %s; set --broker or PROMPTLOCK_BROKER_URL for explicit TCP transport", role, roleUnix)
+	}
+	defaultUnix := defaultBrokerUnixSocket(role)
+	if brokerSocketExists(defaultUnix) {
+		return brokerSelection{
+			BaseURL:    normalizeBrokerURL(explicitURL),
+			UnixSocket: defaultUnix,
+		}, nil
+	}
+	return brokerSelection{}, fmt.Errorf("%s broker unix socket not found at %s; set --broker or PROMPTLOCK_BROKER_URL for explicit TCP transport", role, defaultUnix)
+}
+
+func normalizeBrokerURL(explicit string) string {
+	if strings.TrimSpace(explicit) != "" {
+		return strings.TrimSpace(explicit)
+	}
+	if envURL := strings.TrimSpace(os.Getenv("PROMPTLOCK_BROKER_URL")); envURL != "" {
+		return envURL
+	}
+	return defaultBrokerURL
+}
+
+func roleSpecificBrokerUnixSocket(role brokerRole) string {
+	switch role {
+	case brokerRoleOperator:
+		return strings.TrimSpace(os.Getenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET"))
+	case brokerRoleAgent:
+		return strings.TrimSpace(os.Getenv("PROMPTLOCK_AGENT_UNIX_SOCKET"))
+	default:
+		return ""
+	}
+}
+
+func defaultBrokerUnixSocket(role brokerRole) string {
+	switch role {
+	case brokerRoleOperator:
+		return config.DefaultOperatorUnixSocketPath
+	case brokerRoleAgent:
+		return config.DefaultAgentUnixSocketPath
+	default:
+		return ""
+	}
+}
+
+func brokerSocketExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|approve-queue|audit-verify|auth> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|watch|audit-verify|auth> [flags]")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
 	case "exec":
 		runExec(os.Args[2:])
-	case "approve-queue":
-		runApproveQueue(os.Args[2:])
+	case "watch":
+		runWatch(os.Args[2:])
 	case "audit-verify":
 		runAuditVerify(os.Args[2:])
 	case "auth":
 		runAuth(os.Args[2:])
 	default:
-		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|approve-queue|audit-verify|auth> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: promptlock <exec|watch|audit-verify|auth> [flags]")
 		os.Exit(2)
 	}
 }
@@ -120,7 +209,10 @@ func runExec(args []string) {
 	allowRisky := fs.Bool("allow-risky-command", false, "allow risky commands (env/printenv/proc environ reads)")
 	brokerExec := fs.Bool("broker-exec", false, "execute command via broker /v1/leases/execute")
 	fs.Parse(args)
-	conn.applyTLSOptions()
+	broker, err := conn.resolve(brokerRoleAgent)
+	if err != nil {
+		fatal(err)
+	}
 
 	cmdArgs := fs.Args()
 	sep := indexOf(cmdArgs, "--")
@@ -139,7 +231,7 @@ func runExec(args []string) {
 
 	secrets := []string{}
 	if *intent != "" {
-		resolved, err := resolveIntent(*conn.Broker, *conn.BrokerUnix, *sessionToken, *intent)
+		resolved, err := resolveIntent(broker.BaseURL, broker.UnixSocket, *sessionToken, *intent)
 		if err != nil {
 			fatal(err)
 		}
@@ -156,7 +248,7 @@ func runExec(args []string) {
 		fatal(fmt.Errorf("no secrets resolved; use --intent or --secrets"))
 	}
 
-	caps, err := brokerCapabilities(*conn.Broker, *conn.BrokerUnix)
+	caps, err := brokerCapabilities(broker.BaseURL, broker.UnixSocket)
 	if err == nil {
 		if err := validateExecCapabilityPreconditions(caps, *sessionToken, *brokerExec); err != nil {
 			fatal(err)
@@ -172,7 +264,7 @@ func runExec(args []string) {
 	if err != nil {
 		fatal(err)
 	}
-	reqID, err := requestLease(*conn.Broker, *conn.BrokerUnix, *sessionToken, requestBody{
+	reqID, err := requestLease(broker.BaseURL, broker.UnixSocket, *sessionToken, requestBody{
 		AgentID:            *agent,
 		TaskID:             *task,
 		Reason:             *reason,
@@ -191,19 +283,23 @@ func runExec(args []string) {
 		if getenv("PROMPTLOCK_DEV_MODE", "") != "1" {
 			fatal(fmt.Errorf("--auto-approve is disabled unless PROMPTLOCK_DEV_MODE=1"))
 		}
-		lease, err = approve(*conn.Broker, *conn.BrokerUnix, getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), reqID, *ttl)
+		operatorBroker, err := conn.resolve(brokerRoleOperator)
+		if err != nil {
+			fatal(err)
+		}
+		lease, err = approve(operatorBroker.BaseURL, operatorBroker.UnixSocket, getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), reqID, *ttl)
 		if err != nil {
 			fatal(err)
 		}
 	} else {
-		lease, err = waitForApproval(*conn.Broker, *conn.BrokerUnix, *sessionToken, reqID, *waitApprove, *pollInterval)
+		lease, err = waitForApproval(broker.BaseURL, broker.UnixSocket, *sessionToken, reqID, *waitApprove, *pollInterval)
 		if err != nil {
 			fatal(err)
 		}
 	}
 
 	if *brokerExec {
-		exitCode, output, err := executeWithSecret(*conn.Broker, *conn.BrokerUnix, *sessionToken, lease, *intent, cmdArgs, secrets, fingerprint, wdfp)
+		exitCode, output, err := executeWithSecret(broker.BaseURL, broker.UnixSocket, *sessionToken, lease, *intent, cmdArgs, secrets, fingerprint, wdfp)
 		if err != nil {
 			fatal(err)
 		}
@@ -213,18 +309,17 @@ func runExec(args []string) {
 		os.Exit(exitCode)
 	}
 
-	env := os.Environ()
+	leasedSecrets := map[string]string{}
 	for _, s := range secrets {
-		v, err := accessSecret(*conn.Broker, *conn.BrokerUnix, *sessionToken, lease, s, fingerprint, wdfp)
+		v, err := accessSecret(broker.BaseURL, broker.UnixSocket, *sessionToken, lease, s, fingerprint, wdfp)
 		if err != nil {
 			fatal(err)
 		}
-		envName := strings.ToUpper(s)
-		env = append(env, envName+"="+v)
+		leasedSecrets[s] = v
 	}
 
 	c := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-	c.Env = env
+	c.Env = buildLocalExecutionEnv(leasedSecrets)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
@@ -330,11 +425,7 @@ func buildURL(baseURL, path string) string {
 }
 
 func httpClient(baseURL, unixSocket string) (*http.Client, error) {
-	opts := activeBrokerTLSOptions
 	if unixSocket != "" {
-		if opts.CAFile != "" || opts.ClientCertFile != "" || opts.ClientKeyFile != "" || opts.ServerName != "" {
-			return nil, fmt.Errorf("broker tls options are not supported with --broker-unix-socket")
-		}
 		tr := &http.Transport{}
 		tr.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
@@ -342,53 +433,7 @@ func httpClient(baseURL, unixSocket string) (*http.Client, error) {
 		}
 		return &http.Client{Transport: tr}, nil
 	}
-
-	usesTLSOverrides := opts.CAFile != "" || opts.ClientCertFile != "" || opts.ClientKeyFile != "" || opts.ServerName != ""
-	if !usesTLSOverrides {
-		return http.DefaultClient, nil
-	}
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(baseURL)), "https://") {
-		return nil, fmt.Errorf("broker tls options require an https broker URL")
-	}
-
-	tlsConfig, err := buildBrokerTLSConfig(opts)
-	if err != nil {
-		return nil, err
-	}
-	return &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig}}, nil
-}
-
-func buildBrokerTLSConfig(opts brokerTLSOptions) (*tls.Config, error) {
-	if opts.ClientCertFile != "" && opts.ClientKeyFile == "" {
-		return nil, fmt.Errorf("broker tls client cert requires --broker-tls-client-key-file")
-	}
-	if opts.ClientKeyFile != "" && opts.ClientCertFile == "" {
-		return nil, fmt.Errorf("broker tls client key requires --broker-tls-client-cert-file")
-	}
-
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
-	if opts.ServerName != "" {
-		tlsConfig.ServerName = opts.ServerName
-	}
-	if opts.CAFile != "" {
-		caPEM, err := os.ReadFile(opts.CAFile)
-		if err != nil {
-			return nil, fmt.Errorf("read broker tls ca file %s: %w", opts.CAFile, err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(caPEM) {
-			return nil, fmt.Errorf("parse broker tls ca file %s: no certificates found", opts.CAFile)
-		}
-		tlsConfig.RootCAs = pool
-	}
-	if opts.ClientCertFile != "" && opts.ClientKeyFile != "" {
-		cert, err := tls.LoadX509KeyPair(opts.ClientCertFile, opts.ClientKeyFile)
-		if err != nil {
-			return nil, fmt.Errorf("load broker tls client certificate/key: %w", err)
-		}
-		tlsConfig.Certificates = []tls.Certificate{cert}
-	}
-	return tlsConfig, nil
+	return http.DefaultClient, nil
 }
 
 func fatal(err error) {
@@ -514,72 +559,232 @@ type pendingResponse struct {
 	Pending []pendingItem `json:"pending"`
 }
 
-func runApproveQueue(args []string) {
+const ansiClearScreen = "\x1b[2J\x1b[H"
+
+type watchClient interface {
+	ListPending() ([]pendingItem, error)
+	Approve(requestID string, ttl int) error
+	Deny(requestID, reason string) error
+}
+
+type brokerWatchClient struct {
+	broker        string
+	brokerUnix    string
+	operatorToken string
+}
+
+func (c brokerWatchClient) ListPending() ([]pendingItem, error) {
+	return listPending(c.broker, c.brokerUnix, c.operatorToken)
+}
+
+func (c brokerWatchClient) Approve(requestID string, ttl int) error {
+	_, err := approve(c.broker, c.brokerUnix, c.operatorToken, requestID, ttl)
+	return err
+}
+
+func (c brokerWatchClient) Deny(requestID, reason string) error {
+	return deny(c.broker, c.brokerUnix, c.operatorToken, requestID, reason)
+}
+
+type watchOptions struct {
+	BrokerTarget string
+	PollInterval time.Duration
+	DefaultTTL   int
+	Once         bool
+	Input        *bufio.Reader
+	Output       io.Writer
+	ClearScreen  bool
+	Now          func() time.Time
+	Pause        func(time.Duration)
+}
+
+type watchView struct {
+	BrokerTarget string
+	PollInterval time.Duration
+	Now          time.Time
+	PendingCount int
+	Current      *pendingItem
+	MoreQueued   int
+	Message      string
+}
+
+func runWatch(args []string) {
 	if len(args) > 0 {
 		switch args[0] {
 		case "list":
-			runApproveList(args[1:])
+			runWatchList(args[1:])
 			return
 		case "allow":
-			runApproveAllow(args[1:])
+			runWatchAllow(args[1:])
 			return
 		case "deny":
-			runApproveDeny(args[1:])
+			runWatchDeny(args[1:])
 			return
 		}
 	}
 
-	fs := flag.NewFlagSet("approve-queue", flag.ExitOnError)
+	fs := flag.NewFlagSet("watch", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
 	poll := fs.Duration("poll-interval", 3*time.Second, "poll interval")
 	defaultTTL := fs.Int("ttl", 5, "approval ttl override")
 	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	once := fs.Bool("once", false, "process one pass and exit")
 	fs.Parse(args)
-	conn.applyTLSOptions()
-
-	for {
-		items, err := listPending(*conn.Broker, *conn.BrokerUnix, *operatorToken)
-		if err != nil {
-			fatal(err)
-		}
-		for _, it := range items {
-			printPendingDecisionContext(it)
-			fmt.Print("Approve? [y]es / [n]o / [s]kip: ")
-			var ans string
-			_, _ = fmt.Fscanln(os.Stdin, &ans)
-			switch strings.ToLower(strings.TrimSpace(ans)) {
-			case "y", "yes":
-				_, err := approve(*conn.Broker, *conn.BrokerUnix, *operatorToken, it.ID, *defaultTTL)
-				if err != nil {
-					fmt.Println("approve failed:", err)
-				} else {
-					fmt.Println("approved")
-				}
-			case "n", "no":
-				if err := deny(*conn.Broker, *conn.BrokerUnix, *operatorToken, it.ID, "denied by operator"); err != nil {
-					fmt.Println("deny failed:", err)
-				} else {
-					fmt.Println("denied")
-				}
-			default:
-				fmt.Println("skipped")
-			}
-		}
-		if *once {
-			return
-		}
-		time.Sleep(*poll)
+	broker, err := conn.resolve(brokerRoleOperator)
+	if err != nil {
+		fatal(err)
+	}
+	client := brokerWatchClient{
+		broker:        broker.BaseURL,
+		brokerUnix:    broker.UnixSocket,
+		operatorToken: *operatorToken,
+	}
+	opts := watchOptions{
+		BrokerTarget: watchBrokerTarget(broker.BaseURL, broker.UnixSocket),
+		PollInterval: *poll,
+		DefaultTTL:   *defaultTTL,
+		Once:         *once,
+		Input:        bufio.NewReader(os.Stdin),
+		Output:       os.Stdout,
+		ClearScreen:  isTerminalFile(os.Stdin) && isTerminalFile(os.Stdout),
+		Now:          time.Now,
+		Pause:        time.Sleep,
+	}
+	if err := runWatchLoop(client, opts); err != nil {
+		fatal(err)
 	}
 }
 
-func runApproveList(args []string) {
-	fs := flag.NewFlagSet("approve-queue list", flag.ExitOnError)
+func runWatchLoop(client watchClient, opts watchOptions) error {
+	if opts.Input == nil {
+		opts.Input = bufio.NewReader(os.Stdin)
+	}
+	if opts.Output == nil {
+		opts.Output = os.Stdout
+	}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
+	if opts.Pause == nil {
+		opts.Pause = time.Sleep
+	}
+	state := watchLoopState{skipped: map[string]struct{}{}}
+
+	for {
+		items, err := client.ListPending()
+		if err != nil {
+			return err
+		}
+
+		membershipSignature := pendingMembershipSignature(items)
+		if membershipSignature != state.membershipSignature {
+			state.membershipSignature = membershipSignature
+			state.skipped = map[string]struct{}{}
+		}
+
+		current, moreQueued, message := selectWatchItem(items, state.skipped)
+		renderKey := watchRenderKey(membershipSignature, current, moreQueued, message)
+		if renderKey != state.lastRenderKey {
+			renderWatchScreen(opts.Output, watchView{
+				BrokerTarget: opts.BrokerTarget,
+				PollInterval: opts.PollInterval,
+				Now:          opts.Now(),
+				PendingCount: len(items),
+				Current:      current,
+				MoreQueued:   moreQueued,
+				Message:      message,
+			}, opts.ClearScreen)
+			state.lastRenderKey = renderKey
+		}
+
+		if current == nil {
+			if opts.Once {
+				return nil
+			}
+			opts.Pause(opts.PollInterval)
+			continue
+		}
+
+		decision, err := promptWatchDecision(opts.Input, opts.Output)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				fmt.Fprintln(opts.Output, "\nstdin closed; leaving pending requests untouched")
+				return nil
+			}
+			return err
+		}
+
+		switch decision {
+		case "approve":
+			if err := client.Approve(current.ID, opts.DefaultTTL); err != nil {
+				fmt.Fprintln(opts.Output, "approve failed:", err)
+			} else {
+				fmt.Fprintln(opts.Output, "approved")
+			}
+			state.lastRenderKey = ""
+		case "deny":
+			if err := client.Deny(current.ID, "denied by operator"); err != nil {
+				fmt.Fprintln(opts.Output, "deny failed:", err)
+			} else {
+				fmt.Fprintln(opts.Output, "denied")
+			}
+			state.lastRenderKey = ""
+		case "skip":
+			state.skipped[current.ID] = struct{}{}
+			state.lastRenderKey = ""
+		case "quit":
+			fmt.Fprintln(opts.Output, "watch exited; leaving pending requests untouched")
+			return nil
+		}
+	}
+}
+
+type watchLoopState struct {
+	membershipSignature string
+	skipped             map[string]struct{}
+	lastRenderKey       string
+}
+
+func promptWatchDecision(input *bufio.Reader, out io.Writer) (string, error) {
+	for {
+		fmt.Fprint(out, "Action? [y]es / [n]o / [s]kip / [q]uit: ")
+		line, err := input.ReadString('\n')
+		trimmed := strings.ToLower(strings.TrimSpace(line))
+		switch trimmed {
+		case "y", "yes":
+			return "approve", nil
+		case "n", "no":
+			return "deny", nil
+		case "s", "skip":
+			return "skip", nil
+		case "q", "quit":
+			return "quit", nil
+		case "":
+			if errors.Is(err, io.EOF) {
+				return "", io.EOF
+			}
+			fmt.Fprintln(out, "Enter y, n, s, or q.")
+			continue
+		default:
+			if errors.Is(err, io.EOF) {
+				return "", io.EOF
+			}
+			fmt.Fprintln(out, "Enter y, n, s, or q.")
+			continue
+		}
+	}
+}
+
+func runWatchList(args []string) {
+	fs := flag.NewFlagSet("watch list", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
 	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	fs.Parse(args)
-	conn.applyTLSOptions()
-	items, err := listPending(*conn.Broker, *conn.BrokerUnix, *operatorToken)
+	broker, err := conn.resolve(brokerRoleOperator)
+	if err != nil {
+		fatal(err)
+	}
+	items, err := listPending(broker.BaseURL, broker.UnixSocket, *operatorToken)
 	if err != nil {
 		fatal(err)
 	}
@@ -592,35 +797,41 @@ func runApproveList(args []string) {
 	}
 }
 
-func runApproveAllow(args []string) {
-	fs := flag.NewFlagSet("approve-queue allow", flag.ExitOnError)
+func runWatchAllow(args []string) {
+	fs := flag.NewFlagSet("watch allow", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
 	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	ttl := fs.Int("ttl", 5, "approval ttl override")
 	fs.Parse(args)
-	conn.applyTLSOptions()
 	if fs.NArg() < 1 {
-		fatal(fmt.Errorf("usage: promptlock approve-queue allow [--broker URL] [--ttl N] <request_id>"))
+		fatal(fmt.Errorf("usage: promptlock watch allow [--broker URL] [--ttl N] <request_id>"))
 	}
 	requestID := fs.Arg(0)
-	if _, err := approve(*conn.Broker, *conn.BrokerUnix, *operatorToken, requestID, *ttl); err != nil {
+	broker, err := conn.resolve(brokerRoleOperator)
+	if err != nil {
+		fatal(err)
+	}
+	if _, err := approve(broker.BaseURL, broker.UnixSocket, *operatorToken, requestID, *ttl); err != nil {
 		fatal(err)
 	}
 	fmt.Println("approved", requestID)
 }
 
-func runApproveDeny(args []string) {
-	fs := flag.NewFlagSet("approve-queue deny", flag.ExitOnError)
+func runWatchDeny(args []string) {
+	fs := flag.NewFlagSet("watch deny", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
 	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	reason := fs.String("reason", "denied by operator", "deny reason")
 	fs.Parse(args)
-	conn.applyTLSOptions()
 	if fs.NArg() < 1 {
-		fatal(fmt.Errorf("usage: promptlock approve-queue deny [--broker URL] [--reason TEXT] <request_id>"))
+		fatal(fmt.Errorf("usage: promptlock watch deny [--broker URL] [--reason TEXT] <request_id>"))
 	}
 	requestID := fs.Arg(0)
-	if err := deny(*conn.Broker, *conn.BrokerUnix, *operatorToken, requestID, *reason); err != nil {
+	broker, err := conn.resolve(brokerRoleOperator)
+	if err != nil {
+		fatal(err)
+	}
+	if err := deny(broker.BaseURL, broker.UnixSocket, *operatorToken, requestID, *reason); err != nil {
 		fatal(err)
 	}
 	fmt.Println("denied", requestID)
@@ -642,18 +853,97 @@ func listPending(broker, brokerUnix, operatorToken string) ([]pendingItem, error
 	return out.Pending, nil
 }
 
-func printPendingDecisionContext(it pendingItem) {
-	fmt.Printf("\nRequest %s | agent=%s task=%s ttl=%d\n", it.ID, it.AgentID, it.TaskID, it.TTLMinutes)
-	fmt.Printf("Reason: %s\n", it.Reason)
-	fmt.Printf("Secrets: %s\n", strings.Join(it.Secrets, ", "))
-	fmt.Printf("Command FP: %s\n", it.CommandFingerprint)
-	fmt.Printf("Workdir FP: %s\n", it.WorkdirFingerprint)
+func selectWatchItem(items []pendingItem, skipped map[string]struct{}) (*pendingItem, int, string) {
+	for idx := range items {
+		if _, ok := skipped[items[idx].ID]; ok {
+			continue
+		}
+		moreQueued := unskippedPendingCount(items, skipped) - 1
+		return &items[idx], moreQueued, ""
+	}
+	if len(items) == 0 {
+		return nil, 0, "Watching for pending requests..."
+	}
+	return nil, 0, "All current pending requests have been skipped. Watching for queue changes..."
+}
+
+func unskippedPendingCount(items []pendingItem, skipped map[string]struct{}) int {
+	count := 0
+	for _, item := range items {
+		if _, ok := skipped[item.ID]; ok {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func renderWatchScreen(out io.Writer, view watchView, clearScreen bool) {
+	if clearScreen {
+		fmt.Fprint(out, ansiClearScreen)
+	}
+	fmt.Fprintln(out, "PromptLock Watch")
+	fmt.Fprintf(out, "Broker: %s | Poll: %s | Time: %s | Pending: %d\n", view.BrokerTarget, view.PollInterval, view.Now.Format(time.RFC3339), view.PendingCount)
+	fmt.Fprintln(out)
+	if view.Current == nil {
+		fmt.Fprintln(out, view.Message)
+		if view.PendingCount == 0 {
+			fmt.Fprintln(out, "Waiting for the next approval request.")
+		}
+		return
+	}
+
+	it := view.Current
+	fmt.Fprintf(out, "Request %s | agent=%s task=%s ttl=%d\n", it.ID, it.AgentID, it.TaskID, it.TTLMinutes)
+	fmt.Fprintf(out, "Reason: %s\n", it.Reason)
+	fmt.Fprintf(out, "Secrets: %s\n", strings.Join(it.Secrets, ", "))
+	fmt.Fprintf(out, "Command FP: %s\n", it.CommandFingerprint)
+	fmt.Fprintf(out, "Workdir FP: %s\n", it.WorkdirFingerprint)
 	if strings.TrimSpace(it.EnvPath) != "" {
-		fmt.Printf("Env Path: %s\n", it.EnvPath)
+		fmt.Fprintf(out, "Env Path: %s\n", it.EnvPath)
 	}
 	if strings.TrimSpace(it.EnvPathCanonical) != "" {
-		fmt.Printf("Env Path Canonical: %s\n", it.EnvPathCanonical)
+		fmt.Fprintf(out, "Env Path Canonical: %s\n", it.EnvPathCanonical)
 	}
+	if view.MoreQueued > 0 {
+		fmt.Fprintf(out, "Queued after this: %d\n", view.MoreQueued)
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Action: y=yes n=no s=skip q=quit")
+}
+
+func watchRenderKey(membershipSignature string, current *pendingItem, moreQueued int, message string) string {
+	if current == nil {
+		return "waiting|" + membershipSignature + "|" + message
+	}
+	return fmt.Sprintf("item|%s|%s|%d", membershipSignature, current.ID, moreQueued)
+}
+
+func pendingMembershipSignature(items []pendingItem) string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, "\x00")
+}
+
+func watchBrokerTarget(broker, brokerUnix string) string {
+	if strings.TrimSpace(brokerUnix) != "" {
+		return "unix://" + brokerUnix
+	}
+	return broker
+}
+
+func isTerminalFile(file *os.File) bool {
+	if file == nil {
+		return false
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
 func formatPendingListLine(it pendingItem) string {
@@ -737,7 +1027,7 @@ func executeWithSecret(broker, brokerUnix, sessionToken, lease, intent string, c
 
 func runAuth(args []string) {
 	if len(args) == 0 {
-		fatal(fmt.Errorf("usage: promptlock auth <bootstrap|pair|mint|login> [flags]"))
+		fatal(fmt.Errorf("usage: promptlock auth <bootstrap|pair|mint|login|docker-run> [flags]"))
 	}
 	switch args[0] {
 	case "bootstrap":
@@ -748,8 +1038,10 @@ func runAuth(args []string) {
 		runAuthMint(args[1:])
 	case "login":
 		runAuthLogin(args[1:])
+	case "docker-run":
+		runAuthDockerRun(args[1:])
 	default:
-		fatal(fmt.Errorf("usage: promptlock auth <bootstrap|pair|mint|login> [flags]"))
+		fatal(fmt.Errorf("usage: promptlock auth <bootstrap|pair|mint|login|docker-run> [flags]"))
 	}
 }
 
@@ -777,7 +1069,7 @@ type authLoginResult struct {
 
 func authBootstrap(broker, brokerUnix, operatorToken, agentID, containerID string) (authBootstrapResult, error) {
 	var out authBootstrapResult
-	if err := postJSONAuth(broker, brokerUnix, "/v1/auth/bootstrap/create", operatorToken, map[string]string{"agent_id": agentID, "container_id": containerID}, &out); err != nil {
+	if err := doPostJSONAuth(broker, brokerUnix, "/v1/auth/bootstrap/create", operatorToken, map[string]string{"agent_id": agentID, "container_id": containerID}, &out); err != nil {
 		return authBootstrapResult{}, err
 	}
 	if strings.TrimSpace(out.BootstrapToken) == "" {
@@ -788,7 +1080,7 @@ func authBootstrap(broker, brokerUnix, operatorToken, agentID, containerID strin
 
 func authPair(broker, brokerUnix, token, containerID string) (authPairResult, error) {
 	var out authPairResult
-	if err := postJSONAuth(broker, brokerUnix, "/v1/auth/pair/complete", "", map[string]string{"token": token, "container_id": containerID}, &out); err != nil {
+	if err := doPostJSONAuth(broker, brokerUnix, "/v1/auth/pair/complete", "", map[string]string{"token": token, "container_id": containerID}, &out); err != nil {
 		return authPairResult{}, err
 	}
 	if strings.TrimSpace(out.GrantID) == "" {
@@ -799,7 +1091,7 @@ func authPair(broker, brokerUnix, token, containerID string) (authPairResult, er
 
 func authMint(broker, brokerUnix, grantID string) (authMintResult, error) {
 	var out authMintResult
-	if err := postJSONAuth(broker, brokerUnix, "/v1/auth/session/mint", "", map[string]string{"grant_id": grantID}, &out); err != nil {
+	if err := doPostJSONAuth(broker, brokerUnix, "/v1/auth/session/mint", "", map[string]string{"grant_id": grantID}, &out); err != nil {
 		return authMintResult{}, err
 	}
 	if strings.TrimSpace(out.SessionToken) == "" {
@@ -809,15 +1101,23 @@ func authMint(broker, brokerUnix, grantID string) (authMintResult, error) {
 }
 
 func authLogin(broker, brokerUnix, operatorToken, agentID, containerID string) (authLoginResult, error) {
-	bootstrap, err := authBootstrap(broker, brokerUnix, operatorToken, agentID, containerID)
+	operatorBroker, err := resolveBrokerSelection(brokerRoleOperator, brokerSelectionInput{BaseURL: broker, UnixSocket: brokerUnix})
+	if err != nil {
+		return authLoginResult{}, err
+	}
+	agentBroker, err := resolveBrokerSelection(brokerRoleAgent, brokerSelectionInput{BaseURL: broker, UnixSocket: brokerUnix})
+	if err != nil {
+		return authLoginResult{}, err
+	}
+	bootstrap, err := authBootstrap(operatorBroker.BaseURL, operatorBroker.UnixSocket, operatorToken, agentID, containerID)
 	if err != nil {
 		return authLoginResult{}, fmt.Errorf("bootstrap step failed: %w", err)
 	}
-	pair, err := authPair(broker, brokerUnix, bootstrap.BootstrapToken, containerID)
+	pair, err := authPair(agentBroker.BaseURL, agentBroker.UnixSocket, bootstrap.BootstrapToken, containerID)
 	if err != nil {
 		return authLoginResult{}, fmt.Errorf("pair step failed: %w", err)
 	}
-	mint, err := authMint(broker, brokerUnix, pair.GrantID)
+	mint, err := authMint(agentBroker.BaseURL, agentBroker.UnixSocket, pair.GrantID)
 	if err != nil {
 		return authLoginResult{}, fmt.Errorf("mint step failed: %w", err)
 	}
@@ -835,11 +1135,14 @@ func runAuthBootstrap(args []string) {
 	agent := fs.String("agent", "", "agent id")
 	container := fs.String("container", "", "container id")
 	fs.Parse(args)
-	conn.applyTLSOptions()
 	if strings.TrimSpace(*opToken) == "" || strings.TrimSpace(*agent) == "" || strings.TrimSpace(*container) == "" {
 		fatal(fmt.Errorf("--operator-token, --agent and --container are required"))
 	}
-	out, err := authBootstrap(*conn.Broker, *conn.BrokerUnix, *opToken, *agent, *container)
+	broker, err := conn.resolve(brokerRoleOperator)
+	if err != nil {
+		fatal(err)
+	}
+	out, err := authBootstrap(broker.BaseURL, broker.UnixSocket, *opToken, *agent, *container)
 	if err != nil {
 		fatal(err)
 	}
@@ -852,11 +1155,14 @@ func runAuthPair(args []string) {
 	token := fs.String("token", "", "bootstrap token")
 	container := fs.String("container", "", "container id")
 	fs.Parse(args)
-	conn.applyTLSOptions()
 	if strings.TrimSpace(*token) == "" || strings.TrimSpace(*container) == "" {
 		fatal(fmt.Errorf("--token and --container are required"))
 	}
-	out, err := authPair(*conn.Broker, *conn.BrokerUnix, *token, *container)
+	broker, err := conn.resolve(brokerRoleAgent)
+	if err != nil {
+		fatal(err)
+	}
+	out, err := authPair(broker.BaseURL, broker.UnixSocket, *token, *container)
 	if err != nil {
 		fatal(err)
 	}
@@ -868,11 +1174,14 @@ func runAuthMint(args []string) {
 	conn := registerBrokerFlags(fs)
 	grant := fs.String("grant", "", "grant id")
 	fs.Parse(args)
-	conn.applyTLSOptions()
 	if strings.TrimSpace(*grant) == "" {
 		fatal(fmt.Errorf("--grant is required"))
 	}
-	out, err := authMint(*conn.Broker, *conn.BrokerUnix, *grant)
+	broker, err := conn.resolve(brokerRoleAgent)
+	if err != nil {
+		fatal(err)
+	}
+	out, err := authMint(broker.BaseURL, broker.UnixSocket, *grant)
 	if err != nil {
 		fatal(err)
 	}
@@ -886,11 +1195,10 @@ func runAuthLogin(args []string) {
 	agent := fs.String("agent", "", "agent id")
 	container := fs.String("container", "", "container id")
 	fs.Parse(args)
-	conn.applyTLSOptions()
 	if strings.TrimSpace(*opToken) == "" || strings.TrimSpace(*agent) == "" || strings.TrimSpace(*container) == "" {
 		fatal(fmt.Errorf("--operator-token, --agent and --container are required"))
 	}
-	out, err := authLogin(*conn.Broker, *conn.BrokerUnix, *opToken, *agent, *container)
+	out, err := authLogin(strings.TrimSpace(*conn.Broker), strings.TrimSpace(*conn.BrokerUnix), *opToken, *agent, *container)
 	if err != nil {
 		fatal(err)
 	}
@@ -899,6 +1207,161 @@ func runAuthLogin(args []string) {
 		"expires_at":    out.ExpiresAt,
 		"grant_id":      out.GrantID,
 	})
+}
+
+type dockerRunConfig struct {
+	Image                 string
+	ContainerName         string
+	SessionToken          string
+	BrokerURL             string
+	BrokerUnixSocket      string
+	ContainerBrokerSocket string
+	User                  string
+	Entrypoint            string
+	Workdir               string
+	AdditionalMounts      []string
+	AdditionalEnv         []string
+	AdditionalDockerArgs  []string
+	Command               []string
+	AttachTTY             bool
+}
+
+func runAuthDockerRun(args []string) {
+	fs := flag.NewFlagSet("auth docker-run", flag.ExitOnError)
+	conn := registerBrokerFlags(fs)
+	opToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
+	agent := fs.String("agent", "", "agent id")
+	container := fs.String("container", "", "container id / docker name")
+	image := fs.String("image", "", "docker image to run")
+	containerSocket := fs.String("container-broker-socket", "/run/promptlock/promptlock-agent.sock", "agent broker unix socket path inside the container when using --broker-unix-socket")
+	entrypoint := fs.String("entrypoint", "", "optional docker entrypoint override")
+	workdir := fs.String("workdir", "", "optional working directory inside container")
+	var mounts stringSliceFlag
+	var envs stringSliceFlag
+	var dockerArgs stringSliceFlag
+	fs.Var(&mounts, "mount", "additional docker --mount spec (repeatable)")
+	fs.Var(&envs, "env", "additional container env KEY=VALUE (repeatable)")
+	fs.Var(&dockerArgs, "docker-arg", "additional raw docker run argument (repeatable)")
+	fs.Parse(args)
+	if strings.TrimSpace(*opToken) == "" || strings.TrimSpace(*agent) == "" || strings.TrimSpace(*container) == "" || strings.TrimSpace(*image) == "" {
+		fatal(fmt.Errorf("--operator-token, --agent, --container and --image are required"))
+	}
+
+	loginResult, err := authLogin(strings.TrimSpace(*conn.Broker), strings.TrimSpace(*conn.BrokerUnix), *opToken, *agent, *container)
+	if err != nil {
+		fatal(err)
+	}
+	agentBroker, err := conn.resolve(brokerRoleAgent)
+	if err != nil {
+		fatal(err)
+	}
+
+	runArgs, err := buildDockerRunArgs(dockerRunConfig{
+		Image:                 *image,
+		ContainerName:         *container,
+		SessionToken:          loginResult.SessionToken,
+		BrokerURL:             agentBroker.BaseURL,
+		BrokerUnixSocket:      agentBroker.UnixSocket,
+		ContainerBrokerSocket: *containerSocket,
+		User:                  currentUserDockerIdentity(),
+		Entrypoint:            *entrypoint,
+		Workdir:               *workdir,
+		AdditionalMounts:      mounts,
+		AdditionalEnv:         envs,
+		AdditionalDockerArgs:  dockerArgs,
+		Command:               fs.Args(),
+		AttachTTY:             isTerminalFile(os.Stdin) && isTerminalFile(os.Stdout),
+	})
+	if err != nil {
+		fatal(err)
+	}
+
+	cmd := exec.Command("docker", runArgs...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			os.Exit(ee.ExitCode())
+		}
+		fatal(err)
+	}
+}
+
+func buildDockerRunArgs(cfg dockerRunConfig) ([]string, error) {
+	if strings.TrimSpace(cfg.Image) == "" {
+		return nil, fmt.Errorf("docker image is required")
+	}
+	if strings.TrimSpace(cfg.SessionToken) == "" {
+		return nil, fmt.Errorf("session token is required")
+	}
+	if strings.TrimSpace(cfg.BrokerUnixSocket) == "" && strings.TrimSpace(cfg.BrokerURL) == "" {
+		return nil, fmt.Errorf("either broker URL or broker unix socket is required")
+	}
+
+	args := []string{"run", "--rm"}
+	if cfg.AttachTTY {
+		args = append(args, "-it")
+	}
+	if strings.TrimSpace(cfg.ContainerName) != "" {
+		args = append(args, "--name", cfg.ContainerName)
+	}
+	if user := strings.TrimSpace(cfg.User); user != "" {
+		args = append(args, "--user", user)
+	}
+	args = append(args,
+		"--read-only",
+		"--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges",
+		"--pids-limit", "256",
+		"--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m",
+	)
+
+	if strings.TrimSpace(cfg.BrokerUnixSocket) != "" {
+		containerSocket := strings.TrimSpace(cfg.ContainerBrokerSocket)
+		if containerSocket == "" {
+			containerSocket = "/run/promptlock/promptlock-agent.sock"
+		}
+		args = append(args,
+			"--mount", fmt.Sprintf("type=bind,src=%s,dst=%s", filepath.Clean(cfg.BrokerUnixSocket), containerSocket),
+			"-e", "PROMPTLOCK_AGENT_UNIX_SOCKET="+containerSocket,
+		)
+	} else {
+		args = append(args, "-e", "PROMPTLOCK_BROKER_URL="+cfg.BrokerURL)
+	}
+
+	args = append(args, "-e", "PROMPTLOCK_SESSION_TOKEN="+cfg.SessionToken)
+	if strings.TrimSpace(cfg.Entrypoint) != "" {
+		args = append(args, "--entrypoint", cfg.Entrypoint)
+	}
+	if strings.TrimSpace(cfg.Workdir) != "" {
+		args = append(args, "--workdir", cfg.Workdir)
+	}
+	for _, mount := range cfg.AdditionalMounts {
+		if strings.TrimSpace(mount) == "" {
+			continue
+		}
+		args = append(args, "--mount", mount)
+	}
+	for _, envVar := range cfg.AdditionalEnv {
+		if strings.TrimSpace(envVar) == "" {
+			continue
+		}
+		args = append(args, "-e", envVar)
+	}
+	for _, dockerArg := range cfg.AdditionalDockerArgs {
+		if strings.TrimSpace(dockerArg) == "" {
+			continue
+		}
+		args = append(args, dockerArg)
+	}
+	args = append(args, cfg.Image)
+	args = append(args, cfg.Command...)
+	return args, nil
+}
+
+func currentUserDockerIdentity() string {
+	return fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
 }
 
 func writeJSONStdout(v any) {
@@ -915,18 +1378,28 @@ func runAuditVerify(args []string) {
 	if strings.TrimSpace(*auditPath) == "" {
 		fatal(fmt.Errorf("--file is required"))
 	}
+	if *checkpoint != "" {
+		if prev, err := audit.ReadCheckpoint(*checkpoint); err == nil && strings.TrimSpace(prev) != "" {
+			last, count, err := audit.VerifyFileAnchored(*auditPath, prev)
+			if err != nil {
+				fatal(err)
+			}
+			if *writeCheckpoint {
+				if err := audit.WriteCheckpoint(*checkpoint, last); err != nil {
+					fatal(err)
+				}
+			}
+			fmt.Printf("audit verify ok: records=%d last_hash=%s\n", count, last)
+			return
+		}
+	}
 	last, count, err := audit.VerifyFile(*auditPath)
 	if err != nil {
 		fatal(err)
 	}
-	if *checkpoint != "" {
-		if prev, err := audit.ReadCheckpoint(*checkpoint); err == nil && strings.TrimSpace(prev) != "" && prev != last {
-			fatal(fmt.Errorf("checkpoint mismatch: expected %s got %s", prev, last))
-		}
-		if *writeCheckpoint {
-			if err := audit.WriteCheckpoint(*checkpoint, last); err != nil {
-				fatal(err)
-			}
+	if *checkpoint != "" && *writeCheckpoint {
+		if err := audit.WriteCheckpoint(*checkpoint, last); err != nil {
+			fatal(err)
 		}
 	}
 	fmt.Printf("audit verify ok: records=%d last_hash=%s\n", count, last)

@@ -23,29 +23,29 @@ Yes, dockerizing this tool makes sense.
 - no-new-privileges
 - constrained writable mounts
 - host-side protected audit mount
-- prefer unix socket exposure over broad TCP bind for broker API
+- prefer role-separated unix sockets over broad TCP bind for broker API
 
-## Hardened production baseline (recommended)
+## Hardened OSS baseline (recommended)
 - `security_profile: hardened`
 - `auth.enable_auth: true`
 - `auth.allow_plaintext_secret_return: false`
-- `unix_socket` enabled and permission-restricted (preferred transport)
-- TCP, if enabled, bound to localhost only or behind authenticated mTLS proxy
+- `agent_unix_socket` and `operator_unix_socket` enabled and permission-restricted (preferred local transport)
+- no non-local TCP dependency in the supported OSS deployment story
 - host-protected audit path outside agent-writable mounts
 - host-protected `state_store_file` and `auth.store_file` paths outside agent-writable mounts
 - `PROMPTLOCK_AUTH_STORE_KEY` (or configured `auth.store_encryption_key_env`) supplied via orchestrator secret, not baked into images
 - explicit secret/session backend strategy (do not rely only on in-memory defaults)
 
 ## Secure transport recipes
-- Preferred: expose PromptLock via unix socket (`unix_socket`) and keep TCP local-only.
-- If TCP is required: either enable native TLS (`tls.enable`) or place broker behind authenticated mTLS reverse proxy.
-- Native mTLS can be enabled with `tls.require_client_cert=true` and `tls.client_ca_file`.
-- Canonical hardened mTLS setup: `docs/operations/MTLS-HARDENED.md`.
+- Preferred local shape: expose PromptLock via dual unix sockets and mount only the agent socket into the untrusted container.
+- Host operator commands (`promptlock watch`, `auth bootstrap`) should use the operator socket only from the host.
+- Container agent commands should use only the agent socket.
+- Non-local TCP is not part of the supported OSS v1 release target.
 - `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is an explicit emergency override; use only for controlled testing and rotate credentials afterward.
 
 ## Canonical host-plus-container walkthrough
 - Use `docs/operations/REAL-E2E-HOST-CONTAINER.md` for the CLI-first host daemon + container agent + interactive approval lab walkthrough.
-- Use `docs/operations/MTLS-HARDENED.md` for hardened non-local TCP guidance.
+- For local developer/operator ergonomics, `promptlock auth docker-run` can mint a short-lived session, mount only the agent socket, and launch the agent container in one command instead of requiring a separate auth-login step.
 
 ## Future
 - Provide docker-compose example:

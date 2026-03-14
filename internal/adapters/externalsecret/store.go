@@ -32,6 +32,9 @@ func New(baseURL, authTokenEnvVarName string, timeoutSeconds int) (*Store, error
 	if u.Scheme == "" || u.Host == "" {
 		return nil, fmt.Errorf("invalid external secret source base URL %q", baseURL)
 	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("unsupported external secret source URL scheme %q (expected http or https)", u.Scheme)
+	}
 
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	if timeout <= 0 {
@@ -65,9 +68,10 @@ func (s *Store) GetSecret(name string) (string, error) {
 
 	if s.authTokenEnvVar != "" {
 		token := strings.TrimSpace(os.Getenv(s.authTokenEnvVar))
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
+		if token == "" {
+			return "", fmt.Errorf("external secret auth token env %s is empty", s.authTokenEnvVar)
 		}
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := s.client.Do(req)

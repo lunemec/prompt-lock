@@ -38,6 +38,10 @@ func TestExecuteUsesApprovedEnvPathSecrets(t *testing.T) {
 	if err := os.WriteFile(envFile, []byte("github_token=from_dotenv\n"), 0o600); err != nil {
 		t.Fatalf("write env file: %v", err)
 	}
+	expectedCanonicalPath, err := filepath.EvalSymlinks(envFile)
+	if err != nil {
+		t.Fatalf("canonicalize env file: %v", err)
+	}
 
 	store := memory.NewStore()
 	store.SetSecret("github_token", "from_primary_secret_store")
@@ -51,7 +55,7 @@ func TestExecuteUsesApprovedEnvPathSecrets(t *testing.T) {
 		CommandFingerprint: "fp-env",
 		WorkdirFingerprint: "wd-env",
 		EnvPath:            "secrets/.env",
-		EnvPathCanonical:   envFile,
+		EnvPathCanonical:   expectedCanonicalPath,
 		Status:             domain.RequestApproved,
 		CreatedAt:          now,
 	})
@@ -85,7 +89,7 @@ func TestExecuteUsesApprovedEnvPathSecrets(t *testing.T) {
 		},
 		authEnabled: false,
 		authCfg:     config.AuthConfig{EnableAuth: false, AllowPlaintextSecretReturn: false},
-		execPolicy:  config.ExecutionPolicy{AllowlistPrefixes: []string{"bash"}, DenylistSubstrings: []string{"printenv"}, MaxOutputBytes: 65536, DefaultTimeoutSec: 30, MaxTimeoutSec: 60},
+		execPolicy:  config.ExecutionPolicy{ExactMatchExecutables: []string{"bash"}, DenylistSubstrings: []string{"printenv"}, MaxOutputBytes: 65536, DefaultTimeoutSec: 30, MaxTimeoutSec: 60},
 		now:         func() time.Time { return now },
 	}
 

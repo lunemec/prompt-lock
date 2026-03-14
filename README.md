@@ -1,4 +1,4 @@
-# PromptLock (Draft)
+# PromptLock
 
 ## Goal
 Build **PromptLock**: a human-approved secret access broker for coding agents.
@@ -12,6 +12,8 @@ Project name: **PromptLock**
 
 Tagline: **Human-approved secret access for autonomous agents.**
 
+Status: **pre-1.0 OSS release candidate**. The supported OSS deployment target is local-only hardened operation with role-separated Unix sockets. PromptLock is intended for public OSS use, but it is not yet making a 1.0 stability commitment.
+
 ## Core contract
 - Agent requests: `secrets[] + ttl_minutes + reason + task_id + agent_id`
 - Human approves or denies
@@ -20,6 +22,157 @@ Tagline: **Human-approved secret access for autonomous agents.**
 - All requests and approvals are logged
 
 See `docs/CONTRACT.md`.
+
+## Start Here
+
+If you want the fastest proof that PromptLock works, start with:
+
+```bash
+make e2e-compose
+```
+
+That builds the broker and runner images and exercises a real `promptlock exec --broker-exec` path in Docker.
+
+## Prerequisites
+- Host has Go, Docker, and `jq`.
+- The recommended quickstart below is the hardened local flow.
+  It uses role-separated Unix sockets by default and does not expose the operator API to the container.
+
+## Recommended Quickstart: Hardened Local Docker Flow
+
+This is the simplest copy-paste path for a first-time user/operator.
+It runs the broker on the host, keeps operator access on a host-only socket, mounts only the agent socket into the container, waits for human approval, and then executes the approved command on the broker host via `--broker-exec`.
+
+### 1. Create a minimal lab config
+
+```bash
+cat >/tmp/promptlock-readme.json <<'JSON'
+{
+  "security_profile": "hardened",
+  "audit_path": "/tmp/promptlock-audit.jsonl",
+  "state_store_file": "/tmp/promptlock-state-store.json",
+  "auth": {
+    "enable_auth": true,
+    "operator_token": "op_real_test_token",
+    "allow_plaintext_secret_return": false,
+    "store_file": "/tmp/promptlock-auth-store.json"
+  },
+  "secret_source": {
+    "type": "env",
+    "env_prefix": "PROMPTLOCK_SECRET_",
+    "in_memory_hardened": "fail"
+  },
+  "execution_policy": {
+    "output_security_mode": "raw"
+  },
+  "intents": {
+    "run_tests": ["github_token"]
+  }
+}
+JSON
+```
+
+This demo overrides the hardened default `output_security_mode` to `raw` only so the example can print `go version`.
+Use the hardened default `none` when you do not need command output.
+`redacted` mode is only best-effort log scrubbing; it is not a strong secret-exfiltration control.
+
+### 2. Terminal A: start the broker
+
+```bash
+export PROMPTLOCK_SECRET_GITHUB_TOKEN='demo_github_token_value'
+export PROMPTLOCK_AUTH_STORE_KEY='replace_with_long_random_value'
+PROMPTLOCK_CONFIG=/tmp/promptlock-readme.json go run ./cmd/promptlockd
+```
+
+In hardened local mode, PromptLock defaults to:
+- agent socket: `/tmp/promptlock-agent.sock`
+- operator socket: `/tmp/promptlock-operator.sock`
+
+### 3. Terminal B: start the human watch UI
+
+```bash
+PROMPTLOCK_OPERATOR_TOKEN=op_real_test_token go run ./cmd/promptlock watch
+```
+
+### 4. Terminal C: build the agent image
+
+```bash
+docker build -t promptlock-agent-lab .
+```
+
+### 5. Terminal C: launch the container with a minted session
+
+```bash
+go run ./cmd/promptlock auth docker-run \
+  --operator-token op_real_test_token \
+  --agent toolbelt-agent \
+  --container toolbelt-container-1 \
+  --image promptlock-agent-lab \
+  --entrypoint /usr/local/bin/promptlock \
+  -- \
+  exec \
+  --agent toolbelt-agent \
+  --task readme-lab \
+  --intent run_tests \
+  --reason "README host approval test" \
+  --ttl 20 \
+  --wait-approve 5m \
+  --poll-interval 2s \
+  --broker-exec \
+  -- go version
+```
+
+Approve the request in Terminal B when prompted.
+Expected output in Terminal C after approval:
+
+```text
+go version ...
+```
+
+If your base image already includes `promptlock` (for example a derived toolbelt/Codex image), replace `--image promptlock-agent-lab` with that image and keep the same wrapper command.
+
+### 7. Verify the audit log
+
+```bash
+go run ./cmd/promptlock audit-verify --file /tmp/promptlock-audit.jsonl
+```
+
+Expected: `audit verify ok: ...`
+
+If you want the full host+container lab walkthrough and troubleshooting map, use `docs/operations/REAL-E2E-HOST-CONTAINER.md`.
+
+## Secondary Quickstart: Local Dev Demo
+
+This path is faster, but it is for local testing only because it bypasses the external approval flow.
+
+```bash
+PROMPTLOCK_ALLOW_DEV_PROFILE=1 go run ./cmd/promptlockd
+```
+
+In a second terminal:
+
+```bash
+PROMPTLOCK_DEV_MODE=1 \
+  go run ./cmd/promptlock exec --intent run_tests --ttl 5 --auto-approve -- env
+```
+
+## Developer And Release Workflows
+- Full validation gate: `make validate-final`
+- Toolchain and Docker base-image drift guard: `make toolchain-guard`
+- PR-grade validation gate: `make release-readiness-gate-core`
+- Docker smoke test: `make e2e-compose`
+- Release-quality validation: `make release-readiness-gate`
+- Quick fuzzing pass: `make fuzz`
+- Storage fsync release evidence and release packaging: `docs/operations/RELEASE.md`
+
+Canonical Go and Docker base-image pins live in `.toolchain.env`; update that file first when bumping versions.
+
+## More Docs
+- Full Docker/operator lab flow: `docs/operations/REAL-E2E-HOST-CONTAINER.md`
+- Config reference: `docs/operations/CONFIG.md`
+- Wrapper and approval CLI behavior: `docs/operations/WRAPPER-EXEC.md`
+- Docker deployment guidance: `docs/operations/DOCKER.md`
+- Security policy: `SECURITY.md`
 
 ## Repository contents
 - `AGENTS.md` — project map and non-negotiable engineering/security rules
@@ -42,103 +195,17 @@ See `docs/CONTRACT.md`.
 - `skills/secret-request/SKILL.md` — skill instructions for agents
 - `examples/` — sample workflow commands
 
-## Quick demo
-
-Install local git hook (recommended):
-
-```bash
-git config core.hooksPath .githooks
-chmod +x .githooks/pre-commit
-```
-
-Run final validation gate manually:
-
-```bash
-make validate-final
-```
-
-Run quick fuzzing pass:
-
-```bash
-make fuzz
-```
-
-Run docker-compose real-path smoke test:
-
-```bash
-make e2e-compose
-```
-
-Start broker (prototype Go mock):
-
-```bash
-go run ./cmd/promptlock-mock-broker
-```
-
-Start broker (Go v1 skeleton):
-
-```bash
-PROMPTLOCK_ALLOW_DEV_PROFILE=1 go run ./cmd/promptlockd
-```
-
-Start broker with host config:
-
-```bash
-PROMPTLOCK_CONFIG=./examples/config.example.json go run ./cmd/promptlockd
-```
-
-Run a command via PromptLock wrapper (prototype):
-
-```bash
-PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
-  go run ./cmd/promptlock exec --intent run_tests --ttl 5 --auto-approve -- env
-```
-
-(For local demo only: `--auto-approve` bypasses external human approval flow.)
-
-Agent requests secrets:
-
-```bash
-scripts/secretctl.sh request \
-  --agent ralph-r1 \
-  --task TASK-1001 \
-  --ttl 20 \
-  --reason "Run integration tests against GitHub + npm" \
-  --secret github_token \
-  --secret npm_token
-```
-
-Human approves (interactive queue):
-
-```bash
-go run ./cmd/promptlock approve-queue
-```
-
-Auth lifecycle helpers (CLI):
-
-```bash
-go run ./cmd/promptlock auth bootstrap --agent <agent_id> --container <container_id> --operator-token <token>
-go run ./cmd/promptlock auth pair --token <bootstrap_token> --container <container_id>
-go run ./cmd/promptlock auth mint --grant <grant_id>
-```
-
-CLI-first host+container walkthrough:
-
-```bash
-cat docs/operations/REAL-E2E-HOST-CONTAINER.md
-```
-
 ## Agent-generated code note
 This repository is primarily **agent-generated code and documentation**, following the same agent-first workflow style as the `codex-docker` project.
 
 ## Important
-This repository is currently **experimental** for flow design and integration testing, with an explicit goal of becoming production-ready.
+This repository targets a **public pre-1.0 OSS release**. Hardened deployment is the supported path for real-world use; dev-profile defaults and demo helpers remain for local testing and migration.
 
-Current implementation uses in-memory request/lease/auth/session stores by default unless configured with durable host-backed state files. For production-targeted use, configure hardened deployment controls, encrypted auth persistence (`auth.store_encryption_key_env`), durable request/lease state persistence (`state_store_file`), and external secret backend adapters.
+Current implementation uses in-memory request/lease/auth/session stores by default unless configured with durable host-backed state files. For OSS-targeted use, configure the hardened local controls, encrypted auth persistence (`auth.store_encryption_key_env`), durable request/lease state via either local file persistence (`state_store_file`, `state_store.type=file`) or an external HTTP state adapter (`state_store.type=external`), and external secret backend adapters.
 
 Startup guardrails now enforce fail-closed production posture: non-dev profiles require durable state files and non-`in_memory` secret source; dev profile startup requires explicit opt-in (`PROMPTLOCK_ALLOW_DEV_PROFILE=1`).
 
-Production hardening should include mTLS, unix sockets, policy engine, encrypted at-rest storage, tamper-evident audit logs, and external secret backend integration (Vault/1Password/etc.).
+Supported OSS hardening centers on local dual unix sockets, policy enforcement, encrypted at-rest auth persistence, local audit hash-chain integrity verification, and external secret backend integration (Vault/1Password/etc.). Non-local TCP TLS/mTLS transport support has been removed from the supported code path; PromptLock is a local-only Unix-socket deployment.
 
 **Critical:** audit trail must be persisted on the host (outside agent-controlled workspace/container paths) so request/approval/access history cannot be silently altered by agent workloads.
 

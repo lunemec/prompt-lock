@@ -114,3 +114,47 @@ func TestHandleRequestFailsClosedOnStatePersistFailure(t *testing.T) {
 		t.Fatalf("expected durability_persist_failed audit event")
 	}
 }
+
+func TestDurabilityGateBlocksLeaseUseAfterApprovePersistFailure(t *testing.T) {
+	now := time.Now().UTC()
+	s := testServer(now)
+	s.stateStoreFile = "/non-empty"
+	s.stateStorePersister = failingStateStorePersister{}
+
+	created, err := s.svc.RequestLease("a1", "task-1", "test", 5, []string{"github_token"}, "fp-approve", "wd-approve", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	approveReq := httptest.NewRequest(http.MethodPost, "/v1/leases/approve?request_id="+created.ID, nil)
+	approveReq.Header.Set("Authorization", "Bearer op")
+	approveW := httptest.NewRecorder()
+	s.handleApprove(approveW, approveReq)
+	if approveW.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 on approve persist failure, got %d body=%s", approveW.Code, approveW.Body.String())
+	}
+
+	leaseReq := httptest.NewRequest(http.MethodGet, "/v1/leases/by-request?request_id="+created.ID, nil)
+	leaseReq.Header.Set("Authorization", "Bearer s1")
+	leaseW := httptest.NewRecorder()
+	s.handleLeaseByRequest(leaseW, leaseReq)
+	if leaseW.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected durability gate to block lease lookup, got %d body=%s", leaseW.Code, leaseW.Body.String())
+	}
+
+	accessReq := httptest.NewRequest(http.MethodPost, "/v1/leases/access", bytes.NewBufferString(`{"lease_token":"l1","secret":"github_token","command_fingerprint":"fp-approve","workdir_fingerprint":"wd-approve"}`))
+	accessReq.Header.Set("Authorization", "Bearer s1")
+	accessW := httptest.NewRecorder()
+	s.handleAccess(accessW, accessReq)
+	if accessW.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected durability gate to block secret access, got %d body=%s", accessW.Code, accessW.Body.String())
+	}
+
+	execReq := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(`{"lease_token":"l1","command":["bash","-lc","echo ok"],"secrets":["github_token"],"command_fingerprint":"fp-approve","workdir_fingerprint":"wd-approve"}`))
+	execReq.Header.Set("Authorization", "Bearer s1")
+	execW := httptest.NewRecorder()
+	s.handleExecute(execW, execReq)
+	if execW.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected durability gate to block execute, got %d body=%s", execW.Code, execW.Body.String())
+	}
+}

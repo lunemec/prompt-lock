@@ -1,7 +1,7 @@
 # Release and versioned deployment guide
 
 This project follows SemVer and Keep-a-Changelog.
-PromptLock is currently experimental; this checklist defines the production-readiness release gate.
+PromptLock is currently pre-1.0; this checklist defines the gate for a public OSS prerelease and any later production-targeted release.
 
 ## Pre-release checklist
 
@@ -11,12 +11,16 @@ PromptLock is currently experimental; this checklist defines the production-read
 2. Run full validation:
 
 ```bash
-make validate-final
-make production-readiness-gate
-make fuzz
+make release-readiness-gate
 ```
 
-3. Run smoke integration:
+If Docker daemon is unavailable in your local environment, run the non-compose subset first and complete `make e2e-compose` on a Docker-capable runner before release sign-off:
+
+```bash
+make release-readiness-gate-core
+```
+
+3. (Optional re-run) smoke integration in isolation if you skipped it above:
 
 ```bash
 make e2e-compose
@@ -27,7 +31,10 @@ make e2e-compose
 5. Confirm security policy and disclosure path are published:
    - `SECURITY.md`
 6. Confirm non-dev startup prerequisites are set:
-   - `state_store_file` configured
+   - request/lease state configured through either:
+     - `state_store.type=file` with `state_store_file`, or
+     - `state_store.type=external` with `state_store.external_url` (`https://...`) + `state_store.external_auth_token_env` env value exported
+   - if using `state_store.type=external`, do not treat it as a concurrency-safe multi-node coordination layer; current support is limited to durable external storage integration
    - `auth.store_file` configured
    - auth-store encryption key env exported (`PROMPTLOCK_AUTH_STORE_KEY` or configured `store_encryption_key_env`)
    - `secret_source.type` is not `in_memory`
@@ -37,15 +44,34 @@ make e2e-compose
 make storage-fsync-preflight MOUNT_DIR=/var/lib/promptlock
 ```
 
-8. Run storage fsync release gate for multi-mount persistence paths (generates and validates JSON report):
+8. Export fsync report attestation key material:
+
+```bash
+export PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY='<32+ character HMAC key>'
+export PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_ID='release-key-2026-03'
+# optional rotation overlap verification (example):
+export PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_PREV='<previous 32+ character HMAC key>'
+export PROMPTLOCK_STORAGE_FSYNC_HMAC_KEYRING='release-key-2026-02:PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_PREV'
+export PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_OVERLAP_MAX_AGE='168h'
+```
+
+SOPS alternative (decrypted payload must expose the same env names):
+
+```bash
+export PROMPTLOCK_SOPS_ENV_FILE=/etc/promptlock/fsync-keys.sops.env
+```
+
+9. Run storage fsync release gate for multi-mount persistence paths (generates and validates signed JSON report):
 
 ```bash
 make storage-fsync-release-gate MOUNT_DIRS=/var/lib/promptlock,/var/log/promptlock FSYNC_REPORT=reports/storage-fsync-report.json
+# optional explicit SOPS file override:
+# make storage-fsync-release-gate MOUNT_DIRS=/var/lib/promptlock,/var/log/promptlock FSYNC_REPORT=reports/storage-fsync-report.json SOPS_ENV_FILE=/etc/promptlock/fsync-keys.sops.env
 ```
 
-9. Archive the validated fsync evidence report for release records:
+10. Archive the validated fsync evidence report for release records:
    - `reports/storage-fsync-report.json` (or your configured `FSYNC_REPORT` path)
-   - report includes provenance metadata (`schema_version`, `generated_at`, `generated_by`, `hostname`) validated by gate tooling
+   - report includes provenance metadata (`schema_version`, `generated_at`, `generated_by`, `hostname`) and attestation fields (`signature.alg`, `signature.key_id`, `signature.value`) validated by gate tooling
 
 ## Build release artifacts
 
@@ -58,7 +84,9 @@ Produces:
 
 Notes:
 - `scripts/release-package.sh` now uses GoReleaser for cross-platform binary builds (`linux/amd64`, `darwin/arm64`).
-- Tooling is pinned via `go run github.com/goreleaser/goreleaser/v2@v2.7.0` in the script for reproducibility and Go 1.23 compatibility.
+- Tooling is pinned via `go run github.com/goreleaser/goreleaser/v2@v2.7.0` in the script for reproducibility.
+- Repository Go and Docker base-image pins are centralized in `.toolchain.env` and enforced by `make toolchain-guard`.
+- GitHub Actions, `go.mod`, and Docker build/runtime image tags are aligned to the current `.toolchain.env` values (`GO_VERSION=1.26.1`, `GO_BUILD_IMAGE=golang:1.26.1-alpine3.23`, `RUNTIME_IMAGE=alpine:3.23`).
 
 ## Tag and publish
 
@@ -68,7 +96,11 @@ git push origin v0.2.0
 ```
 
 GitHub release workflow should attach build artifacts for tagged versions.
-Tagged release CI now enforces `make storage-fsync-release-gate` and uploads `reports/storage-fsync-report-release-ci.json` as a release workflow artifact.
+Tagged release CI now enforces `make storage-fsync-release-gate`, requires `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY` + `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_ID`, and uploads `reports/storage-fsync-report-release-ci.json` as a release workflow artifact.
+Release CI now also exports optional rotation envs when configured (`PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_PREV`, `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEYRING`, `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_OVERLAP_MAX_AGE`).
+For additional rotated keys beyond `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_PREV`, extend workflow `env` with the extra referenced key env names.
+If your release flow uses SOPS-managed files instead of pre-exported env vars, ensure `sops` is installed on the runner and set `PROMPTLOCK_SOPS_ENV_FILE`/`SOPS_ENV_FILE` to the decrypted file path during gate execution.
+If you intentionally change Go or Docker image versions for release tooling, update `.toolchain.env` first and keep `make toolchain-guard` green before tagging.
 
 ## Deployment notes
 
@@ -76,7 +108,7 @@ Tagged release CI now enforces `make storage-fsync-release-gate` and uploads `re
 - `security_profile: hardened`
 - `auth.enable_auth: true`
 - `auth.allow_plaintext_secret_return: false`
-- prefer `unix_socket` transport
+- use dual unix sockets for local operator/agent separation
 - protect audit log path on host
 
 ### Compatibility deployment (temporary)

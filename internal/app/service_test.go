@@ -203,6 +203,85 @@ func TestRequestLeaseWithPolicyCreatesPendingWhenNoActiveEquivalentLease(t *test
 	}
 }
 
+func TestRequestLeaseWithPolicyHonorsDisabledActiveLeaseReuse(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	_ = store.SaveLease(domain.Lease{
+		Token:              "lease_active",
+		RequestID:          "req_existing",
+		AgentID:            "agent1",
+		TaskID:             "task-old",
+		Secrets:            []string{"github_token", "npm_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		ExpiresAt:          now.Add(10 * time.Minute),
+	})
+
+	svc := Service{
+		Policy:        domain.DefaultPolicy(),
+		RequestPolicy: RequestPolicy{IdenticalRequestCooldown: 60 * time.Second, MaxPendingPerAgent: 2, EnableActiveLeaseReuse: false},
+		Requests:      store,
+		Leases:        store,
+		Secrets:       store,
+		Audit:         &auditBuf{},
+		Now:           func() time.Time { return now },
+		NewRequestID:  func() string { return "req_new" },
+		NewLeaseTok:   func() string { return "lease_new" },
+	}
+
+	result, err := svc.RequestLeaseWithPolicy("agent1", "task1", "test", 5, []string{"github_token", "npm_token"}, "fp1", "wd1", "", "")
+	if err != nil {
+		t.Fatalf("request lease with policy: %v", err)
+	}
+	if result.Reused {
+		t.Fatalf("expected disabled active lease reuse to force a new request")
+	}
+	if result.Request.ID != "req_new" {
+		t.Fatalf("expected created request id req_new, got %q", result.Request.ID)
+	}
+}
+
+func TestRequestLeaseWithPolicyHonorsCustomPendingCap(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	_ = store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_1",
+		AgentID:            "agent1",
+		TaskID:             "task_1",
+		Reason:             "first",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now.Add(-5 * time.Second),
+	})
+
+	svc := Service{
+		Policy:        domain.DefaultPolicy(),
+		RequestPolicy: RequestPolicy{IdenticalRequestCooldown: 60 * time.Second, MaxPendingPerAgent: 1, EnableActiveLeaseReuse: true},
+		Requests:      store,
+		Leases:        store,
+		Secrets:       store,
+		Audit:         &auditBuf{},
+		Now:           func() time.Time { return now },
+		NewRequestID:  func() string { return "req_new" },
+		NewLeaseTok:   func() string { return "lease_new" },
+	}
+
+	_, err := svc.RequestLeaseWithPolicy("agent1", "task2", "second", 5, []string{"npm_token"}, "fp2", "wd2", "", "")
+	if err == nil {
+		t.Fatalf("expected custom pending cap to throttle")
+	}
+	var throttleErr *RequestThrottleError
+	if !errors.As(err, &throttleErr) {
+		t.Fatalf("expected request throttle error, got %v", err)
+	}
+	if throttleErr.Reason != RequestThrottleReasonPendingCap {
+		t.Fatalf("expected pending-cap throttle, got %q", throttleErr.Reason)
+	}
+}
+
 func TestRequestLeaseWithPolicyThrottlesWhenPendingCapReached(t *testing.T) {
 	store := memory.NewStore()
 	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
@@ -264,6 +343,57 @@ func TestRequestLeaseWithPolicyThrottlesWhenPendingCapReached(t *testing.T) {
 	}
 	if len(pending) != 2 {
 		t.Fatalf("expected pending queue unchanged on throttle, got %d", len(pending))
+	}
+}
+
+func TestOwnershipChecksDenyCrossAgentReadsAndUse(t *testing.T) {
+	store := memory.NewStore()
+	store.SetSecret("github_token", "x")
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      store,
+		Audit:        &auditBuf{},
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_test" },
+		NewLeaseTok:  func() string { return "lease_test" },
+	}
+
+	_ = store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_test",
+		AgentID:            "agent-a",
+		TaskID:             "task-a",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestApproved,
+		CreatedAt:          now,
+	})
+	_ = store.SaveLease(domain.Lease{
+		Token:              "lease_test",
+		RequestID:          "req_test",
+		AgentID:            "agent-a",
+		TaskID:             "task-a",
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		ExpiresAt:          now.Add(5 * time.Minute),
+	})
+
+	if _, err := svc.RequestStatusByAgent("req_test", "agent-b"); !errors.Is(err, ErrRequestNotOwned) {
+		t.Fatalf("expected ErrRequestNotOwned from request status, got %v", err)
+	}
+	if _, err := svc.LeaseByRequestForAgent("req_test", "agent-b"); !errors.Is(err, ErrRequestNotOwned) {
+		t.Fatalf("expected ErrRequestNotOwned from lease by request, got %v", err)
+	}
+	if _, err := svc.AccessSecretByAgent("agent-b", "lease_test", "github_token", "fp1", "wd1"); !errors.Is(err, ErrLeaseNotOwned) {
+		t.Fatalf("expected ErrLeaseNotOwned from access secret, got %v", err)
+	}
+	if _, err := svc.ResolveExecutionSecretsByAgent("agent-b", "lease_test", []string{"github_token"}, "fp1", "wd1"); !errors.Is(err, ErrLeaseNotOwned) {
+		t.Fatalf("expected ErrLeaseNotOwned from resolve execution secrets, got %v", err)
 	}
 }
 

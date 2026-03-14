@@ -1,4 +1,5 @@
 {
+  "security_profile": "dev",
   "address": "0.0.0.0:8765",
   "audit_path": "/tmp/promptlock-audit.jsonl",
   "auth": {
@@ -12,9 +13,9 @@
     "cleanup_interval_seconds": 60
   },
   "execution_policy": {
-    "allowlist_prefixes": ["bash"],
+    "exact_match_executables": ["echo"],
     "denylist_substrings": ["printenv", "/proc/", "environ"],
-    "output_security_mode": "redacted",
+    "output_security_mode": "raw",
     "max_output_bytes": 65536,
     "default_timeout_sec": 30,
     "max_timeout_sec": 60

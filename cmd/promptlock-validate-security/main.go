@@ -16,6 +16,14 @@ var forbiddenPatterns = []string{
 	"-----BEGIN PRIVATE KEY-----",
 }
 
+var skippedDirs = map[string]struct{}{
+	".git":             {},
+	"dist":             {},
+	".goreleaser-dist": {},
+	".gocache":         {},
+	".gomodcache":      {},
+}
+
 type violation struct {
 	path    string
 	pattern string
@@ -46,7 +54,7 @@ func scan(root string) ([]violation, error) {
 		}
 		clean := filepath.Clean(path)
 		if d.IsDir() {
-			if d.Name() == ".git" {
+			if _, skip := skippedDirs[d.Name()]; skip {
 				return filepath.SkipDir
 			}
 			return nil

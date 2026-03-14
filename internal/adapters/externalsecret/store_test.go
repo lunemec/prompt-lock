@@ -150,6 +150,7 @@ func TestNewInvalidConfig(t *testing.T) {
 		{name: "whitespace base URL", baseURL: "   "},
 		{name: "invalid URL", baseURL: "://bad"},
 		{name: "URL without scheme", baseURL: "example.com"},
+		{name: "unsupported scheme", baseURL: "ftp://example.com"},
 	}
 
 	for _, tc := range tests {
@@ -158,6 +159,25 @@ func TestNewInvalidConfig(t *testing.T) {
 				t.Fatalf("expected error for base URL %q", tc.baseURL)
 			}
 		})
+	}
+}
+
+func TestGetSecretEmptyConfiguredAuthTokenEnvFailsClosed(t *testing.T) {
+	const tokenEnv = "PROMPTLOCK_EXTERNAL_SECRET_TOKEN"
+	t.Setenv(tokenEnv, "")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("request should not be sent when auth token env is empty")
+	}))
+	defer srv.Close()
+
+	s, err := New(srv.URL, tokenEnv, 5)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	if _, err := s.GetSecret("auth_test"); err == nil {
+		t.Fatalf("expected empty configured auth token env to fail")
 	}
 }
 

@@ -11,6 +11,9 @@ This guard ensures inward-only dependencies for key layers.
 ## What it checks
 - `internal/core` must not import adapter or transport packages.
 - `internal/app` must not import `cmd/promptlockd`.
+- The CLI transport selector must fail closed when local role sockets are missing instead of silently downgrading to implicit localhost TCP.
+- Agent and operator route registration must stay separated.
+- Mutating approval endpoints must reject malformed JSON instead of mutating state.
 
 ## Failing example (intentional anti-pattern)
 

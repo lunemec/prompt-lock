@@ -7,11 +7,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
 // VerifyFile validates hash-chain continuity for an audit jsonl file.
 func VerifyFile(path string) (string, int, error) {
+	return verifyFile(path, "")
+}
+
+// VerifyFileAnchored validates hash-chain continuity and requires the provided
+// checkpoint hash to exist somewhere in the verified chain.
+func VerifyFileAnchored(path string, checkpointHash string) (string, int, error) {
+	return verifyFile(path, strings.TrimSpace(checkpointHash))
+}
+
+func verifyFile(path string, checkpointHash string) (string, int, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", 0, err
@@ -22,6 +33,7 @@ func VerifyFile(path string) (string, int, error) {
 	prev := ""
 	count := 0
 	last := ""
+	checkpointFound := checkpointHash == ""
 	for s.Scan() {
 		line := strings.TrimSpace(s.Text())
 		if line == "" {
@@ -47,16 +59,52 @@ func VerifyFile(path string) (string, int, error) {
 		}
 		prev = rec.Hash
 		last = rec.Hash
+		if checkpointHash != "" && rec.Hash == checkpointHash {
+			checkpointFound = true
+		}
 		count++
 	}
 	if err := s.Err(); err != nil {
 		return "", count, err
 	}
+	if !checkpointFound {
+		return "", count, fmt.Errorf("checkpoint hash %s not found in verified audit chain", checkpointHash)
+	}
 	return last, count, nil
 }
 
 func WriteCheckpoint(path string, hash string) error {
-	return os.WriteFile(path, []byte(strings.TrimSpace(hash)+"\n"), 0o600)
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".promptlock-checkpoint-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.WriteString(strings.TrimSpace(hash) + "\n"); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	if err := syncCheckpointParentDir(dir); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
 }
 
 func ReadCheckpoint(path string) (string, error) {
@@ -65,4 +113,8 @@ func ReadCheckpoint(path string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(b)), nil
+}
+
+var syncCheckpointParentDir = func(path string) error {
+	return syncDir(path)
 }

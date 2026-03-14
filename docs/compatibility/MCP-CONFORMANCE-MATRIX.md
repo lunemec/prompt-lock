@@ -14,8 +14,22 @@
 - Parse/batch protocol errors include `id: null` when request id is not available
 - Notifications (no `id`) do not emit responses
 - String request IDs are echoed unchanged in responses
+- `ping` method is supported with empty-object result payload
+- Initialize responses include explicit protocol/capability negotiation fields (`protocolVersion`, `capabilities.tools`) without over-advertising unimplemented namespaces
+- `initialized` and `notifications/initialized` are accepted (notification-safe no-op; request form returns empty-object result)
+- `notifications/cancelled` is accepted (request form returns empty-object result)
+- `notifications/cancelled` actively cancels matching in-flight `tools/call` requests by JSON-RPC request id (`params.requestId`/`params.id`), returns a fail-closed tool-call error, and best-effort propagates cleanup to broker `/v1/leases/cancel`
+- MCP cancellation cleanup logs a stderr warning when broker `/v1/leases/cancel` propagation fails, so operators can manually deny stale pending requests
+- `shutdown` method is supported with empty-object result payload
+- `exit` notification terminates process without response
 - `tools/list` accepts `params: null` from target profile A clients
+- `tools/list` advertises constrained JSON Schema for `execute_with_intent` (`additionalProperties=false`, required `intent`/`command`, bounded command arg lengths, integer TTL bounds) for safer client-side validation/UX
+- `resources/list` and `prompts/list` are supported (empty-list payloads for compatibility with clients that probe these namespaces) but the namespaces are not advertised in `initialize.capabilities` until full support exists
+- `tools/call` now returns `-32602` for null/empty params or missing `name`, avoiding unknown-tool ambiguity on invalid request shape
+- `tools/call` argument validation rejects non-string command elements and non-integer TTL values (fail-closed input handling)
+- `tools/call` notifications (missing request `id`) are ignored with no backend side effects
 - Tool call execute path + denied/timeout/session-failure paths
+- Single-session lifecycle sequencing coverage (`initialize -> notifications/initialized -> tools/list -> tools/call`)
 - Response shape/schema invariants for initialize/tools/list/error payloads
 
 ## Test sources

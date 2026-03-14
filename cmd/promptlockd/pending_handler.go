@@ -12,9 +12,13 @@ func (s *server) handlePendingRequests(w http.ResponseWriter, r *http.Request) {
 		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !s.requireDurabilityReady(w) {
+		return
+	}
 	items, err := s.svc.Requests.ListPendingRequests()
 	if err != nil {
-		writeMappedError(w, ErrInternal, err.Error())
+		kind, msg := stateStoreListError(err)
+		writeMappedError(w, kind, msg)
 		return
 	}
 	writeJSON(w, map[string]any{"pending": items})

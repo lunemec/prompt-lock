@@ -37,6 +37,25 @@ func TestNetworkEgressExtractsNonURLDomainForms(t *testing.T) {
 	if err := s.validateNetworkEgress([]string{"curl", "--url", "https://api.github.com/repos"}, ""); err != nil {
 		t.Fatalf("expected --url form to be allowed: %v", err)
 	}
+	if err := s.validateNetworkEgress([]string{"curl", "api.github.com/repos"}, ""); err != nil {
+		t.Fatalf("expected host/path form to be allowed: %v", err)
+	}
+	if err := s.validateNetworkEgress([]string{"curl", "api.github.com:443/repos"}, ""); err != nil {
+		t.Fatalf("expected host:port/path form to be allowed: %v", err)
+	}
+}
+
+func TestNetworkEgressBlocksHostPathBypass(t *testing.T) {
+	s := &server{networkEgressPolicy: config.NetworkEgressPolicy{
+		Enabled:      true,
+		AllowDomains: []string{"api.github.com"},
+	}}
+	if err := s.validateNetworkEgress([]string{"curl", "evil.com/path"}, ""); err == nil {
+		t.Fatalf("expected host/path bypass form to be blocked")
+	}
+	if err := s.validateNetworkEgress([]string{"wget", "evil.com/file"}, ""); err == nil {
+		t.Fatalf("expected alternate client host/path form to be blocked")
+	}
 }
 
 func TestNetworkEgressIntentDeterministic(t *testing.T) {

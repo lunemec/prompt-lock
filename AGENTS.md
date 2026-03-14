@@ -19,6 +19,8 @@ Purpose: short map + hard rules for this repository.
 - Any potential security issue must be explicitly raised in output and plan updates.
 - Expose developer/user workflows via **Makefile commands**.
 - Prefer the repository’s primary language/toolchain (**Go**) for new tooling and automation; avoid adding secondary runtimes unless absolutely necessary and explicitly approved.
+- Config and schema names must match enforced behavior. If a legacy field name is kept for compatibility, document the mismatch where operators will see it and keep the rename/removal work open in `docs/plans/BACKLOG.md`.
+- Do not overstate security posture in code or docs. Basename-only executable matching is not path provenance, and a deployment path should not be treated as supported unless CI or release gates exercise that path (or a stronger equivalent).
 - Significant decisions and requirement changes must be captured in ADRs under `docs/decisions/` and indexed in `docs/decisions/INDEX.md`.
 - Keep changelog in Keep-a-Changelog format; new changes go to `[Unreleased]` until release.
 - `make validate-final` is the mandatory final validation gate before commit.

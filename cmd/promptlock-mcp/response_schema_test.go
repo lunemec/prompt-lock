@@ -79,8 +79,57 @@ func assertBaseJSONRPCShape(t *testing.T, msg map[string]any, expectID bool) {
 func TestInitializeResponseSchema(t *testing.T) {
 	msg := exchangeLine(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
 	assertBaseJSONRPCShape(t, msg, true)
-	if _, ok := msg["result"].(map[string]any); !ok {
+	res, ok := msg["result"].(map[string]any)
+	if !ok {
 		t.Fatalf("initialize result must be object: %+v", msg)
+	}
+	if _, ok := res["protocolVersion"].(string); !ok {
+		t.Fatalf("initialize.protocolVersion must be string: %+v", res)
+	}
+	caps, ok := res["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatalf("initialize.capabilities must be object: %+v", res)
+	}
+	if _, ok := caps["tools"].(map[string]any); !ok {
+		t.Fatalf("initialize.capabilities.tools must be object: %+v", caps)
+	}
+	if _, ok := caps["resources"]; ok {
+		t.Fatalf("initialize.capabilities.resources must be omitted until resources namespace is implemented: %+v", caps)
+	}
+	if _, ok := caps["prompts"]; ok {
+		t.Fatalf("initialize.capabilities.prompts must be omitted until prompts namespace is implemented: %+v", caps)
+	}
+}
+
+func TestPingResponseSchema(t *testing.T) {
+	msg := exchangeLine(t, `{"jsonrpc":"2.0","id":99,"method":"ping","params":{}}`)
+	assertBaseJSONRPCShape(t, msg, true)
+	if _, ok := msg["result"].(map[string]any); !ok {
+		t.Fatalf("ping result must be object: %+v", msg)
+	}
+}
+
+func TestShutdownResponseSchema(t *testing.T) {
+	msg := exchangeLine(t, `{"jsonrpc":"2.0","id":100,"method":"shutdown","params":{}}`)
+	assertBaseJSONRPCShape(t, msg, true)
+	if _, ok := msg["result"].(map[string]any); !ok {
+		t.Fatalf("shutdown result must be object: %+v", msg)
+	}
+}
+
+func TestInitializedResponseSchema(t *testing.T) {
+	msg := exchangeLine(t, `{"jsonrpc":"2.0","id":101,"method":"initialized","params":{}}`)
+	assertBaseJSONRPCShape(t, msg, true)
+	if _, ok := msg["result"].(map[string]any); !ok {
+		t.Fatalf("initialized result must be object: %+v", msg)
+	}
+}
+
+func TestNotificationsCancelledResponseSchema(t *testing.T) {
+	msg := exchangeLine(t, `{"jsonrpc":"2.0","id":102,"method":"notifications/cancelled","params":{"requestId":1}}`)
+	assertBaseJSONRPCShape(t, msg, true)
+	if _, ok := msg["result"].(map[string]any); !ok {
+		t.Fatalf("notifications/cancelled result must be object: %+v", msg)
 	}
 }
 
@@ -93,6 +142,30 @@ func TestToolsListResponseSchema(t *testing.T) {
 	}
 	if _, ok := res["tools"].([]any); !ok {
 		t.Fatalf("tools/list result.tools must be array: %+v", msg)
+	}
+}
+
+func TestResourcesListResponseSchema(t *testing.T) {
+	msg := exchangeLine(t, `{"jsonrpc":"2.0","id":200,"method":"resources/list","params":{}}`)
+	assertBaseJSONRPCShape(t, msg, true)
+	res, ok := msg["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("resources/list result must be object: %+v", msg)
+	}
+	if _, ok := res["resources"].([]any); !ok {
+		t.Fatalf("resources/list result.resources must be array: %+v", msg)
+	}
+}
+
+func TestPromptsListResponseSchema(t *testing.T) {
+	msg := exchangeLine(t, `{"jsonrpc":"2.0","id":201,"method":"prompts/list","params":{}}`)
+	assertBaseJSONRPCShape(t, msg, true)
+	res, ok := msg["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("prompts/list result must be object: %+v", msg)
+	}
+	if _, ok := res["prompts"].([]any); !ok {
+		t.Fatalf("prompts/list result.prompts must be array: %+v", msg)
 	}
 }
 

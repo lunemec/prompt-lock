@@ -32,7 +32,7 @@ func testServer(now time.Time) *server {
 		authStore:   aStore,
 		now:         func() time.Time { return now },
 		intents:     map[string][]string{"run_tests": {"github_token"}},
-		execPolicy:  config.ExecutionPolicy{AllowlistPrefixes: []string{"bash"}, DenylistSubstrings: []string{"printenv"}, MaxOutputBytes: 1024, DefaultTimeoutSec: 30, MaxTimeoutSec: 60},
+		execPolicy:  config.ExecutionPolicy{ExactMatchExecutables: []string{"bash"}, DenylistSubstrings: []string{"printenv"}, MaxOutputBytes: 1024, DefaultTimeoutSec: 30, MaxTimeoutSec: 60},
 	}
 }
 
@@ -53,6 +53,17 @@ func TestAgentEndpointRejectsOperatorToken(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer op")
 	w := httptest.NewRecorder()
 	s.handleResolveIntent(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestCancelEndpointRejectsOperatorToken(t *testing.T) {
+	s := testServer(time.Now().UTC())
+	req := httptest.NewRequest(http.MethodPost, "/v1/leases/cancel?request_id=r1", bytes.NewBufferString(`{"reason":"cancel"}`))
+	req.Header.Set("Authorization", "Bearer op")
+	w := httptest.NewRecorder()
+	s.handleCancel(w, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", w.Code)
 	}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -31,7 +30,10 @@ func (s *server) handleDeny(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req denyReq
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := decodeOptionalJSONBody(r, &req); err != nil {
+		writeMappedError(w, ErrBadRequest, err.Error())
+		return
+	}
 	denied, err := s.svc.DenyRequest(requestID, req.Reason)
 	if err != nil {
 		kind, msg := stateStoreMutationError(err)

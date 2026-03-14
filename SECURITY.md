@@ -32,5 +32,5 @@ Include:
 
 ## Scope notes
 
-PromptLock is currently experimental and pre-1.0, with active production-readiness hardening underway. Current scope includes non-production defaults and in-memory stores for some components.
+PromptLock is currently pre-1.0. Hardened deployments are the supported path for real-world use, while dev/demo defaults remain available for local testing and examples.
 Please include deployment profile details (`security_profile`, transport mode, auth settings) in reports.

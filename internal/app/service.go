@@ -14,6 +14,7 @@ type Clock func() time.Time
 
 type Service struct {
 	Policy         domain.Policy
+	RequestPolicy  RequestPolicy
 	Requests       ports.RequestStore
 	Leases         ports.LeaseStore
 	Secrets        ports.SecretStore
@@ -31,10 +32,19 @@ func (s Service) now() time.Time {
 	return s.Now().UTC()
 }
 
+func (s Service) requestPolicy() RequestPolicy {
+	if s.RequestPolicy == (RequestPolicy{}) {
+		return DefaultRequestPolicy()
+	}
+	return s.RequestPolicy.Normalize()
+}
+
 func (s Service) RequestLease(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint, workdirFingerprint, envPath, envPathCanonical string) (domain.LeaseRequest, error) {
 	if err := s.Policy.ValidateRequest(ttl, secrets); err != nil {
 		return domain.LeaseRequest{}, err
 	}
+	envPath = strings.TrimSpace(envPath)
+	envPathCanonical = normalizeEnvPathCanonical(envPathCanonical)
 	req := domain.LeaseRequest{
 		ID:                 s.NewRequestID(),
 		AgentID:            agentID,
@@ -92,10 +102,22 @@ func (s Service) ApproveRequest(requestID string, ttlMinutes int) (domain.Lease,
 }
 
 func (s Service) AccessSecret(leaseToken, secretName, commandFingerprint, workdirFingerprint string) (string, error) {
-	lease, err := s.Leases.GetLease(leaseToken)
+	lease, err := s.getLeaseOwnedByAgent(leaseToken, "")
 	if err != nil {
 		return "", err
 	}
+	return s.accessSecretForLease(lease, secretName, commandFingerprint, workdirFingerprint)
+}
+
+func (s Service) AccessSecretByAgent(agentID, leaseToken, secretName, commandFingerprint, workdirFingerprint string) (string, error) {
+	lease, err := s.getLeaseOwnedByAgent(leaseToken, agentID)
+	if err != nil {
+		return "", err
+	}
+	return s.accessSecretForLease(lease, secretName, commandFingerprint, workdirFingerprint)
+}
+
+func (s Service) accessSecretForLease(lease domain.Lease, secretName, commandFingerprint, workdirFingerprint string) (string, error) {
 	if lease.IsExpired(s.now()) {
 		return "", errors.New("lease expired")
 	}

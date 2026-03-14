@@ -22,6 +22,9 @@ If unsure about security impact, explicitly escalate in output.
 - Provide Makefile commands for common contributor workflows.
 - **Default stack discipline:** keep implementation and automation in the project’s primary stack (Go for PromptLock). Avoid introducing additional runtime/toolchain dependencies (e.g., Python/Node scripts) unless absolutely necessary.
 - If an additional toolchain is truly required, document the rationale and get explicit maintainer approval before merging.
+- Repository Go and Docker base-image pins must stay aligned through `.toolchain.env`, with `make toolchain-guard` kept green in local validation and CI.
+- Configuration and API schema names must describe actual runtime semantics. If compatibility forces a legacy misnomer, keep the mismatch explicitly documented and track cleanup in `docs/plans/BACKLOG.md`.
+- Security and support claims must match enforced reality. Do not describe basename-only executable checks as provenance, and do not describe a hardened deployment path as supported unless validation gates exercise that path or a stricter equivalent.
 - Document architectural and requirement decisions in ADRs.
 - Maintain CHANGELOG.md using Keep-a-Changelog.
 - New changes must be under `[Unreleased]`.

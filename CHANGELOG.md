@@ -6,7 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- The supported OSS v1 deployment target is now explicitly local-only hardened operation with dual Unix sockets; non-local TCP TLS/mTLS remains in the repository as experimental/private transport work and is no longer part of the release story.
+- PromptLock public docs and planning state now consistently describe the project as a pre-1.0 OSS release candidate rather than a draft/experimental v1 claim.
+- GitHub Actions CI now stays Go/shell-native by using `make validate-final` plus `make leak-guard` instead of installing Python and running `bandit`.
+- Pull-request CI now uses explicit `actions/setup-go`, runs `make release-readiness-gate-core`, preserves `make leak-guard`, and publishes MCP conformance output so PR validation reflects the repository’s claimed release-readiness posture more credibly.
+- Go and Docker base-image pins are now centralized in `.toolchain.env`, validated by `make toolchain-guard`, and aligned across `go.mod`, GitHub Actions, and the Docker build/runtime images.
+- The README now leads with a Docker-first quickstart, a shorter local dev fallback, and direct “how to use it” steps instead of front-loading release-only workflows and repo inventory.
+- Operator approval flow now uses `promptlock watch` instead of `promptlock approve-queue`, with a minimal redraw-based terminal UI that keeps skipped requests suppressed until the queue membership changes.
+- Hardened local deployments now default to dual Unix sockets (`agent_unix_socket`, `operator_unix_socket`) instead of a single shared local socket, and the CLI auto-selects the correct socket by command role with no broker transport flags.
+- Execution-policy docs and examples now use `execution_policy.exact_match_executables` as the canonical schema name, describe `execution_policy.allowlist_prefixes` as a legacy alias only, and document broker-managed `command_search_paths` plus the exact trust and residual-limit model for host execution.
+- Planning and ADR docs now record the broker-managed executable-resolution decision and close the follow-up backlog items for schema cleanup, executable provenance hardening, and graceful compose teardown.
+
+### Fixed
+- Broker-side `/v1/leases/execute` and local CLI non-broker exec now stop inheriting the full ambient environment by default, passing only an explicit minimal baseline plus approved leased secrets into child processes.
+- Broker execution policy now requires exact executable identity matching instead of prefix matching, closing bypasses where binaries like `goevil` or `git-backdoor` previously matched `go` or `git`.
+- Authenticated agent identity is now bound to the validated session on lease creation, and agent-facing request/lease status, access, and execute paths now reject cross-agent ownership violations with `403` instead of allowing impersonation or object reuse across sessions.
+- Env-path request persistence and execute-time verification now normalize canonical paths consistently, preventing platform-specific `/var` vs `/private/var` mismatches from breaking approved env-path execution flows.
+- `promptlock-validate-security` now skips repo-local Go cache directories (`.gocache`, `.gomodcache`) so ordinary local build/test workflows do not trigger false-positive secret-scan failures.
+- Docker compose E2E smoke now opts into the dev profile explicitly, sets the required unauthenticated non-local TCP override for its demo topology, uses `sh` from the Alpine runtime image instead of assuming `bash`, and excludes repo-local caches from the Docker build context, keeping `make release-readiness-gate` runnable after local Go workflows.
+- Escaped the compose-smoke `$GITHUB_TOKEN` reference so `make e2e-compose` no longer emits a misleading host-env interpolation warning while still verifying broker-exec secret injection inside the container.
+- The real host/container walkthrough now includes the missing `jq` prerequisite, explicit agent-image `docker build`/`docker run` commands, Linux `host.docker.internal` guidance, and the lab `execution_policy.exact_match_executables` allowlist required for the published `echo` broker-exec example.
+- Hardened config loading now preserves explicit non-shell `execution_policy.exact_match_executables` additions and explicit `output_security_mode` overrides instead of unconditionally overwriting them, while still honoring the legacy `allowlist_prefixes` alias when the new key is absent.
+- Broker-host execution now resolves commands through broker-managed `execution_policy.command_search_paths` instead of the broker process ambient `PATH`, closing PATH-shadowing and same-basename alternate-binary selection gaps for broker-exec and host-docker mediation.
+- `promptlockd` now shuts down cleanly on normal compose teardown, so `make e2e-compose` and `make release-readiness-gate` no longer surface `promptlockd-e2e exited with code 2` as normal operator noise.
+
 ### Added
+- `promptlock auth docker-run` helper command to mint a short-lived session and launch `docker run` with PromptLock broker/session env already injected, reducing the copy-paste needed for containerized agent startup.
+- Role-separated local socket transport:
+  - broker config fields `agent_unix_socket` and `operator_unix_socket`
+  - CLI role-aware env defaults `PROMPTLOCK_AGENT_UNIX_SOCKET` and `PROMPTLOCK_OPERATOR_UNIX_SOCKET`
+  - local `auth login` / `auth docker-run` orchestration that bootstraps on operator socket and pairs/mints on agent socket
 - `promptlock-storage-fsync-check` Go command with JSON report mode (`--json`, `--dir-list`) and Make workflows:
   - `make storage-fsync-preflight MOUNT_DIR=...`
   - `make storage-fsync-report MOUNT_DIRS=/path/a,/path/b`
@@ -14,7 +44,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `make storage-fsync-validate FSYNC_REPORT=reports/storage-fsync-report.json`
   - `make storage-fsync-release-gate MOUNT_DIRS=/path/a,/path/b FSYNC_REPORT=reports/storage-fsync-report.json`
 - Storage fsync JSON report provenance fields (`schema_version`, `generated_at`, `generated_by`, `hostname`) with validation enforcement in `promptlock-storage-fsync-validate`.
+- Storage fsync report HMAC attestation fields (`signature.alg`, `signature.key_id`, `signature.value`) and shared deterministic payload signing/verification helpers in `internal/fsyncreport` (signature payload excludes the signature envelope itself).
+- Storage fsync validator key-rotation support with optional verification keyring (`PROMPTLOCK_STORAGE_FSYNC_HMAC_KEYRING`) and overlap max-age policy (`PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_OVERLAP_MAX_AGE`) for non-primary key IDs.
+- SOPS-managed key-material loader (`internal/sopsenv`) with broker startup preload support (`PROMPTLOCK_SOPS_ENV_FILE`) and fsync tooling integration (`--sops-env-file`, Make `SOPS_ENV_FILE`).
+- PromptLock CLI broker mTLS client transport options (`--broker-tls-ca-file`, `--broker-tls-client-cert-file`, `--broker-tls-client-key-file`, `--broker-tls-server-name`) with matching `PROMPTLOCK_BROKER_TLS_*` env wiring.
+- Distributed request/lease state backend adapter (`state_store.type=external`) with HTTP API wiring (`internal/adapters/externalstate`) and env overrides (`PROMPTLOCK_STATE_STORE_*`).
+- External-state happy-path integration coverage for broker lease lifecycle handlers (request, approve, status, by-request, pending, access) using `internal/adapters/externalstate`.
+- `make release-readiness-gate` workflow target (`validate-final` + readiness gate + fuzz + compose E2E smoke) for release-quality validation parity.
+- `make release-readiness-gate-core` workflow target for non-Docker environments (`validate-final` + readiness gate + fuzz), keeping `release-readiness-gate` as the strict Docker-inclusive release gate.
+- Tested env-override loader for broker startup (`applyEnvOverrides`) covering external state backend env vars and invalid timeout parsing.
 - External HTTP-backed secret source adapter (`secret_source.type=external`) with bearer-token env wiring and timeout controls.
+- MCP adapter now supports JSON-RPC `ping` for clients that perform explicit protocol liveness probes.
+- MCP adapter now supports JSON-RPC `shutdown` and `exit` lifecycle methods for improved client interoperability.
+- MCP adapter now accepts `initialized` / `notifications/initialized` lifecycle messages for stricter target-client compatibility without notification-response leaks.
+- MCP adapter now accepts `notifications/cancelled` as a notification-safe no-op (with request-form tolerance) for broader MCP client compatibility.
+- MCP adapter now supports `resources/list` and `prompts/list` (empty-list compatibility responses) while initialize negotiation advertises implemented namespaces (`protocolVersion`, `capabilities.tools`) for safer client interoperability.
+- MCP `execute_with_intent` tool schema now advertises strict JSON constraints (required fields, bounded command args, integer TTL, `additionalProperties=false`) to improve client UX and fail-fast validation.
+- MCP adapter now enforces in-flight cancellation semantics for `notifications/cancelled` by request id, aborting active `tools/call` flows (for example pending approval polls) instead of treating cancellation as a compatibility-only no-op.
+- MCP adapter now ignores `tools/call` notifications without request `id` and performs no broker calls for those frames, preventing untracked execution side effects.
+- Broker now exposes agent-session cancellation endpoint `POST /v1/leases/cancel?request_id=...` with ownership enforcement so MCP cancellation can best-effort clean up pending requests server-side.
+- MCP harness now verifies single-session lifecycle sequencing (`initialize`, `notifications/initialized`, `tools/list`, `tools/call`) to catch notification-ordering regressions.
 - Durable request/lease state persistence support via `state_store_file`.
 - Encrypted auth-store persistence support (`auth.store_encryption_key_env`, default `PROMPTLOCK_AUTH_STORE_KEY`) and ADR-0018 for production deployment guardrails.
 - Canonical CLI/endpoint/token contract matrix at `docs/operations/CLI-ENDPOINT-CONTRACT-MATRIX.md` with operator remediation mappings for common auth/endpoint failures.
@@ -52,9 +101,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `promptlock exec` prototype wrapper command for intent/secrets-driven execution.
 - Intent resolution endpoint and request status endpoint in Go broker.
 - Lease query by request endpoint to support external approval flow.
-- Pending requests endpoint for approval watcher.
-- `promptlock approve-queue` host-side watcher CLI for approving/denying queued requests.
-- Added explicit watcher subcommands: `approve-queue list|allow|deny`.
+- Pending requests endpoint for operator watch flows.
+- `promptlock watch` host-side watcher CLI for approving/denying queued requests.
+- Added explicit watch subcommands: `watch list|allow|deny`.
 - Added auth foundation: pairing bootstrap/grant/session/revoke endpoints and in-memory auth store.
 - Added auth config block for long-running container support (idle + absolute grant TTL).
 - Added initial endpoint authz enforcement (operator token + agent session token) when auth is enabled.
@@ -99,6 +148,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `security_profile=dev` now requires explicit startup opt-in (`PROMPTLOCK_ALLOW_DEV_PROFILE=1`) to reduce accidental insecure deployment.
 - Non-dev startup now fails fast unless `state_store_file` + `auth.store_file` are configured and `secret_source.type` is `env`, `file`, or `external`.
+- Non-dev startup now supports either local state persistence (`state_store.type=file` + `state_store_file`) or distributed external state backend (`state_store.type=external` with `https` URL + token env value), and request/lease handlers fail closed with `503` when state backend connectivity/auth fails.
+- Request/approve/deny/pending/lease-query/access/execute handler paths now consistently surface upstream state/secret backend outages as `503 Service Unavailable` (instead of mixed `400/403/500` responses), with regression coverage for each path.
 - Auth-store atomic persistence now writes through secure unique temp files instead of predictable `<store>.tmp`, preventing symlink clobbering and concurrent tmp-file collision races.
 - Persistence failures now fail closed: auth-store/request-lease write failures close a durability gate, emit explicit audit events, and force mutating auth/lease endpoints to return `503 Service Unavailable`.
 - Transport safety local-address classification now rejects non-IP hostnames that merely start with `127.` (for example `127.evil.example`) instead of treating them as loopback.
@@ -106,6 +157,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Atomic auth-store and request/lease state persistence now fsync parent directories after rename to harden crash-consistency of directory-entry updates.
 - Release/runbook fsync workflows now include explicit report-validation gates that fail closed when any mount result is not `ok=true`.
 - Tagged GitHub release workflow now runs `storage-fsync-release-gate` before packaging and uploads the fsync JSON report artifact for release evidence.
+- Tagged GitHub release workflow now exports optional fsync key-rotation env wiring (`PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_PREV`, `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEYRING`, `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_OVERLAP_MAX_AGE`) so overlap verification can run in CI for common previous-key rotations.
+- Storage fsync report generation/validation workflows now require HMAC key env wiring (`PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY`, `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_ID`) and fail closed when signatures are missing or invalid.
+- Storage fsync validation now supports multi-key verification during rotations, but remains fail closed when keyring entries are malformed, referenced key envs are missing/invalid, non-primary key overlaps are disabled, or overlap windows are exceeded.
+- Tagged release workflow now runs `make release-readiness-gate` before fsync report attestation and packaging.
+- Audit file sink now fsyncs every appended record, and broker startup now acquires fail-closed single-writer locks for configured persistence files (`state_store_file.lock`, `auth.store_file.lock`).
+- `make e2e-compose` now uses a compatibility wrapper that supports both `docker compose` plugin and legacy `docker-compose` binary environments.
+- Security baseline scanning now skips generated release artifact directories (`dist/`, `.goreleaser-dist/`) to avoid false-positive secret hits after `make release-package`.
+- Example/hardened operations configs now include `state_store` block guidance (`file` vs `external`) so external distributed state deployments are documented in canonical setup docs.
 - Project/release/security messaging now consistently describes PromptLock as experimental today with explicit production-readiness hardening as the target state.
 - Hardened real-e2e smoke now sets auth-store encryption key env so non-dev encrypted auth persistence guards remain active in CI.
 - Real E2E smoke harness now uses hardened-compatible transport defaults (`BROKER_BIND_HOST=0.0.0.0`), emits actionable startup diagnostics, and asserts deny-path audit evidence in its JSON report.
@@ -116,6 +175,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local-address detection for transport safety now recognizes loopback IPv4/IPv6 variants (for example `127.0.0.2`, `[::1]`) so local binds are not misclassified as non-local.
 - CLI HTTP error handling now preserves broker response body text alongside status to improve remediation fidelity (`request_id required`, `secret backend unavailable`, etc.).
 - MCP JSON-RPC error envelopes now include `id: null` for parse/batch errors, with expanded target-client conformance tests (string IDs and null params).
+- MCP `tools/call` now returns `-32602` for null/empty params and missing `name`, avoiding ambiguous unknown-tool responses on malformed request shapes.
+- MCP `tools/call` argument parsing now fails closed on non-string command elements and non-integer TTL values (for example `1.5`), preventing implicit coercion to unexpected values.
+- Agent request cancellation now fails closed with `403` when session identity does not own the target request id.
+- MCP cancellation cleanup now emits an explicit stderr warning when broker `POST /v1/leases/cancel` propagation fails, improving operator visibility for stale pending-request remediation.
 - Documentation structure now requires `docs/plans/ACTIVE-PLAN.md` as the canonical handoff, `docs/plans/BACKLOG.md` as the canonical open-task list, typed `docs/plans/` subdirectories for active material, and archived date-stamped plan history under `docs/plans/archive/`.
 - Operational docs now distinguish the CLI-first host-plus-container lab walkthrough from the hardened mTLS production baseline, modernize the config example around `secret_source`, and mark planning notes as non-canonical status documents.
 - ADR metadata is now normalized around explicit consequences, security implications, lowercase status values, and supersession fields.

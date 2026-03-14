@@ -1,13 +1,9 @@
 package main
 
 import (
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/json"
-	"encoding/pem"
-	"math/big"
+	"flag"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +11,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lunemec/promptlock/internal/adapters/audit"
+	"github.com/lunemec/promptlock/internal/core/ports"
 )
 
 func TestPostJSONAuthSendsBearerAndDecodes(t *testing.T) {
@@ -36,6 +35,31 @@ func TestPostJSONAuthSendsBearerAndDecodes(t *testing.T) {
 	if out["bootstrap_token"] != "boot_x" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
+}
+
+func captureCommandStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	origStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stdout: %v", err)
+	}
+	os.Stdout = w
+	t.Cleanup(func() {
+		os.Stdout = origStdout
+	})
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("close stdout reader: %v", err)
+	}
+	return string(out)
 }
 
 func TestAuthLoginOrchestratesBootstrapPairMint(t *testing.T) {
@@ -123,6 +147,39 @@ func TestAuthLoginOrchestratesBootstrapPairMint(t *testing.T) {
 	}
 	if calls[2].body["grant_id"] != grantID {
 		t.Fatalf("mint payload mismatch: %+v", calls[2].body)
+	}
+}
+
+func TestRunAuditVerifyAcceptsAppendAfterCheckpoint(t *testing.T) {
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	checkpointPath := filepath.Join(t.TempDir(), "audit.checkpoint")
+
+	sink, err := audit.NewFileSink(auditPath)
+	if err != nil {
+		t.Fatalf("new file sink: %v", err)
+	}
+	if err := sink.Write(ports.AuditEvent{Event: "e1", Timestamp: time.Now().UTC()}); err != nil {
+		t.Fatalf("write first audit event: %v", err)
+	}
+	firstHash, _, err := audit.VerifyFile(auditPath)
+	if err != nil {
+		t.Fatalf("verify initial audit file: %v", err)
+	}
+	if err := audit.WriteCheckpoint(checkpointPath, firstHash); err != nil {
+		t.Fatalf("write checkpoint: %v", err)
+	}
+	if err := sink.Write(ports.AuditEvent{Event: "e2", Timestamp: time.Now().UTC()}); err != nil {
+		t.Fatalf("write second audit event: %v", err)
+	}
+	if err := sink.Close(); err != nil {
+		t.Fatalf("close audit sink: %v", err)
+	}
+
+	out := captureCommandStdout(t, func() {
+		runAuditVerify([]string{"--file", auditPath, "--checkpoint", checkpointPath})
+	})
+	if !strings.Contains(out, "audit verify ok: records=2") {
+		t.Fatalf("expected audit verify success after append, got %q", out)
 	}
 }
 
@@ -277,100 +334,189 @@ func TestValidateExecCapabilityPreconditionsPlaintextPolicy(t *testing.T) {
 	}
 }
 
-func TestHTTPClientRejectsTLSOptionsWithUnixSocket(t *testing.T) {
-	orig := activeBrokerTLSOptions
-	t.Cleanup(func() { activeBrokerTLSOptions = orig })
-	activeBrokerTLSOptions = brokerTLSOptions{CAFile: "/tmp/ca.pem"}
-	_, err := httpClient("https://broker.example", "/tmp/promptlock.sock")
+func TestRegisterBrokerFlagsRejectsRemovedTLSFlag(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	registerBrokerFlags(fs)
+	err := fs.Parse([]string{"--broker-tls-ca-file", "/tmp/ca.pem"})
 	if err == nil {
-		t.Fatalf("expected unix-socket + tls options error")
+		t.Fatalf("expected removed broker TLS flag to be rejected")
 	}
-	if !strings.Contains(err.Error(), "not supported with --broker-unix-socket") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestHTTPClientRejectsTLSOptionsWithHTTPBrokerURL(t *testing.T) {
-	orig := activeBrokerTLSOptions
-	t.Cleanup(func() { activeBrokerTLSOptions = orig })
-	activeBrokerTLSOptions = brokerTLSOptions{CAFile: "/tmp/ca.pem"}
-	_, err := httpClient("http://127.0.0.1:8765", "")
-	if err == nil {
-		t.Fatalf("expected http broker + tls options error")
-	}
-	if !strings.Contains(err.Error(), "require an https broker URL") {
-		t.Fatalf("unexpected error: %v", err)
+	if !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("unexpected parse error: %v", err)
 	}
 }
 
-func TestBuildBrokerTLSConfigLoadsCAAndClientCertificate(t *testing.T) {
-	certPEM, keyPEM := generateSelfSignedCertPair(t)
-	caPath := filepath.Join(t.TempDir(), "ca.pem")
-	certPath := filepath.Join(t.TempDir(), "client.crt")
-	keyPath := filepath.Join(t.TempDir(), "client.key")
-	if err := os.WriteFile(caPath, certPEM, 0o600); err != nil {
-		t.Fatalf("write ca file: %v", err)
+func TestResolveBrokerSelectionPrefersRoleSpecificSocketDefaults(t *testing.T) {
+	socketsDir := t.TempDir()
+	operatorSocket := filepath.Join(socketsDir, "promptlock-operator.sock")
+	agentSocket := filepath.Join(socketsDir, "promptlock-agent.sock")
+	if err := os.WriteFile(operatorSocket, []byte(""), 0o600); err != nil {
+		t.Fatalf("write operator socket placeholder: %v", err)
 	}
-	if err := os.WriteFile(certPath, certPEM, 0o600); err != nil {
-		t.Fatalf("write client cert file: %v", err)
-	}
-	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
-		t.Fatalf("write client key file: %v", err)
+	if err := os.WriteFile(agentSocket, []byte(""), 0o600); err != nil {
+		t.Fatalf("write agent socket placeholder: %v", err)
 	}
 
-	cfg, err := buildBrokerTLSConfig(brokerTLSOptions{
-		CAFile:         caPath,
-		ClientCertFile: certPath,
-		ClientKeyFile:  keyPath,
-		ServerName:     "broker.example",
-	})
+	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", operatorSocket)
+	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", agentSocket)
+	t.Setenv("PROMPTLOCK_BROKER_URL", "")
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "")
+
+	operatorSelection, err := resolveBrokerSelection(brokerRoleOperator, brokerSelectionInput{})
 	if err != nil {
-		t.Fatalf("build tls config: %v", err)
+		t.Fatalf("resolve operator broker selection: %v", err)
 	}
-	if cfg.RootCAs == nil {
-		t.Fatalf("expected root CAs to be configured")
+	if operatorSelection.UnixSocket != operatorSocket {
+		t.Fatalf("operator unix socket = %q, want %q", operatorSelection.UnixSocket, operatorSocket)
 	}
-	if len(cfg.Certificates) != 1 {
-		t.Fatalf("expected 1 client certificate, got %d", len(cfg.Certificates))
+	if operatorSelection.BaseURL != defaultBrokerURL {
+		t.Fatalf("operator base url = %q, want default %q", operatorSelection.BaseURL, defaultBrokerURL)
 	}
-	if cfg.ServerName != "broker.example" {
-		t.Fatalf("expected server name broker.example, got %q", cfg.ServerName)
+
+	agentSelection, err := resolveBrokerSelection(brokerRoleAgent, brokerSelectionInput{})
+	if err != nil {
+		t.Fatalf("resolve agent broker selection: %v", err)
+	}
+	if agentSelection.UnixSocket != agentSocket {
+		t.Fatalf("agent unix socket = %q, want %q", agentSelection.UnixSocket, agentSocket)
+	}
+	if agentSelection.BaseURL != defaultBrokerURL {
+		t.Fatalf("agent base url = %q, want default %q", agentSelection.BaseURL, defaultBrokerURL)
 	}
 }
 
-func TestBuildBrokerTLSConfigRequiresClientKeyWhenCertProvided(t *testing.T) {
-	_, err := buildBrokerTLSConfig(brokerTLSOptions{ClientCertFile: "/tmp/client.crt"})
-	if err == nil {
-		t.Fatalf("expected missing client key error")
+func TestResolveBrokerSelectionUsesExplicitBrokerURLWhenDefaultSocketMissing(t *testing.T) {
+	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", filepath.Join(t.TempDir(), "missing.sock"))
+	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", filepath.Join(t.TempDir(), "missing.sock"))
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_BROKER_URL", "https://broker.example.internal")
+
+	selection, err := resolveBrokerSelection(brokerRoleOperator, brokerSelectionInput{})
+	if err != nil {
+		t.Fatalf("resolve operator broker selection: %v", err)
 	}
-	if !strings.Contains(err.Error(), "client cert requires") {
-		t.Fatalf("unexpected error: %v", err)
+	if selection.UnixSocket != "" {
+		t.Fatalf("expected missing default unix socket to fall back to broker URL, got %q", selection.UnixSocket)
+	}
+	if selection.BaseURL != "https://broker.example.internal" {
+		t.Fatalf("base url = %q, want https broker fallback", selection.BaseURL)
 	}
 }
 
-func generateSelfSignedCertPair(t *testing.T) ([]byte, []byte) {
-	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+func TestResolveBrokerSelectionExplicitCompatUnixSocketWins(t *testing.T) {
+	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "/tmp/compat.sock")
+	t.Setenv("PROMPTLOCK_BROKER_URL", "https://broker.example.internal")
+
+	selection, err := resolveBrokerSelection(brokerRoleOperator, brokerSelectionInput{})
 	if err != nil {
-		t.Fatalf("generate rsa key: %v", err)
+		t.Fatalf("resolve operator broker selection: %v", err)
 	}
-	now := time.Now().UTC()
-	tpl := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{
-			CommonName: "promptlock-test",
-		},
-		NotBefore:             now.Add(-time.Minute),
-		NotAfter:              now.Add(24 * time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
+	if selection.UnixSocket != "/tmp/compat.sock" {
+		t.Fatalf("compat unix socket = %q, want /tmp/compat.sock", selection.UnixSocket)
 	}
-	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
+}
+
+func TestResolveBrokerSelectionFailsClosedWhenRoleSocketMissingAndNoExplicitBroker(t *testing.T) {
+	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", filepath.Join(t.TempDir(), "missing.sock"))
+	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", filepath.Join(t.TempDir(), "missing.sock"))
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_BROKER_URL", "")
+
+	if _, err := resolveBrokerSelection(brokerRoleOperator, brokerSelectionInput{}); err == nil {
+		t.Fatalf("expected missing role socket to fail closed")
+	}
+}
+
+func TestResolveBrokerSelectionExplicitBrokerURLWinsOverLocalSocketDefaults(t *testing.T) {
+	socketsDir := t.TempDir()
+	operatorSocket := filepath.Join(socketsDir, "promptlock-operator.sock")
+	if err := os.WriteFile(operatorSocket, []byte(""), 0o600); err != nil {
+		t.Fatalf("write operator socket placeholder: %v", err)
+	}
+
+	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", operatorSocket)
+	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_BROKER_URL", "")
+
+	selection, err := resolveBrokerSelection(brokerRoleOperator, brokerSelectionInput{BaseURL: "https://broker.example.internal"})
 	if err != nil {
-		t.Fatalf("create certificate: %v", err)
+		t.Fatalf("resolve operator broker selection: %v", err)
 	}
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
-	return certPEM, keyPEM
+	if selection.UnixSocket != "" {
+		t.Fatalf("expected explicit broker URL to skip local unix socket selection, got %q", selection.UnixSocket)
+	}
+	if selection.BaseURL != "https://broker.example.internal" {
+		t.Fatalf("base url = %q, want explicit broker URL", selection.BaseURL)
+	}
+}
+
+func TestAuthLoginUsesOperatorSocketForBootstrapAndAgentSocketForPairMint(t *testing.T) {
+	operatorSocket := filepath.Join(t.TempDir(), "operator.sock")
+	agentSocket := filepath.Join(t.TempDir(), "agent.sock")
+	if err := os.WriteFile(operatorSocket, []byte(""), 0o600); err != nil {
+		t.Fatalf("write operator socket placeholder: %v", err)
+	}
+	if err := os.WriteFile(agentSocket, []byte(""), 0o600); err != nil {
+		t.Fatalf("write agent socket placeholder: %v", err)
+	}
+	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", operatorSocket)
+	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", agentSocket)
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_BROKER_URL", "")
+
+	type authCall struct {
+		baseURL    string
+		unixSocket string
+		path       string
+	}
+
+	var calls []authCall
+	origDoPostJSONAuth := doPostJSONAuth
+	t.Cleanup(func() { doPostJSONAuth = origDoPostJSONAuth })
+	doPostJSONAuth = func(baseURL, unixSocket, path, bearer string, in any, out any) error {
+		calls = append(calls, authCall{
+			baseURL:    baseURL,
+			unixSocket: unixSocket,
+			path:       path,
+		})
+		switch typed := out.(type) {
+		case *authBootstrapResult:
+			typed.BootstrapToken = "boot_1"
+			typed.ExpiresAt = time.Unix(1, 0)
+		case *authPairResult:
+			typed.GrantID = "grant_1"
+			typed.IdleExpiresAt = time.Unix(1, 0)
+			typed.AbsoluteExpiresAt = time.Unix(2, 0)
+		case *authMintResult:
+			typed.SessionToken = "sess_1"
+			typed.ExpiresAt = time.Unix(3, 0)
+		default:
+			t.Fatalf("unexpected output type %T", out)
+		}
+		return nil
+	}
+
+	out, err := authLogin("", "", "op_tok", "agent_1", "ctr_1")
+	if err != nil {
+		t.Fatalf("authLogin: %v", err)
+	}
+	if out.SessionToken != "sess_1" {
+		t.Fatalf("unexpected session token %q", out.SessionToken)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("call count = %d, want 3", len(calls))
+	}
+	if calls[0].path != "/v1/auth/bootstrap/create" || calls[0].unixSocket != operatorSocket {
+		t.Fatalf("bootstrap call = %+v, want operator socket %q", calls[0], operatorSocket)
+	}
+	if calls[1].path != "/v1/auth/pair/complete" || calls[1].unixSocket != agentSocket {
+		t.Fatalf("pair call = %+v, want agent socket %q", calls[1], agentSocket)
+	}
+	if calls[2].path != "/v1/auth/session/mint" || calls[2].unixSocket != agentSocket {
+		t.Fatalf("mint call = %+v, want agent socket %q", calls[2], agentSocket)
+	}
 }

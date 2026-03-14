@@ -85,6 +85,82 @@ func TestValidateDeploymentMode(t *testing.T) {
 	if err := validateDeploymentMode(hardenedCfg, ""); err == nil {
 		t.Fatalf("expected in_memory secret source in non-dev to fail")
 	}
+
+	externalCfg := config.Config{
+		SecurityProfile: "hardened",
+		StateStore: config.StateStoreConfig{
+			Type:                 "external",
+			ExternalURL:          "https://state.example.internal",
+			ExternalAuthTokenEnv: "PROMPTLOCK_EXTERNAL_STATE_TOKEN",
+		},
+		SecretSource: config.SecretSourceConfig{
+			Type: "env",
+		},
+		Auth: config.AuthConfig{
+			EnableAuth:            true,
+			StoreFile:             "/tmp/auth-store.json",
+			StoreEncryptionKeyEnv: "PROMPTLOCK_AUTH_STORE_KEY",
+		},
+	}
+	t.Setenv("PROMPTLOCK_AUTH_STORE_KEY", "0123456789abcdef")
+	t.Setenv("PROMPTLOCK_EXTERNAL_STATE_TOKEN", "state-token")
+	if err := validateDeploymentMode(externalCfg, ""); err != nil {
+		t.Fatalf("expected hardened external state backend to pass: %v", err)
+	}
+
+	t.Setenv("PROMPTLOCK_EXTERNAL_STATE_TOKEN", "")
+	if err := validateDeploymentMode(externalCfg, ""); err == nil {
+		t.Fatalf("expected external state backend without token env value to fail")
+	}
+	t.Setenv("PROMPTLOCK_EXTERNAL_STATE_TOKEN", "state-token")
+
+	externalCfg.StateStore.ExternalURL = "http://state.example.internal"
+	if err := validateDeploymentMode(externalCfg, ""); err == nil {
+		t.Fatalf("expected non-https external state backend in non-dev profile to fail")
+	}
+
+	externalCfg.StateStore.ExternalURL = "https://state.example.internal"
+	externalCfg.StateStore.ExternalAuthTokenEnv = ""
+	if err := validateDeploymentMode(externalCfg, ""); err == nil {
+		t.Fatalf("expected missing external auth token env name to fail")
+	}
+
+	externalSecretCfg := config.Config{
+		SecurityProfile: "hardened",
+		StateStoreFile:  "/tmp/state-store.json",
+		SecretSource: config.SecretSourceConfig{
+			Type:                 "external",
+			ExternalURL:          "https://secrets.example.internal",
+			ExternalAuthTokenEnv: "PROMPTLOCK_EXTERNAL_SECRET_TOKEN",
+		},
+		Auth: config.AuthConfig{
+			EnableAuth:            true,
+			StoreFile:             "/tmp/auth-store.json",
+			StoreEncryptionKeyEnv: "PROMPTLOCK_AUTH_STORE_KEY",
+		},
+	}
+	t.Setenv("PROMPTLOCK_AUTH_STORE_KEY", "0123456789abcdef")
+	t.Setenv("PROMPTLOCK_EXTERNAL_SECRET_TOKEN", "secret-token")
+	if err := validateDeploymentMode(externalSecretCfg, ""); err != nil {
+		t.Fatalf("expected hardened external secret backend to pass: %v", err)
+	}
+
+	t.Setenv("PROMPTLOCK_EXTERNAL_SECRET_TOKEN", "")
+	if err := validateDeploymentMode(externalSecretCfg, ""); err == nil {
+		t.Fatalf("expected external secret backend without token env value to fail")
+	}
+	t.Setenv("PROMPTLOCK_EXTERNAL_SECRET_TOKEN", "secret-token")
+
+	externalSecretCfg.SecretSource.ExternalURL = "http://secrets.example.internal"
+	if err := validateDeploymentMode(externalSecretCfg, ""); err == nil {
+		t.Fatalf("expected non-https external secret backend in non-dev profile to fail")
+	}
+
+	externalSecretCfg.SecretSource.ExternalURL = "https://secrets.example.internal"
+	externalSecretCfg.SecretSource.ExternalAuthTokenEnv = ""
+	if err := validateDeploymentMode(externalSecretCfg, ""); err == nil {
+		t.Fatalf("expected missing external secret auth token env name to fail")
+	}
 }
 
 func TestResolveAuthStoreEncryptionKey(t *testing.T) {
@@ -110,5 +186,37 @@ func TestResolveAuthStoreEncryptionKey(t *testing.T) {
 	}
 	if len(key) == 0 {
 		t.Fatalf("expected non-empty key bytes")
+	}
+}
+
+func TestValidateStateStoreSafety(t *testing.T) {
+	cfg := config.Config{}
+	if err := validateStateStoreSafety(cfg); err != nil {
+		t.Fatalf("default state store safety should pass: %v", err)
+	}
+
+	cfg.StateStore.Type = "external"
+	if err := validateStateStoreSafety(cfg); err == nil {
+		t.Fatalf("expected missing external_url to fail")
+	}
+
+	cfg.StateStore.ExternalURL = "https://state.example.internal"
+	if err := validateStateStoreSafety(cfg); err == nil {
+		t.Fatalf("expected missing external_auth_token_env to fail")
+	}
+
+	cfg.StateStore.ExternalAuthTokenEnv = "PROMPTLOCK_EXTERNAL_STATE_TOKEN"
+	if err := validateStateStoreSafety(cfg); err != nil {
+		t.Fatalf("expected valid external state store config to pass: %v", err)
+	}
+
+	cfg.StateStore.ExternalURL = "://bad-url"
+	if err := validateStateStoreSafety(cfg); err == nil {
+		t.Fatalf("expected invalid URL to fail")
+	}
+
+	cfg.StateStore.Type = "postgres"
+	if err := validateStateStoreSafety(cfg); err == nil {
+		t.Fatalf("expected unsupported type to fail")
 	}
 }

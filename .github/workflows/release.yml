@@ -12,15 +12,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Load toolchain versions
+        run: |
+          while IFS= read -r line; do
+            case "$line" in
+              ''|\#*) continue ;;
+              *) echo "$line" >> "$GITHUB_ENV" ;;
+            esac
+          done < .toolchain.env
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Go version
+        run: go version
 
       - name: Validate
+        env:
+          PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY: ${{ secrets.PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY }}
+          PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_PREV: ${{ secrets.PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_PREV }}
+          PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_ID: ${{ vars.PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_ID }}
+          PROMPTLOCK_STORAGE_FSYNC_HMAC_KEYRING: ${{ vars.PROMPTLOCK_STORAGE_FSYNC_HMAC_KEYRING }}
+          PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_OVERLAP_MAX_AGE: ${{ vars.PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_OVERLAP_MAX_AGE }}
+          PROMPTLOCK_SOPS_ENV_FILE: ${{ vars.PROMPTLOCK_SOPS_ENV_FILE }}
         run: |
-          make validate-final
-          make production-readiness-gate
+          make release-readiness-gate
           STATE_DIR="${RUNNER_TEMP}/promptlock-release-state"
           AUDIT_DIR="${RUNNER_TEMP}/promptlock-release-audit"
           make storage-fsync-release-gate MOUNT_DIRS="${STATE_DIR},${AUDIT_DIR}" FSYNC_REPORT=reports/storage-fsync-report-release-ci.json

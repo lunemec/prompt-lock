@@ -9,12 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/lunemec/promptlock/internal/fsyncreport"
+	"github.com/lunemec/promptlock/internal/sopsenv"
 )
 
-const (
-	reportSchemaVersion = "v1"
-	reportGeneratedBy   = "promptlock-storage-fsync-check"
-)
+var loadSOPSEnvFile = sopsenv.LoadFromFile
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -24,13 +24,19 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("promptlock-storage-fsync-check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		dirs    stringListFlag
-		dirList string
-		jsonOut bool
+		dirs         stringListFlag
+		dirList      string
+		jsonOut      bool
+		sopsEnvFile  string
+		hmacKeyEnv   string
+		hmacKeyIDEnv string
 	)
 	fs.Var(&dirs, "dir", "target mount directory to verify (repeatable)")
 	fs.StringVar(&dirList, "dir-list", "", "comma-separated mount directories to verify")
 	fs.BoolVar(&jsonOut, "json", false, "emit JSON report for one or more directories")
+	fs.StringVar(&sopsEnvFile, "sops-env-file", "", "optional path to SOPS-encrypted env/json file for key material (falls back to PROMPTLOCK_SOPS_ENV_FILE)")
+	fs.StringVar(&hmacKeyEnv, "hmac-key-env", fsyncreport.DefaultHMACKeyEnv, "environment variable name containing the report HMAC key")
+	fs.StringVar(&hmacKeyIDEnv, "hmac-key-id-env", fsyncreport.DefaultHMACKeyIDEnv, "environment variable name containing the report HMAC key id")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -39,28 +45,44 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "Usage: promptlock-storage-fsync-check --dir /path/to/mount")
 		return 2
 	}
-	results := make([]checkResult, 0, len(targetDirs))
+	results := make([]fsyncreport.Result, 0, len(targetDirs))
 	allOK := true
 	for _, dir := range targetDirs {
 		if err := checkMountFSync(dir); err != nil {
 			allOK = false
-			results = append(results, checkResult{Dir: dir, OK: false, Error: err.Error()})
+			results = append(results, fsyncreport.Result{Dir: dir, OK: false, Error: err.Error()})
 			continue
 		}
-		results = append(results, checkResult{Dir: dir, OK: true})
+		results = append(results, fsyncreport.Result{Dir: dir, OK: true})
 	}
 	if jsonOut {
+		if err := loadSOPSEnvForRun(sopsEnvFile, []string{
+			resolveEnvName(hmacKeyEnv, fsyncreport.DefaultHMACKeyEnv),
+			resolveEnvName(hmacKeyIDEnv, fsyncreport.DefaultHMACKeyIDEnv),
+		}); err != nil {
+			fmt.Fprintf(stderr, "ERROR: %v\n", err)
+			return 2
+		}
+		keyMaterial, err := fsyncreport.ResolveKeyMaterialFromEnv(hmacKeyEnv, hmacKeyIDEnv)
+		if err != nil {
+			fmt.Fprintf(stderr, "ERROR: %v\n", err)
+			return 2
+		}
 		hostname, err := os.Hostname()
 		if err != nil || strings.TrimSpace(hostname) == "" {
 			hostname = "unknown-host"
 		}
-		report := checkReport{
-			SchemaVersion: reportSchemaVersion,
+		report := fsyncreport.Report{
+			SchemaVersion: fsyncreport.SchemaVersion,
 			GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
-			GeneratedBy:   reportGeneratedBy,
+			GeneratedBy:   fsyncreport.GeneratedBy,
 			Hostname:      hostname,
 			OK:            allOK,
 			Results:       results,
+		}
+		if err := fsyncreport.SignReport(&report, keyMaterial); err != nil {
+			fmt.Fprintf(stderr, "ERROR: sign json report: %v\n", err)
+			return 1
 		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -84,6 +106,24 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 0
 	}
 	return 1
+}
+
+func resolveEnvName(raw string, fallback string) string {
+	if v := strings.TrimSpace(raw); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func resolveSOPSEnvFilePath(flagPath string) string {
+	if v := strings.TrimSpace(flagPath); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv(sopsenv.DefaultEnvFileEnv))
+}
+
+func loadSOPSEnvForRun(flagPath string, requiredKeys []string) error {
+	return loadSOPSEnvFile(resolveSOPSEnvFilePath(flagPath), requiredKeys)
 }
 
 func checkMountFSync(dir string) error {
@@ -170,19 +210,4 @@ func collectDirs(flagDirs []string, dirList string) []string {
 		}
 	}
 	return out
-}
-
-type checkResult struct {
-	Dir   string `json:"dir"`
-	OK    bool   `json:"ok"`
-	Error string `json:"error,omitempty"`
-}
-
-type checkReport struct {
-	SchemaVersion string        `json:"schema_version"`
-	GeneratedAt   string        `json:"generated_at"`
-	GeneratedBy   string        `json:"generated_by"`
-	Hostname      string        `json:"hostname"`
-	OK            bool          `json:"ok"`
-	Results       []checkResult `json:"results"`
 }

@@ -22,7 +22,7 @@ func (s Service) RequestLeaseWithPolicy(agentID, taskID, reason string, ttl int,
 		return RequestLeaseResult{}, err
 	}
 
-	policy := DefaultRequestPolicy()
+	policy := s.requestPolicy()
 	input := RequestPolicyInput{
 		AgentID:            agentID,
 		Secrets:            secrets,

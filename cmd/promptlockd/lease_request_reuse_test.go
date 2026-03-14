@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -77,5 +78,54 @@ func TestHandleRequestReturnsReusedLeaseWithoutPersistingState(t *testing.T) {
 	}
 	if len(pending) != 0 {
 		t.Fatalf("expected no new pending requests, got %d", len(pending))
+	}
+}
+
+func TestHandleRequestHonorsDisabledActiveLeaseReuse(t *testing.T) {
+	now := time.Date(2026, 3, 11, 0, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.SaveLease(domain.Lease{
+		Token:              "lease-existing",
+		RequestID:          "req-existing",
+		AgentID:            "agent-1",
+		TaskID:             "task-1",
+		Secrets:            []string{"github_token", "npm_token"},
+		CommandFingerprint: "fp-1",
+		WorkdirFingerprint: "wd-1",
+		ExpiresAt:          now.Add(10 * time.Minute),
+	})
+
+	s := &server{
+		svc: app.Service{
+			Policy:        domain.DefaultPolicy(),
+			RequestPolicy: app.RequestPolicy{IdenticalRequestCooldown: 60 * time.Second, MaxPendingPerAgent: 2, EnableActiveLeaseReuse: false},
+			Requests:      store,
+			Leases:        store,
+			Secrets:       store,
+			Audit:         unavailableTestAudit{},
+			Now:           func() time.Time { return now },
+			NewRequestID:  func() string { return "req-new" },
+			NewLeaseTok:   func() string { return "lease-new" },
+		},
+		authEnabled:         false,
+		authCfg:             config.AuthConfig{EnableAuth: false},
+		stateStoreFile:      filepath.Join(t.TempDir(), "state-store.json"),
+		stateStorePersister: store,
+		now:                 func() time.Time { return now },
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/leases/request", bytes.NewBufferString(`{"agent_id":"agent-1","task_id":"task-2","reason":"repeat","ttl_minutes":5,"secrets":["npm_token"," github_token "],"command_fingerprint":"fp-1","workdir_fingerprint":"wd-1"}`))
+	w := httptest.NewRecorder()
+	s.handleRequest(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for new request, got %d body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if strings.Contains(body, `"status":"reused"`) {
+		t.Fatalf("expected disabled active lease reuse to avoid reused response, got %s", body)
+	}
+	if !strings.Contains(body, `"request_id":"req-new"`) {
+		t.Fatalf("expected new request id in response, got %s", body)
 	}
 }
