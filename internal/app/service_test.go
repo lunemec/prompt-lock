@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,9 +20,28 @@ type scriptedAuditBuf struct {
 	failAt int
 	calls  int
 }
+type concurrentApproveProbeStore struct {
+	*memory.Store
+	waitForSecondGet time.Duration
+	firstGetStarted  chan struct{}
+	secondGetSeen    chan struct{}
+	firstGetOnce     sync.Once
+	secondGetOnce    sync.Once
+	mu               sync.Mutex
+	getCalls         int
+}
 
 type failingSecretStore struct{}
 type sensitiveErrorSecretStore struct{}
+type countingSecretStore struct {
+	calls int
+	value string
+}
+type countingEnvPathSecretStore struct {
+	resolveCalls int
+	resolved     map[string]string
+	canonical    string
+}
 
 type failingLeaseStore struct{ err error }
 type failingRequestLeaseStateCommitter struct{ err error }
@@ -35,6 +55,20 @@ type persistThenFailRequestLeaseStateCommitter struct {
 func (failingSecretStore) GetSecret(string) (string, error) { return "", errors.New("backend timeout") }
 func (sensitiveErrorSecretStore) GetSecret(string) (string, error) {
 	return "", errors.New("external backend returned status 500: raw-secret-value")
+}
+func (s *countingSecretStore) GetSecret(string) (string, error) {
+	s.calls++
+	return s.value, nil
+}
+func (s *countingEnvPathSecretStore) Canonicalize(string) (string, error) {
+	if s.canonical != "" {
+		return s.canonical, nil
+	}
+	return "/workspace/.env", nil
+}
+func (s *countingEnvPathSecretStore) Resolve(string, []string) (map[string]string, string, error) {
+	s.resolveCalls++
+	return s.resolved, s.canonical, nil
 }
 
 func (f failingLeaseStore) SaveLease(domain.Lease) error { return f.err }
@@ -73,6 +107,31 @@ func (a *scriptedAuditBuf) Write(e ports.AuditEvent) error {
 		return errors.New("audit unavailable")
 	}
 	return nil
+}
+
+func (s *concurrentApproveProbeStore) GetRequest(id string) (domain.LeaseRequest, error) {
+	req, err := s.Store.GetRequest(id)
+	if err != nil {
+		return domain.LeaseRequest{}, err
+	}
+
+	s.mu.Lock()
+	s.getCalls++
+	call := s.getCalls
+	s.mu.Unlock()
+
+	switch call {
+	case 1:
+		s.firstGetOnce.Do(func() { close(s.firstGetStarted) })
+		select {
+		case <-s.secondGetSeen:
+		case <-time.After(s.waitForSecondGet):
+		}
+	case 2:
+		s.secondGetOnce.Do(func() { close(s.secondGetSeen) })
+	}
+
+	return req, nil
 }
 
 func TestLeaseFlow(t *testing.T) {
@@ -299,6 +358,89 @@ func TestApproveRequestCarriesEnvPathMetadataOnPrimaryAudit(t *testing.T) {
 	}
 	if !foundPrimary {
 		t.Fatalf("expected request_approved audit event")
+	}
+}
+
+func TestApproveRequestSerializesConcurrentMutation(t *testing.T) {
+	now := time.Date(2026, 3, 15, 10, 0, 0, 0, time.UTC)
+	store := &concurrentApproveProbeStore{
+		Store:            memory.NewStore(),
+		waitForSecondGet: 100 * time.Millisecond,
+		firstGetStarted:  make(chan struct{}),
+		secondGetSeen:    make(chan struct{}),
+	}
+	if err := store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_concurrent_approve",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		Reason:             "test",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	}); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+
+	leaseTokens := make(chan string, 2)
+	leaseTokens <- "lease-concurrent-1"
+	leaseTokens <- "lease-concurrent-2"
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		MutationLock: &sync.Mutex{},
+		Requests:     store,
+		Leases:       store,
+		Secrets:      store,
+		Audit:        &auditBuf{},
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "unused-request-id" },
+		NewLeaseTok: func() string {
+			return <-leaseTokens
+		},
+	}
+
+	results := make(chan error, 2)
+	go func() {
+		_, err := svc.ApproveRequest("req_concurrent_approve", 5)
+		results <- err
+	}()
+
+	<-store.firstGetStarted
+	go func() {
+		_, err := svc.ApproveRequest("req_concurrent_approve", 5)
+		results <- err
+	}()
+
+	var successCount int
+	var notPendingCount int
+	for i := 0; i < 2; i++ {
+		err := <-results
+		if err == nil {
+			successCount++
+			continue
+		}
+		if err.Error() == "request is not pending" {
+			notPendingCount++
+			continue
+		}
+		t.Fatalf("unexpected concurrent approve error: %v", err)
+	}
+
+	if successCount != 1 {
+		t.Fatalf("expected exactly one successful approval, got %d", successCount)
+	}
+	if notPendingCount != 1 {
+		t.Fatalf("expected exactly one non-pending rejection, got %d", notPendingCount)
+	}
+
+	leases, err := store.ListLeases()
+	if err != nil {
+		t.Fatalf("list leases: %v", err)
+	}
+	if len(leases) != 1 {
+		t.Fatalf("expected exactly one lease after concurrent approvals, got %#v", leases)
 	}
 }
 
@@ -881,6 +1023,93 @@ func TestAccessSecretBackendFailureAuditDoesNotLeakRawBackendError(t *testing.T)
 	}
 	if ev.Metadata["reason"] == "" {
 		t.Fatalf("expected non-empty sanitized reason")
+	}
+}
+
+func TestAccessSecretDoesNotReadSecretWhenPreAccessAuditFails(t *testing.T) {
+	store := memory.NewStore()
+	secrets := &countingSecretStore{value: "x"}
+	audit := &scriptedAuditBuf{failAt: 1}
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      secrets,
+		Audit:        audit,
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_test" },
+		NewLeaseTok:  func() string { return "lease_test" },
+	}
+
+	_ = store.SaveRequest(domain.LeaseRequest{ID: "req_test", AgentID: "agent1", TaskID: "task1", TTLMinutes: 5, Secrets: []string{"github_token"}, CommandFingerprint: "fp1", WorkdirFingerprint: "wd1", Status: domain.RequestApproved, CreatedAt: now})
+	_ = store.SaveLease(domain.Lease{Token: "lease_test", RequestID: "req_test", AgentID: "agent1", TaskID: "task1", Secrets: []string{"github_token"}, CommandFingerprint: "fp1", WorkdirFingerprint: "wd1", ExpiresAt: now.Add(5 * time.Minute)})
+
+	_, err := svc.AccessSecret("lease_test", "github_token", "fp1", "wd1")
+	if !errors.Is(err, ErrAuditUnavailable) {
+		t.Fatalf("expected audit failure before secret read, got %v", err)
+	}
+	if secrets.calls != 0 {
+		t.Fatalf("expected secret backend read to stay blocked, got %d calls", secrets.calls)
+	}
+	if len(audit.events) != 1 || audit.events[0].Event != AuditEventSecretAccessStarted {
+		t.Fatalf("expected only %s before failure, got %+v", AuditEventSecretAccessStarted, audit.events)
+	}
+}
+
+func TestResolveExecutionSecretsDoesNotReadEnvPathWhenPreAccessAuditFails(t *testing.T) {
+	store := memory.NewStore()
+	envStore := &countingEnvPathSecretStore{
+		resolved:  map[string]string{"github_token": "dotenv-value"},
+		canonical: "/workspace/.env",
+	}
+	audit := &scriptedAuditBuf{failAt: 1}
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	svc := Service{
+		Policy:         domain.DefaultPolicy(),
+		Requests:       store,
+		Leases:         store,
+		Secrets:        &countingSecretStore{value: "primary"},
+		EnvPathSecrets: envStore,
+		Audit:          audit,
+		Now:            func() time.Time { return now },
+		NewRequestID:   func() string { return "req_test" },
+		NewLeaseTok:    func() string { return "lease_test" },
+	}
+
+	_ = store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_test",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		EnvPath:            "./.env",
+		EnvPathCanonical:   "/workspace/.env",
+		Status:             domain.RequestApproved,
+		CreatedAt:          now,
+	})
+	_ = store.SaveLease(domain.Lease{
+		Token:              "lease_test",
+		RequestID:          "req_test",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		ExpiresAt:          now.Add(5 * time.Minute),
+	})
+
+	_, err := svc.ResolveExecutionSecrets("lease_test", []string{"github_token"}, "fp1", "wd1")
+	if !errors.Is(err, ErrAuditUnavailable) {
+		t.Fatalf("expected audit failure before env-path read, got %v", err)
+	}
+	if envStore.resolveCalls != 0 {
+		t.Fatalf("expected env-path secret read to stay blocked, got %d calls", envStore.resolveCalls)
+	}
+	if len(audit.events) != 1 || audit.events[0].Event != AuditEventSecretAccessStarted {
+		t.Fatalf("expected only %s before failure, got %+v", AuditEventSecretAccessStarted, audit.events)
 	}
 }
 

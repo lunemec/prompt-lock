@@ -7,11 +7,16 @@ import (
 	"github.com/lunemec/promptlock/internal/core/ports"
 )
 
-func (s Service) DenyRequest(requestID string, reason string) (domain.LeaseRequest, error) {
+func (s *Service) DenyRequest(requestID string, reason string) (domain.LeaseRequest, error) {
 	return s.DenyRequestWithActor(requestID, reason, "", "")
 }
 
-func (s Service) DenyRequestWithActor(requestID string, reason string, actorType, actorID string) (domain.LeaseRequest, error) {
+func (s *Service) DenyRequestWithActor(requestID string, reason string, actorType, actorID string) (domain.LeaseRequest, error) {
+	defer s.lockMutation()()
+	return s.denyRequestWithActorUnlocked(requestID, reason, actorType, actorID)
+}
+
+func (s *Service) denyRequestWithActorUnlocked(requestID string, reason string, actorType, actorID string) (domain.LeaseRequest, error) {
 	req, err := s.Requests.GetRequest(requestID)
 	if err != nil {
 		return domain.LeaseRequest{}, err

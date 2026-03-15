@@ -7,7 +7,12 @@ import (
 	"github.com/lunemec/promptlock/internal/core/ports"
 )
 
-func (s Service) CancelRequestByAgent(requestID, agentID, reason string) (domain.LeaseRequest, error) {
+func (s *Service) CancelRequestByAgent(requestID, agentID, reason string) (domain.LeaseRequest, error) {
+	defer s.lockMutation()()
+	return s.cancelRequestByAgentUnlocked(requestID, agentID, reason)
+}
+
+func (s *Service) cancelRequestByAgentUnlocked(requestID, agentID, reason string) (domain.LeaseRequest, error) {
 	req, err := s.Requests.GetRequest(requestID)
 	if err != nil {
 		return domain.LeaseRequest{}, err

@@ -182,8 +182,8 @@ func (s *server) handleAuthRevoke(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"status": "revoked"})
 }
 
-func (s *server) authLifecycleSvc() app.AuthLifecycle {
-	return app.AuthLifecycle{
+func (s *server) authLifecycleSvc() *app.AuthLifecycle {
+	return &app.AuthLifecycle{
 		Store: s.authStore,
 		Audit: s.svc.Audit,
 		Now:   s.now,
@@ -197,6 +197,7 @@ func (s *server) authLifecycleSvc() app.AuthLifecycle {
 		NewGrantID:        func() string { return mustSecureToken("grant_") },
 		NewSessionToken:   func() string { return mustSecureToken("sess_") },
 		Persist:           s.persistAuthStore,
+		MutationLock:      &s.authLifecycleMu,
 		AuditFailureHandler: func(err error) error {
 			return s.closeDurabilityGate("audit", err)
 		},

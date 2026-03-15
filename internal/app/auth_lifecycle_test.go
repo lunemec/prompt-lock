@@ -3,6 +3,8 @@ package app
 import (
 	"errors"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -90,6 +92,155 @@ func TestAuthLifecycleFlow(t *testing.T) {
 	}
 }
 
+func TestCreateBootstrapRollbackDoesNotClobberConcurrentBootstrap(t *testing.T) {
+	now := time.Date(2026, 3, 15, 11, 0, 0, 0, time.UTC)
+	store := auth.NewStore()
+	sharedLock := &sync.Mutex{}
+	failingPersistStarted := make(chan struct{})
+	releaseFailingPersist := make(chan struct{})
+	successPersisted := make(chan struct{})
+	var failingPersistOnce sync.Once
+	var successPersistOnce sync.Once
+	failingPersistCalls := 0
+
+	failingSvc := AuthLifecycle{
+		Store:        store,
+		MutationLock: sharedLock,
+		Now:          func() time.Time { return now },
+		Cfg: AuthLifecycleConfig{
+			BootstrapTokenTTLSeconds: 60,
+			GrantIdleTimeoutMinutes:  10,
+			GrantAbsoluteMaxMinutes:  120,
+			SessionTTLMinutes:        15,
+		},
+		NewBootstrapToken: func() string { return "boot_fail" },
+		NewGrantID:        func() string { return "grant_unused_fail" },
+		NewSessionToken:   func() string { return "sess_unused_fail" },
+		Persist: func() error {
+			failingPersistCalls++
+			if failingPersistCalls > 1 {
+				return nil
+			}
+			failingPersistOnce.Do(func() { close(failingPersistStarted) })
+			<-releaseFailingPersist
+			return errors.New("disk full")
+		},
+	}
+
+	successSvc := AuthLifecycle{
+		Store:        store,
+		MutationLock: sharedLock,
+		Now:          func() time.Time { return now },
+		Cfg: AuthLifecycleConfig{
+			BootstrapTokenTTLSeconds: 60,
+			GrantIdleTimeoutMinutes:  10,
+			GrantAbsoluteMaxMinutes:  120,
+			SessionTTLMinutes:        15,
+		},
+		NewBootstrapToken: func() string { return "boot_ok" },
+		NewGrantID:        func() string { return "grant_unused_ok" },
+		NewSessionToken:   func() string { return "sess_unused_ok" },
+		Persist: func() error {
+			successPersistOnce.Do(func() { close(successPersisted) })
+			return nil
+		},
+	}
+
+	failingErrCh := make(chan error, 1)
+	go func() {
+		_, err := failingSvc.CreateBootstrap("agent-fail", "container-fail", "operator", "token-op")
+		failingErrCh <- err
+	}()
+
+	<-failingPersistStarted
+
+	successErrCh := make(chan error, 1)
+	go func() {
+		_, err := successSvc.CreateBootstrap("agent-ok", "container-ok", "operator", "token-op")
+		successErrCh <- err
+	}()
+
+	select {
+	case <-successPersisted:
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseFailingPersist)
+
+	if err := <-failingErrCh; err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("expected failing bootstrap persist error, got %v", err)
+	}
+	if err := <-successErrCh; err != nil {
+		t.Fatalf("expected concurrent bootstrap to succeed, got %v", err)
+	}
+
+	snapshot := store.Snapshot()
+	if _, ok := snapshot.Bootstrap["boot_ok"]; !ok {
+		t.Fatalf("expected successful bootstrap to remain after rollback")
+	}
+	if _, ok := snapshot.Bootstrap["boot_fail"]; ok {
+		t.Fatalf("expected failed bootstrap to be removed during rollback")
+	}
+}
+
+func TestAuthLifecycleAuditMetadataHashesBearerCredentials(t *testing.T) {
+	now := time.Date(2026, 3, 9, 18, 0, 0, 0, time.UTC)
+	store := auth.NewStore()
+	audit := &authAuditBuf{}
+	svc := AuthLifecycle{
+		Store: store,
+		Audit: audit,
+		Now:   func() time.Time { return now },
+		Cfg: AuthLifecycleConfig{
+			BootstrapTokenTTLSeconds: 60,
+			GrantIdleTimeoutMinutes:  10,
+			GrantAbsoluteMaxMinutes:  120,
+			SessionTTLMinutes:        15,
+		},
+		NewBootstrapToken: func() string { return "boot_t1" },
+		NewGrantID:        func() string { return "grant_sensitive_value" },
+		NewSessionToken:   func() string { return "sess_sensitive_value" },
+		Persist:           func() error { return nil },
+	}
+
+	boot, err := svc.CreateBootstrap("a1", "c1", "operator", "token-op")
+	if err != nil {
+		t.Fatalf("create bootstrap: %v", err)
+	}
+	grant, err := svc.CompletePairing(boot.Token, "c1")
+	if err != nil {
+		t.Fatalf("complete pairing: %v", err)
+	}
+	session, err := svc.MintSession(grant.GrantID)
+	if err != nil {
+		t.Fatalf("mint session: %v", err)
+	}
+	if err := svc.Revoke(grant.GrantID, session.Token, "operator", "token-op"); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	pairCompleted := mustFindAuthAuditEvent(t, audit.events, "auth_pair_completed")
+	if got, want := pairCompleted.Metadata["grant_id"], hashedAuditCredentialRef(grant.GrantID); got != want {
+		t.Fatalf("auth_pair_completed grant_id = %q, want %q", got, want)
+	}
+	if got := pairCompleted.Metadata["container_id"]; got != "c1" {
+		t.Fatalf("auth_pair_completed container_id = %q, want c1", got)
+	}
+
+	sessionMinted := mustFindAuthAuditEvent(t, audit.events, "auth_session_minted")
+	if got, want := sessionMinted.Metadata["grant_id"], hashedAuditCredentialRef(grant.GrantID); got != want {
+		t.Fatalf("auth_session_minted grant_id = %q, want %q", got, want)
+	}
+
+	revoked := mustFindAuthAuditEvent(t, audit.events, "auth_revoked")
+	if got, want := revoked.Metadata["grant_id"], hashedAuditCredentialRef(grant.GrantID); got != want {
+		t.Fatalf("auth_revoked grant_id = %q, want %q", got, want)
+	}
+	if got, want := revoked.Metadata["session_token"], hashedAuditCredentialRef(session.Token); got != want {
+		t.Fatalf("auth_revoked session_token = %q, want %q", got, want)
+	}
+}
+
 func TestAuthLifecycleCreateBootstrapReturnsPersistError(t *testing.T) {
 	now := time.Date(2026, 3, 9, 18, 0, 0, 0, time.UTC)
 	store := auth.NewStore()
@@ -113,6 +264,17 @@ func TestAuthLifecycleCreateBootstrapReturnsPersistError(t *testing.T) {
 	if _, err := svc.CreateBootstrap("a1", "c1", "operator", "token-op"); err == nil {
 		t.Fatalf("expected persist error")
 	}
+}
+
+func mustFindAuthAuditEvent(t *testing.T, events []ports.AuditEvent, name string) ports.AuditEvent {
+	t.Helper()
+	for _, event := range events {
+		if event.Event == name {
+			return event
+		}
+	}
+	t.Fatalf("expected audit event %q", name)
+	return ports.AuditEvent{}
 }
 
 func TestAuthLifecyclePairMismatchIsAudited(t *testing.T) {

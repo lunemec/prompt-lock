@@ -22,6 +22,9 @@ func startAuthCleanupLoop(s *server) {
 }
 
 func runAuthCleanupPass(s *server) error {
+	s.authLifecycleMu.Lock()
+	defer s.authLifecycleMu.Unlock()
+
 	snapshot := s.authStore.Snapshot()
 	rb, rs, rg := s.authStore.CleanupExpired(s.now())
 	if rb+rs+rg == 0 {

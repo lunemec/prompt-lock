@@ -18,6 +18,7 @@ const (
 	AuditEventRequestReusedActiveLease   = "request_reused_active_lease"
 	AuditEventRequestThrottledCooldown   = "request_throttled_cooldown"
 	AuditEventRequestThrottledPendingCap = "request_throttled_pending_cap"
+	AuditEventSecretAccessStarted        = "secret_access_started"
 	AuditEventEnvPathConfirmed           = "env_path_confirmed"
 	AuditEventEnvPathRejected            = "env_path_rejected"
 )
@@ -134,6 +135,18 @@ func envPathRejectedEvent(now time.Time, agentID, taskID, requestID, envPathOrig
 		TaskID:    strings.TrimSpace(taskID),
 		RequestID: strings.TrimSpace(requestID),
 		Metadata:  metadata,
+	}
+}
+
+func secretAccessEvent(event string, now time.Time, lease domain.Lease, secretName string) ports.AuditEvent {
+	return ports.AuditEvent{
+		Event:      event,
+		Timestamp:  now,
+		AgentID:    lease.AgentID,
+		TaskID:     lease.TaskID,
+		RequestID:  lease.RequestID,
+		LeaseToken: lease.Token,
+		Secret:     secretName,
 	}
 }
 

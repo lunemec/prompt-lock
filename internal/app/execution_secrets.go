@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/lunemec/promptlock/internal/core/domain"
-	"github.com/lunemec/promptlock/internal/core/ports"
 )
 
 func (s Service) ResolveExecutionSecrets(leaseToken string, secretNames []string, commandFingerprint, workdirFingerprint string) (map[string]string, error) {
@@ -71,6 +70,11 @@ func (s Service) resolveEnvPathExecutionSecrets(request domain.LeaseRequest, lea
 		s.AuditEnvPathRejected(request.AgentID, request.TaskID, request.ID, request.EnvPath, request.EnvPathCanonical, "env_path_canonical_missing")
 		return nil, errors.New("env path canonical confirmation required")
 	}
+	for _, secretName := range requested {
+		if err := s.auditCritical(secretAccessEvent(AuditEventSecretAccessStarted, s.now(), lease, secretName)); err != nil {
+			return nil, err
+		}
+	}
 
 	resolved, resolvedCanonical, err := s.EnvPathSecrets.Resolve(request.EnvPath, requested)
 	if err != nil {
@@ -85,15 +89,7 @@ func (s Service) resolveEnvPathExecutionSecrets(request domain.LeaseRequest, lea
 
 	s.AuditEnvPathConfirmed(request.AgentID, request.TaskID, request.ID, request.EnvPath, resolvedCanonical)
 	for _, secretName := range requested {
-		if err := s.auditCritical(ports.AuditEvent{
-			Event:      "secret_access",
-			Timestamp:  s.now(),
-			AgentID:    lease.AgentID,
-			TaskID:     lease.TaskID,
-			RequestID:  lease.RequestID,
-			LeaseToken: lease.Token,
-			Secret:     secretName,
-		}); err != nil {
+		if err := s.auditCritical(secretAccessEvent("secret_access", s.now(), lease, secretName)); err != nil {
 			return nil, err
 		}
 	}

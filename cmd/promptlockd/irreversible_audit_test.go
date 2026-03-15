@@ -148,7 +148,7 @@ func TestHandleExecuteFailsBeforeRunningCommandWhenStartAuditFails(t *testing.T)
 	helperPath := filepath.Join(markerDir, "marker")
 	writeExecutableScript(t, helperPath, "printf ran > "+shellQuote(markerPath)+"\nprintf command-ok")
 
-	audit := &scriptedAudit{failAt: map[int]error{2: errors.New("audit disk offline")}}
+	audit := &scriptedAudit{failAt: map[int]error{3: errors.New("audit disk offline")}}
 	s := &server{
 		svc: app.Service{
 			Policy:       domain.DefaultPolicy(),
@@ -206,7 +206,7 @@ func TestHandleExecuteReturnsAuditWarningWhenCompletionAuditFailsAfterCommandRun
 	helperPath := filepath.Join(markerDir, "marker")
 	writeExecutableScript(t, helperPath, "printf ran > "+shellQuote(markerPath)+"\nprintf command-ok")
 
-	audit := &scriptedAudit{failAt: map[int]error{3: errors.New("audit disk offline")}}
+	audit := &scriptedAudit{failAt: map[int]error{4: errors.New("audit disk offline")}}
 	s := &server{
 		svc: app.Service{
 			Policy:       domain.DefaultPolicy(),

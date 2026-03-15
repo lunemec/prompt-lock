@@ -1,8 +1,11 @@
 package app
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lunemec/promptlock/internal/auth"
@@ -33,6 +36,7 @@ type AuthLifecycle struct {
 	Store               AuthStore
 	Audit               ports.AuditSink
 	AuditFailureHandler func(error) error
+	MutationLock        sync.Locker
 	Now                 Clock
 	Cfg                 AuthLifecycleConfig
 	NewBootstrapToken   func() string
@@ -55,7 +59,16 @@ func (a AuthLifecycle) persist() error {
 	return nil
 }
 
-func (a AuthLifecycle) CreateBootstrap(agentID, containerID, actorType, actorID string) (auth.BootstrapToken, error) {
+func (a *AuthLifecycle) lockMutation() func() {
+	if a == nil || a.MutationLock == nil {
+		return func() {}
+	}
+	a.MutationLock.Lock()
+	return a.MutationLock.Unlock
+}
+
+func (a *AuthLifecycle) CreateBootstrap(agentID, containerID, actorType, actorID string) (auth.BootstrapToken, error) {
+	defer a.lockMutation()()
 	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(containerID) == "" {
 		return auth.BootstrapToken{}, errors.New("agent_id and container_id are required")
 	}
@@ -80,7 +93,8 @@ func (a AuthLifecycle) CreateBootstrap(agentID, containerID, actorType, actorID 
 	return t, nil
 }
 
-func (a AuthLifecycle) CompletePairing(token, containerID string) (auth.PairingGrant, error) {
+func (a *AuthLifecycle) CompletePairing(token, containerID string) (auth.PairingGrant, error) {
+	defer a.lockMutation()()
 	if strings.TrimSpace(token) == "" || strings.TrimSpace(containerID) == "" {
 		return auth.PairingGrant{}, errors.New("token and container_id are required")
 	}
@@ -105,14 +119,15 @@ func (a AuthLifecycle) CompletePairing(token, containerID string) (auth.PairingG
 		a.Store.Restore(snapshot)
 		return auth.PairingGrant{}, wrapRollbackError(err, a.persist())
 	}
-	if err := a.auditCritical(ports.AuditEvent{Event: "auth_pair_completed", Timestamp: now, ActorType: "agent", ActorID: bt.AgentID, AgentID: bt.AgentID, Metadata: map[string]string{"container_id": containerID, "grant_id": g.GrantID}}); err != nil {
+	if err := a.auditCritical(ports.AuditEvent{Event: "auth_pair_completed", Timestamp: now, ActorType: "agent", ActorID: bt.AgentID, AgentID: bt.AgentID, Metadata: authAuditMetadata(map[string]string{"container_id": containerID, "grant_id": g.GrantID})}); err != nil {
 		a.Store.Restore(snapshot)
 		return auth.PairingGrant{}, wrapRollbackError(err, a.persist())
 	}
 	return g, nil
 }
 
-func (a AuthLifecycle) MintSession(grantID string) (auth.SessionToken, error) {
+func (a *AuthLifecycle) MintSession(grantID string) (auth.SessionToken, error) {
+	defer a.lockMutation()()
 	g, err := a.Store.GetGrant(grantID)
 	if err != nil {
 		return auth.SessionToken{}, err
@@ -137,14 +152,15 @@ func (a AuthLifecycle) MintSession(grantID string) (auth.SessionToken, error) {
 		a.Store.Restore(snapshot)
 		return auth.SessionToken{}, wrapRollbackError(err, a.persist())
 	}
-	if err := a.auditCritical(ports.AuditEvent{Event: "auth_session_minted", Timestamp: now, ActorType: "agent", ActorID: g.AgentID, AgentID: g.AgentID, Metadata: map[string]string{"grant_id": g.GrantID}}); err != nil {
+	if err := a.auditCritical(ports.AuditEvent{Event: "auth_session_minted", Timestamp: now, ActorType: "agent", ActorID: g.AgentID, AgentID: g.AgentID, Metadata: authAuditMetadata(map[string]string{"grant_id": g.GrantID})}); err != nil {
 		a.Store.Restore(snapshot)
 		return auth.SessionToken{}, wrapRollbackError(err, a.persist())
 	}
 	return st, nil
 }
 
-func (a AuthLifecycle) Revoke(grantID, sessionID, actorType, actorID string) error {
+func (a *AuthLifecycle) Revoke(grantID, sessionID, actorType, actorID string) error {
+	defer a.lockMutation()()
 	if strings.TrimSpace(grantID) == "" && strings.TrimSpace(sessionID) == "" {
 		return errors.New("grant_id or session_token is required")
 	}
@@ -165,7 +181,7 @@ func (a AuthLifecycle) Revoke(grantID, sessionID, actorType, actorID string) err
 		a.Store.Restore(snapshot)
 		return wrapRollbackError(err, a.persist())
 	}
-	if err := a.auditCritical(ports.AuditEvent{Event: "auth_revoked", Timestamp: a.now(), ActorType: actorType, ActorID: actorID, Metadata: map[string]string{"grant_id": grantID, "session_token": sessionID}}); err != nil {
+	if err := a.auditCritical(ports.AuditEvent{Event: "auth_revoked", Timestamp: a.now(), ActorType: actorType, ActorID: actorID, Metadata: authAuditMetadata(map[string]string{"grant_id": grantID, "session_token": sessionID})}); err != nil {
 		a.Store.Restore(snapshot)
 		return wrapRollbackError(err, a.persist())
 	}
@@ -185,4 +201,36 @@ func (a AuthLifecycle) auditCritical(event ports.AuditEvent) error {
 		return ErrAuditUnavailable
 	}
 	return nil
+}
+
+func authAuditMetadata(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		switch key {
+		case "bootstrap_token", "grant_id", "session_token":
+			out[key] = hashedAuditCredentialRef(trimmed)
+		default:
+			out[key] = trimmed
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func hashedAuditCredentialRef(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	full := hex.EncodeToString(sum[:])
+	if len(full) > 16 {
+		full = full[:16]
+	}
+	return "tokhash_" + full
 }

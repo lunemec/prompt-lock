@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Planning and ADR docs now record the broker-managed executable-resolution decision and close the follow-up backlog items for schema cleanup, executable provenance hardening, and graceful compose teardown.
 
 ### Fixed
+- Secret access now writes a critical `secret_access_started` audit gate before reading secret material from a backend or approved env-path source, so audit sink failure can no longer cause an unaudited secret read behind a `503`.
 - Request/lease mutations, auth lifecycle writes, and auth cleanup now re-persist the restored snapshot when persistence fails after writing durable state but before reporting success, preventing stale durable state after post-`rename` parent-directory `fsync` failures.
 - Multi-target auth revoke now restores the full auth snapshot if one target fails before persistence or audit, preventing partial revocation when a request supplies both `grant_id` and an invalid `session_token`.
 - Env-path approval/deny now records `env_path_original` and `env_path_canonical` on the primary `request_approved` / `request_denied` audit records, and supplemental `env_path_confirmed` / `env_path_rejected` writes are now best-effort so a broken secondary audit write cannot force a misleading rollback after the primary audited decision already succeeded.

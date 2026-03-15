@@ -130,13 +130,13 @@ Notes:
 - Lease must be unexpired.
 - Lease may access only listed secrets.
 - `ttl_minutes` is capped by broker policy.
-- Access is audited (agent, task, secret, timestamp).
+- Secret access is audit-gated before PromptLock reads secret material, and successful reads emit `secret_access` with agent/task/secret/timestamp context.
 
 ## Critical requirement: host-side audit trail
 This is a critical requirement for production use.
 
 - Audit records must be written on the host (outside agent workspace/container writable paths).
-- Required events: request created, approved, denied, secret accessed, lease expired/revoked.
+- Required events: request created, approved, denied, `secret_access_started`, `secret_access`, lease expired/revoked.
 - Records must include: timestamp, agent_id, task_id, requested secrets, decision actor, TTL, and outcome.
 - Audit storage should be host-owned and verifiable through the local hash chain.
 - Agent/container users must not be able to modify or delete historical audit logs.
@@ -156,7 +156,7 @@ To avoid excessive prompts:
 ## v1 scope choices
 - Explicit secret names only (no wildcard/group requests)
 - Leases are reusable until expiry
-- Every access under a lease must be audit-logged
+- Every access under a lease must be audit-gated before the broker reads secret material, and successful reads must still emit `secret_access`
 
 ## Error contract summary
 - `400` bad request: malformed JSON, missing required fields, invalid method for endpoint.

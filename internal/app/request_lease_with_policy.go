@@ -17,7 +17,8 @@ type leaseLister interface {
 	ListLeases() ([]domain.Lease, error)
 }
 
-func (s Service) RequestLeaseWithPolicy(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint, workdirFingerprint, envPath, envPathCanonical string) (RequestLeaseResult, error) {
+func (s *Service) RequestLeaseWithPolicy(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint, workdirFingerprint, envPath, envPathCanonical string) (RequestLeaseResult, error) {
+	defer s.lockMutation()()
 	if err := s.Policy.ValidateRequest(ttl, secrets); err != nil {
 		return RequestLeaseResult{}, err
 	}
@@ -62,7 +63,7 @@ func (s Service) RequestLeaseWithPolicy(agentID, taskID, reason string, ttl int,
 		return RequestLeaseResult{}, NewRequestThrottleError(RequestThrottleReasonCooldown, retryAfter)
 	}
 
-	created, err := s.RequestLease(agentID, taskID, reason, ttl, secrets, commandFingerprint, workdirFingerprint, envPath, envPathCanonical)
+	created, err := s.requestLeaseUnlocked(agentID, taskID, reason, ttl, secrets, commandFingerprint, workdirFingerprint, envPath, envPathCanonical)
 	if err != nil {
 		return RequestLeaseResult{}, err
 	}

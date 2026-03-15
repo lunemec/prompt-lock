@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lunemec/promptlock/internal/core/domain"
@@ -15,6 +16,7 @@ type Clock func() time.Time
 type Service struct {
 	Policy                     domain.Policy
 	RequestPolicy              RequestPolicy
+	MutationLock               sync.Locker
 	Requests                   ports.RequestStore
 	Leases                     ports.LeaseStore
 	RequestLeaseStateCommitter ports.RequestLeaseStateCommitter
@@ -41,14 +43,27 @@ func (s Service) requestPolicy() RequestPolicy {
 	return s.RequestPolicy.Normalize()
 }
 
-func (s Service) commitRequestLeaseState() error {
+func (s *Service) lockMutation() func() {
+	if s == nil || s.MutationLock == nil {
+		return func() {}
+	}
+	s.MutationLock.Lock()
+	return s.MutationLock.Unlock
+}
+
+func (s *Service) commitRequestLeaseState() error {
 	if s.RequestLeaseStateCommitter == nil {
 		return nil
 	}
 	return s.RequestLeaseStateCommitter.CommitRequestLeaseState()
 }
 
-func (s Service) RequestLease(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint, workdirFingerprint, envPath, envPathCanonical string) (domain.LeaseRequest, error) {
+func (s *Service) RequestLease(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint, workdirFingerprint, envPath, envPathCanonical string) (domain.LeaseRequest, error) {
+	defer s.lockMutation()()
+	return s.requestLeaseUnlocked(agentID, taskID, reason, ttl, secrets, commandFingerprint, workdirFingerprint, envPath, envPathCanonical)
+}
+
+func (s *Service) requestLeaseUnlocked(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint, workdirFingerprint, envPath, envPathCanonical string) (domain.LeaseRequest, error) {
 	if err := s.Policy.ValidateRequest(ttl, secrets); err != nil {
 		return domain.LeaseRequest{}, err
 	}
@@ -84,11 +99,16 @@ func (s Service) RequestLease(agentID, taskID, reason string, ttl int, secrets [
 	return req, nil
 }
 
-func (s Service) ApproveRequest(requestID string, ttlMinutes int) (domain.Lease, error) {
+func (s *Service) ApproveRequest(requestID string, ttlMinutes int) (domain.Lease, error) {
 	return s.ApproveRequestWithActor(requestID, ttlMinutes, "", "")
 }
 
-func (s Service) ApproveRequestWithActor(requestID string, ttlMinutes int, actorType, actorID string) (domain.Lease, error) {
+func (s *Service) ApproveRequestWithActor(requestID string, ttlMinutes int, actorType, actorID string) (domain.Lease, error) {
+	defer s.lockMutation()()
+	return s.approveRequestWithActorUnlocked(requestID, ttlMinutes, actorType, actorID)
+}
+
+func (s *Service) approveRequestWithActorUnlocked(requestID string, ttlMinutes int, actorType, actorID string) (domain.Lease, error) {
 	req, err := s.Requests.GetRequest(requestID)
 	if err != nil {
 		return domain.Lease{}, err
@@ -177,13 +197,16 @@ func (s Service) accessSecretForLease(lease domain.Lease, secretName, commandFin
 	if lease.WorkdirFingerprint != "" && lease.WorkdirFingerprint != workdirFingerprint {
 		return "", errors.New("workdir fingerprint mismatch")
 	}
+	if err := s.auditCritical(secretAccessEvent(AuditEventSecretAccessStarted, s.now(), lease, secretName)); err != nil {
+		return "", err
+	}
 	val, err := s.Secrets.GetSecret(secretName)
 	if err != nil {
 		reason := secretBackendAuditReason(err)
 		s.writeAuditEvent(ports.AuditEvent{Event: "secret_backend_error", Timestamp: s.now(), AgentID: lease.AgentID, TaskID: lease.TaskID, RequestID: lease.RequestID, LeaseToken: lease.Token, Secret: secretName, Metadata: map[string]string{"reason": reason}})
 		return "", ErrSecretBackendUnavailable
 	}
-	if err := s.auditCritical(ports.AuditEvent{Event: "secret_access", Timestamp: s.now(), AgentID: lease.AgentID, TaskID: lease.TaskID, RequestID: lease.RequestID, LeaseToken: lease.Token, Secret: secretName}); err != nil {
+	if err := s.auditCritical(secretAccessEvent("secret_access", s.now(), lease, secretName)); err != nil {
 		return "", err
 	}
 	return val, nil
