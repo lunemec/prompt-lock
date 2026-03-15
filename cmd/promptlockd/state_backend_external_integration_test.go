@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -177,5 +178,284 @@ func TestExternalStateBackendHappyPathFlow(t *testing.T) {
 
 	if seenAuth == 0 {
 		t.Fatalf("expected backend auth header to be used")
+	}
+}
+
+func TestExternalStateRequestCreateRollsBackWhenAuditFails(t *testing.T) {
+	t.Setenv("PROMPTLOCK_EXTERNAL_STATE_TOKEN", "state-token")
+
+	requests := map[string]domain.LeaseRequest{}
+	leases := map[string]domain.Lease{}
+	stateBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.Header.Get("Authorization"), "Bearer state-token"; got != want {
+			http.Error(w, "missing auth", http.StatusUnauthorized)
+			return
+		}
+
+		switch {
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/v1/state/requests/"):
+			var req domain.LeaseRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			requests[req.ID] = req
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/state/requests/"):
+			id := strings.TrimPrefix(r.URL.Path, "/v1/state/requests/")
+			delete(requests, id)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/state/leases/"):
+			token := strings.TrimPrefix(r.URL.Path, "/v1/state/leases/")
+			delete(leases, token)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	}))
+	defer stateBackend.Close()
+
+	store, err := externalstate.New(stateBackend.URL, "PROMPTLOCK_EXTERNAL_STATE_TOKEN", 5)
+	if err != nil {
+		t.Fatalf("new external state store: %v", err)
+	}
+
+	now := time.Now().UTC()
+	s := &server{
+		svc: app.Service{
+			Policy:       domain.DefaultPolicy(),
+			Requests:     store,
+			Leases:       store,
+			Secrets:      memory.NewStore(),
+			Audit:        failingAudit{},
+			Now:          func() time.Time { return now },
+			NewRequestID: func() string { return "req-ext-audit-rollback" },
+			NewLeaseTok:  func() string { return "lease-unused" },
+		},
+		authEnabled: false,
+		now:         func() time.Time { return now },
+	}
+
+	requestW := httptest.NewRecorder()
+	requestReq := httptest.NewRequest(http.MethodPost, "/v1/leases/request", bytes.NewBufferString(`{"agent_id":"agent-1","task_id":"task-1","reason":"r","ttl_minutes":5,"secrets":["github_token"],"command_fingerprint":"fp-1","workdir_fingerprint":"wd-1"}`))
+	s.handleRequest(requestW, requestReq)
+	if requestW.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 on audit failure, got %d body=%s", requestW.Code, requestW.Body.String())
+	}
+	if len(requests) != 0 {
+		t.Fatalf("expected external request rollback, got %#v", requests)
+	}
+	if len(leases) != 0 {
+		t.Fatalf("expected no external lease state, got %#v", leases)
+	}
+}
+
+func TestExternalStateApproveRollsBackWhenAuditFails(t *testing.T) {
+	t.Setenv("PROMPTLOCK_EXTERNAL_STATE_TOKEN", "state-token")
+
+	requests := map[string]domain.LeaseRequest{
+		"req-ext-approve-rollback": {
+			ID:                 "req-ext-approve-rollback",
+			AgentID:            "agent-1",
+			TaskID:             "task-1",
+			Reason:             "r",
+			TTLMinutes:         5,
+			Secrets:            []string{"github_token"},
+			CommandFingerprint: "fp-1",
+			WorkdirFingerprint: "wd-1",
+			Status:             domain.RequestPending,
+			CreatedAt:          time.Now().UTC(),
+		},
+	}
+	leases := map[string]domain.Lease{}
+	stateBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.Header.Get("Authorization"), "Bearer state-token"; got != want {
+			http.Error(w, "missing auth", http.StatusUnauthorized)
+			return
+		}
+
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/state/requests/"):
+			id := strings.TrimPrefix(r.URL.Path, "/v1/state/requests/")
+			req, ok := requests[id]
+			if !ok {
+				http.Error(w, "request not found", http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(req)
+			return
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/v1/state/requests/"):
+			var req domain.LeaseRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			requests[req.ID] = req
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/v1/state/leases/"):
+			var lease domain.Lease
+			if err := json.NewDecoder(r.Body).Decode(&lease); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			leases[lease.Token] = lease
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/state/leases/"):
+			token := strings.TrimPrefix(r.URL.Path, "/v1/state/leases/")
+			delete(leases, token)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	}))
+	defer stateBackend.Close()
+
+	store, err := externalstate.New(stateBackend.URL, "PROMPTLOCK_EXTERNAL_STATE_TOKEN", 5)
+	if err != nil {
+		t.Fatalf("new external state store: %v", err)
+	}
+
+	now := time.Now().UTC()
+	s := &server{
+		svc: app.Service{
+			Policy:       domain.DefaultPolicy(),
+			Requests:     store,
+			Leases:       store,
+			Secrets:      memory.NewStore(),
+			Audit:        failingAudit{},
+			Now:          func() time.Time { return now },
+			NewRequestID: func() string { return "req-unused" },
+			NewLeaseTok:  func() string { return "lease-ext-approve-rollback" },
+		},
+		authEnabled: false,
+		now:         func() time.Time { return now },
+	}
+
+	approveW := httptest.NewRecorder()
+	approveReq := httptest.NewRequest(http.MethodPost, "/v1/leases/approve?request_id=req-ext-approve-rollback", bytes.NewBufferString(`{"ttl_minutes":5}`))
+	s.handleApprove(approveW, approveReq)
+	if approveW.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 on audit failure, got %d body=%s", approveW.Code, approveW.Body.String())
+	}
+
+	if got := requests["req-ext-approve-rollback"].Status; got != domain.RequestPending {
+		t.Fatalf("expected external request rollback to pending, got %s", got)
+	}
+	if len(leases) != 0 {
+		t.Fatalf("expected external lease rollback, got %#v", leases)
+	}
+}
+
+func TestExternalStateApproveKeepsCommittedStateWhenSupplementaryEnvPathAuditFails(t *testing.T) {
+	t.Setenv("PROMPTLOCK_EXTERNAL_STATE_TOKEN", "state-token")
+
+	requests := map[string]domain.LeaseRequest{
+		"req-ext-env-approve-rollback": {
+			ID:                 "req-ext-env-approve-rollback",
+			AgentID:            "agent-1",
+			TaskID:             "task-1",
+			Reason:             "r",
+			TTLMinutes:         5,
+			Secrets:            []string{"github_token"},
+			CommandFingerprint: "fp-1",
+			WorkdirFingerprint: "wd-1",
+			EnvPath:            "./.env",
+			EnvPathCanonical:   "/workspace/.env",
+			Status:             domain.RequestPending,
+			CreatedAt:          time.Now().UTC(),
+		},
+	}
+	leases := map[string]domain.Lease{}
+	stateBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.Header.Get("Authorization"), "Bearer state-token"; got != want {
+			http.Error(w, "missing auth", http.StatusUnauthorized)
+			return
+		}
+
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/state/requests/"):
+			id := strings.TrimPrefix(r.URL.Path, "/v1/state/requests/")
+			req, ok := requests[id]
+			if !ok {
+				http.Error(w, "request not found", http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(req)
+			return
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/v1/state/requests/"):
+			var req domain.LeaseRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			requests[req.ID] = req
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/v1/state/leases/"):
+			var lease domain.Lease
+			if err := json.NewDecoder(r.Body).Decode(&lease); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			leases[lease.Token] = lease
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/state/leases/"):
+			token := strings.TrimPrefix(r.URL.Path, "/v1/state/leases/")
+			delete(leases, token)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	}))
+	defer stateBackend.Close()
+
+	store, err := externalstate.New(stateBackend.URL, "PROMPTLOCK_EXTERNAL_STATE_TOKEN", 5)
+	if err != nil {
+		t.Fatalf("new external state store: %v", err)
+	}
+
+	now := time.Now().UTC()
+	audit := &scriptedAudit{failAt: map[int]error{2: errors.New("audit disk offline")}}
+	s := &server{
+		svc: app.Service{
+			Policy:       domain.DefaultPolicy(),
+			Requests:     store,
+			Leases:       store,
+			Secrets:      memory.NewStore(),
+			Audit:        audit,
+			Now:          func() time.Time { return now },
+			NewRequestID: func() string { return "req-unused" },
+			NewLeaseTok:  func() string { return "lease-ext-env-approve-rollback" },
+		},
+		authEnabled: false,
+		now:         func() time.Time { return now },
+	}
+	s.svc.AuditFailureHandler = func(err error) error {
+		return s.closeDurabilityGate("audit", err)
+	}
+
+	approveW := httptest.NewRecorder()
+	approveReq := httptest.NewRequest(http.MethodPost, "/v1/leases/approve?request_id=req-ext-env-approve-rollback", bytes.NewBufferString(`{"ttl_minutes":5}`))
+	s.handleApprove(approveW, approveReq)
+	if approveW.Code != http.StatusOK {
+		t.Fatalf("expected 200 when supplementary env-path approval audit fails, got %d body=%s", approveW.Code, approveW.Body.String())
+	}
+
+	if got := requests["req-ext-env-approve-rollback"].Status; got != domain.RequestApproved {
+		t.Fatalf("expected external request to stay approved, got %s", got)
+	}
+	if _, ok := leases["lease-ext-env-approve-rollback"]; !ok {
+		t.Fatalf("expected external lease to stay committed, got %#v", leases)
 	}
 }

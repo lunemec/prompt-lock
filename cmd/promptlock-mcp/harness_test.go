@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -212,6 +214,81 @@ func TestMCPToolsCallExecuteWithIntentRoundtrip(t *testing.T) {
 	}
 }
 
+func TestMCPToolsCallUsesAgentUnixSocketByDefault(t *testing.T) {
+	socketPath := filepath.Join(os.TempDir(), fmt.Sprintf("promptlock-mcp-tools-%d.sock", time.Now().UnixNano()))
+	_ = os.Remove(socketPath)
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/intents/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{"secrets": []string{"github_token"}})
+		case "/v1/leases/request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"request_id": "r-unix"})
+		case "/v1/requests/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "approved"})
+		case "/v1/leases/by-request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"lease_token": "l-unix"})
+		case "/v1/leases/execute":
+			_ = json.NewEncoder(w).Encode(map[string]any{"exit_code": 0, "stdout_stderr": "unix-ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	})}
+	defer srv.Close()
+	go func() { _ = srv.Serve(ln) }()
+
+	_, writeLine, readJSON := launchMCP(t, map[string]string{
+		"PROMPTLOCK_BROKER_URL":        "",
+		"PROMPTLOCK_AGENT_UNIX_SOCKET": socketPath,
+		"PROMPTLOCK_SESSION_TOKEN":     "s1",
+	})
+
+	writeLine(`{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}`)
+	msg := readJSON()
+	if msg["error"] != nil {
+		t.Fatalf("tools/call over unix socket returned error: %+v", msg)
+	}
+	res, ok := msg["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("invalid result: %+v", msg)
+	}
+	content, ok := res["content"].([]any)
+	if !ok || len(content) == 0 {
+		t.Fatalf("missing content: %+v", msg)
+	}
+	item, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("invalid content shape: %+v", msg)
+	}
+	text, _ := item["text"].(string)
+	if !strings.Contains(text, "unix-ok") {
+		t.Fatalf("expected unix socket roundtrip output, got %q", text)
+	}
+}
+
+func TestMCPToolsCallRejectsObjectRequestID(t *testing.T) {
+	_, writeLine, readJSON := launchMCP(t, map[string]string{"PROMPTLOCK_SESSION_TOKEN": "s1"})
+
+	writeLine(`{"jsonrpc":"2.0","id":{"bad":1},"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}`)
+	msg := readJSON()
+	errObj, ok := msg["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error object, got %+v", msg)
+	}
+	if int(errObj["code"].(float64)) != -32600 {
+		t.Fatalf("expected -32600 for invalid tools/call request id, got %+v", errObj)
+	}
+	if id, ok := msg["id"]; !ok || id != nil {
+		t.Fatalf("expected id=null for invalid tools/call request id, got %+v", msg)
+	}
+}
+
 func TestMCPToolsCallRealBrokerE2E(t *testing.T) {
 	addr := freeAddr(t)
 	cfgPath := filepath.Join(t.TempDir(), "promptlock-config.json")
@@ -294,6 +371,53 @@ func TestMCPToolsCallRealBrokerE2E(t *testing.T) {
 	text, _ := item["text"].(string)
 	if !strings.Contains(text, "exit=0") || !strings.Contains(text, "E2E_OK") {
 		t.Fatalf("unexpected text: %s", text)
+	}
+}
+
+func TestMCPExecuteWithIntentUsesAgentUnixSocketByDefault(t *testing.T) {
+	socketPath := filepath.Join(os.TempDir(), fmt.Sprintf("promptlock-mcp-%d.sock", time.Now().UnixNano()))
+	_ = os.Remove(socketPath)
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen unix socket: %v", err)
+	}
+	defer listener.Close()
+
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/intents/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{"secrets": []string{"github_token"}})
+		case "/v1/leases/request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"request_id": "r-unix"})
+		case "/v1/requests/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "approved"})
+		case "/v1/leases/by-request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"lease_token": "l-unix"})
+		case "/v1/leases/execute":
+			_ = json.NewEncoder(w).Encode(map[string]any{"exit_code": 0, "stdout_stderr": "unix-ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	})}
+	defer srv.Close()
+	go func() { _ = srv.Serve(listener) }()
+
+	t.Setenv("PROMPTLOCK_BROKER_URL", "")
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", socketPath)
+	t.Setenv("PROMPTLOCK_SESSION_TOKEN", "s1")
+
+	out, err := executeWithIntent(context.Background(), map[string]interface{}{
+		"intent":      "run_tests",
+		"command":     []interface{}{"echo", "ok"},
+		"ttl_minutes": float64(5),
+	})
+	if err != nil {
+		t.Fatalf("executeWithIntent: %v", err)
+	}
+	if !strings.Contains(out, "unix-ok") {
+		t.Fatalf("expected unix-socket transport output, got %q", out)
 	}
 }
 

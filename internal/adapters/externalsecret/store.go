@@ -104,14 +104,13 @@ func (s *Store) GetSecret(name string) (string, error) {
 		if err := json.Unmarshal([]byte(trimmedBody), &payload); err != nil {
 			return "", fmt.Errorf("parse external secret JSON response: %w", err)
 		}
-		value := strings.TrimSpace(payload.Value)
-		if value == "" {
+		if strings.TrimSpace(payload.Value) == "" {
 			return "", fmt.Errorf("external secret source returned empty secret value")
 		}
-		return value, nil
+		return payload.Value, nil
 	}
 
-	return trimmedBody, nil
+	return string(bodyBytes), nil
 }
 
 func (s *Store) secretURL(secretName string) string {

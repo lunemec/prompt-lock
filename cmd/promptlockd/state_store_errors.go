@@ -11,6 +11,9 @@ const stateStoreUnavailableMessage = "state backend unavailable; retry when back
 const secretBackendUnavailableMessage = "secret backend unavailable; retry when backend connectivity is restored"
 
 func stateStoreReadError(err error) (error, string) {
+	if errors.Is(err, app.ErrAuditUnavailable) || errors.Is(err, ErrDurabilityClosed) {
+		return ErrServiceUnavailable, durabilityUnavailableMessage
+	}
 	if errors.Is(err, ports.ErrStoreUnavailable) {
 		return ErrServiceUnavailable, stateStoreUnavailableMessage
 	}
@@ -21,6 +24,9 @@ func stateStoreReadError(err error) (error, string) {
 }
 
 func stateStoreMutationError(err error) (error, string) {
+	if errors.Is(err, app.ErrAuditUnavailable) || errors.Is(err, ErrDurabilityClosed) {
+		return ErrServiceUnavailable, durabilityUnavailableMessage
+	}
 	if errors.Is(err, ports.ErrStoreUnavailable) {
 		return ErrServiceUnavailable, stateStoreUnavailableMessage
 	}
@@ -28,6 +34,9 @@ func stateStoreMutationError(err error) (error, string) {
 }
 
 func stateStoreCancelMutationError(err error) (error, string) {
+	if errors.Is(err, app.ErrAuditUnavailable) || errors.Is(err, ErrDurabilityClosed) {
+		return ErrServiceUnavailable, durabilityUnavailableMessage
+	}
 	if errors.Is(err, ports.ErrStoreUnavailable) {
 		return ErrServiceUnavailable, stateStoreUnavailableMessage
 	}
@@ -38,6 +47,9 @@ func stateStoreCancelMutationError(err error) (error, string) {
 }
 
 func stateStoreAccessError(err error) (error, string) {
+	if errors.Is(err, app.ErrAuditUnavailable) || errors.Is(err, ErrDurabilityClosed) {
+		return ErrServiceUnavailable, durabilityUnavailableMessage
+	}
 	if errors.Is(err, app.ErrSecretBackendUnavailable) {
 		return ErrServiceUnavailable, secretBackendUnavailableMessage
 	}
@@ -51,6 +63,9 @@ func stateStoreAccessError(err error) (error, string) {
 }
 
 func stateStoreListError(err error) (error, string) {
+	if errors.Is(err, app.ErrAuditUnavailable) || errors.Is(err, ErrDurabilityClosed) {
+		return ErrServiceUnavailable, durabilityUnavailableMessage
+	}
 	if errors.Is(err, ports.ErrStoreUnavailable) {
 		return ErrServiceUnavailable, stateStoreUnavailableMessage
 	}

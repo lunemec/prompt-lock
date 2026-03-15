@@ -6,10 +6,7 @@
   "audit_path": "/var/log/promptlock/audit.jsonl",
   "state_store_file": "/var/lib/promptlock/state-store.json",
   "state_store": {
-    "type": "file",
-    "external_url": "https://state.example.internal",
-    "external_auth_token_env": "PROMPTLOCK_EXTERNAL_STATE_TOKEN",
-    "external_timeout_sec": 10
+    "type": "file"
   },
   "policy": {
     "default_ttl_minutes": 5,
@@ -41,7 +38,7 @@
   },
   "host_ops_policy": {
     "docker_allow_subcommands": ["version", "ps", "images", "compose"],
-    "docker_compose_allow_verbs": ["config", "ps", "ls", "images"],
+    "docker_compose_allow_verbs": ["config", "ps"],
     "docker_ps_allowed_flags": ["-a", "--all", "-q", "--quiet", "--format", "-f", "--filter", "--no-trunc", "-n", "--last"],
     "docker_images_allowed_flags": ["-q", "--quiet", "--format", "--no-trunc", "--digests", "--filter"],
     "docker_deny_substrings": ["--privileged", "--pid=host", "-v /:/", "docker.sock", "--network host", "--mount", "-v "],
@@ -60,10 +57,6 @@
   "secret_source": {
     "type": "env",
     "env_prefix": "PROMPTLOCK_SECRET_",
-    "external_url": "https://secrets.example.internal",
-    "external_auth_token_env": "PROMPTLOCK_EXTERNAL_SECRET_TOKEN",
-    "external_timeout_sec": 10,
-    "file_path": "/etc/promptlock/secrets.json",
     "in_memory_hardened": "fail"
   },
   "secrets": [],

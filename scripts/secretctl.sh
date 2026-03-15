@@ -2,6 +2,7 @@
 set -euo pipefail
 
 BROKER_URL="${BROKER_URL:-http://127.0.0.1:8765}"
+BROKER_UNIX_SOCKET="${BROKER_UNIX_SOCKET:-}"
 SESSION_TOKEN="${SESSION_TOKEN:-}"
 
 usage() {
@@ -11,9 +12,21 @@ Usage:
   secretctl.sh access --lease TOKEN --secret NAME
 
 Env:
-  BROKER_URL (default: http://127.0.0.1:8765)
+  BROKER_URL (default: http://127.0.0.1:8765 when BROKER_UNIX_SOCKET is unset)
+  BROKER_UNIX_SOCKET (optional; preferred for local hardened dual-socket deployments)
   SESSION_TOKEN (required when broker auth is enabled)
 USAGE
+}
+
+broker_request() {
+  local method="$1"
+  local path="$2"
+  shift 2
+  if [[ -n "$BROKER_UNIX_SOCKET" ]]; then
+    curl --unix-socket "$BROKER_UNIX_SOCKET" -sS -X "$method" "http://promptlock.local${path}" "$@"
+    return
+  fi
+  curl -sS -X "$method" "${BROKER_URL}${path}" "$@"
 }
 
 cmd="${1:-}"
@@ -48,7 +61,7 @@ if [[ "$cmd" == "request" ]]; then
     --argjson ttl "$ttl" \
     --argjson s "$json_secrets" \
     '{agent_id:$a, task_id:$t, reason:$r, ttl_minutes:$ttl, secrets:$s}' \
-  | curl -sS -X POST "$BROKER_URL/v1/leases/request" \
+  | broker_request POST "/v1/leases/request" \
       -H "Authorization: Bearer $SESSION_TOKEN" \
       -H 'content-type: application/json' -d @-
   echo
@@ -66,7 +79,7 @@ if [[ "$cmd" == "access" ]]; then
   done
 
   jq -n --arg l "$lease" --arg s "$secret" '{lease_token:$l, secret:$s}' \
-    | curl -sS -X POST "$BROKER_URL/v1/leases/access" \
+    | broker_request POST "/v1/leases/access" \
         -H "Authorization: Bearer $SESSION_TOKEN" \
         -H 'content-type: application/json' -d @-
   echo

@@ -68,7 +68,7 @@ All previously open items from this initiative are now complete in the current w
 - **Status:** ✅ Completed (2026-03-09)
 - Verification:
   - Harness deny path verifies deterministic CLI denial (`request denied`).
-  - Harness asserts `operator_denied_request` audit event contains both `request_id` and deny `reason`.
+  - Harness asserts `request_denied` audit event contains both `request_id` and deny `reason`.
 - Strict gates:
   - [x] Request denied by operator returns deterministic error to agent CLI.
   - [x] Audit events include deny reason and request id.

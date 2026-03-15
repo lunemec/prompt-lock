@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -105,6 +107,21 @@ func (hostDockerBoundedOutputPolicy) ResolveHostDockerCommand([]string) (app.Res
 func (hostDockerBoundedOutputPolicy) ApplyOutputSecurity(in string) string { return in }
 func (hostDockerBoundedOutputPolicy) ClampTimeout(requested int) int       { return requested }
 
+type hostDockerEnvPolicy struct{ helperPath string }
+
+func (p hostDockerEnvPolicy) ValidateExecuteRequest(string, app.ExecuteRequest) error { return nil }
+func (p hostDockerEnvPolicy) ValidateExecuteCommand([]string) error                   { return nil }
+func (p hostDockerEnvPolicy) ResolveExecuteCommand([]string) (app.ResolvedCommand, error) {
+	return app.ResolvedCommand{}, nil
+}
+func (p hostDockerEnvPolicy) ValidateNetworkEgress([]string, string) error { return nil }
+func (p hostDockerEnvPolicy) ValidateHostDockerCommand([]string) error     { return nil }
+func (p hostDockerEnvPolicy) ResolveHostDockerCommand([]string) (app.ResolvedCommand, error) {
+	return app.ResolvedCommand{Path: p.helperPath, SearchPath: filepath.Dir(p.helperPath)}, nil
+}
+func (p hostDockerEnvPolicy) ApplyOutputSecurity(in string) string { return in }
+func (p hostDockerEnvPolicy) ClampTimeout(requested int) int       { return requested }
+
 func TestHandleHostDockerExecuteCapsOutputAtMaxBytes(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell helper is unix-specific")
@@ -133,5 +150,44 @@ func TestHandleHostDockerExecuteCapsOutputAtMaxBytes(t *testing.T) {
 	}
 	if out.StdoutStderr != strings.Repeat("x", 16) {
 		t.Fatalf("stdout_stderr = %q, want %q", out.StdoutStderr, strings.Repeat("x", 16))
+	}
+}
+
+func TestHandleHostDockerExecuteUsesMinimalEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell helper is unix-specific")
+	}
+
+	td := t.TempDir()
+	helperPath := filepath.Join(td, "print-env.sh")
+	helper := "#!/bin/sh\nprintf '%s' \"$PROMPTLOCK_TEST_LEAK\"\n"
+	if err := os.WriteFile(helperPath, []byte(helper), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PROMPTLOCK_TEST_LEAK", "leak-me")
+	s := &server{
+		svc:           app.Service{Audit: testAudit{}},
+		execPolicy:    config.ExecutionPolicy{MaxOutputBytes: 64},
+		hostOpsPolicy: config.HostOpsPolicy{DockerTimeoutSec: 30},
+		policyEngine:  hostDockerEnvPolicy{helperPath: helperPath},
+		now:           time.Now,
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/host/docker/execute", bytes.NewBufferString(`{"command":["docker","ps"]}`))
+	w := httptest.NewRecorder()
+	s.handleHostDockerExecute(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var out struct {
+		StdoutStderr string `json:"stdout_stderr"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if strings.Contains(out.StdoutStderr, "leak-me") {
+		t.Fatalf("expected ambient env to be stripped from host-docker exec, got %q", out.StdoutStderr)
 	}
 }

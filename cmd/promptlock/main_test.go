@@ -150,6 +150,99 @@ func TestAuthLoginOrchestratesBootstrapPairMint(t *testing.T) {
 	}
 }
 
+func TestRunAuthLoginDoesNotPrintBearerMaterialByDefault(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/bootstrap/create":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"bootstrap_token": "boot_1",
+				"expires_at":      "2026-01-01T00:00:00Z",
+			})
+		case "/v1/auth/pair/complete":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"grant_id":            "grant_1",
+				"idle_expires_at":     "2026-01-01T00:00:00Z",
+				"absolute_expires_at": "2026-01-01T00:00:00Z",
+			})
+		case "/v1/auth/session/mint":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_token": "sess_1",
+				"expires_at":    "2026-01-01T00:00:00Z",
+			})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	out := captureCommandStdout(t, func() {
+		runAuthLogin([]string{
+			"--broker", ts.URL,
+			"--operator-token", "op_tok",
+			"--agent", "agent_1",
+			"--container", "ctr_1",
+		})
+	})
+	if strings.Contains(out, "session_token") || strings.Contains(out, "grant_id") {
+		t.Fatalf("expected auth login default output to omit bearer material, got %q", out)
+	}
+	if !strings.Contains(out, "expires_at") {
+		t.Fatalf("expected safe auth login output to retain expiry context, got %q", out)
+	}
+}
+
+func TestRunAuthDockerRunDoesNotExposeSessionTokenOnDockerCommandLine(t *testing.T) {
+	argsPath := filepath.Join(t.TempDir(), "docker-args.txt")
+	dockerDir := t.TempDir()
+	fakeDocker := filepath.Join(dockerDir, "docker")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TEST_DOCKER_ARGS_PATH\"\n"
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dockerDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TEST_DOCKER_ARGS_PATH", argsPath)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/bootstrap/create":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"bootstrap_token": "boot_1",
+				"expires_at":      "2026-01-01T00:00:00Z",
+			})
+		case "/v1/auth/pair/complete":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"grant_id":            "grant_1",
+				"idle_expires_at":     "2026-01-01T00:00:00Z",
+				"absolute_expires_at": "2026-01-01T00:00:00Z",
+			})
+		case "/v1/auth/session/mint":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_token": "sess_123",
+				"expires_at":    "2026-01-01T00:00:00Z",
+			})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	runAuthDockerRun([]string{
+		"--broker", ts.URL,
+		"--operator-token", "op_tok",
+		"--agent", "agent_1",
+		"--container", "ctr_1",
+		"--image", "promptlock-agent-lab",
+	})
+
+	argsBytes, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read fake docker args: %v", err)
+	}
+	if strings.Contains(string(argsBytes), "PROMPTLOCK_SESSION_TOKEN=sess_123") {
+		t.Fatalf("expected docker argv to omit raw session token, got %q", string(argsBytes))
+	}
+}
+
 func TestRunAuditVerifyAcceptsAppendAfterCheckpoint(t *testing.T) {
 	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
 	checkpointPath := filepath.Join(t.TempDir(), "audit.checkpoint")
@@ -253,6 +346,47 @@ func TestAuthLoginPropagatesStepFailures(t *testing.T) {
 				t.Fatalf("call count = %d, want %d", callCount, tt.expectedCalls)
 			}
 		})
+	}
+}
+
+func TestRunAuthLoginDoesNotPrintGrantIDByDefault(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/bootstrap/create":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"bootstrap_token": "boot_1",
+				"expires_at":      "2026-01-01T00:00:00Z",
+			})
+		case "/v1/auth/pair/complete":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"grant_id":            "grant_1",
+				"idle_expires_at":     "2026-01-01T00:00:00Z",
+				"absolute_expires_at": "2026-01-01T00:00:00Z",
+			})
+		case "/v1/auth/session/mint":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_token": "sess_1",
+				"expires_at":    "2026-01-01T00:00:00Z",
+			})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	out := captureCommandStdout(t, func() {
+		runAuthLogin([]string{
+			"--broker", ts.URL,
+			"--operator-token", "op_tok",
+			"--agent", "agent_1",
+			"--container", "ctr_1",
+		})
+	})
+	if strings.Contains(out, "grant_id") {
+		t.Fatalf("expected auth login output to omit grant_id by default, got %q", out)
+	}
+	if strings.Contains(out, "session_token") {
+		t.Fatalf("expected auth login output to omit session token by default, got %q", out)
 	}
 }
 
@@ -518,5 +652,50 @@ func TestAuthLoginUsesOperatorSocketForBootstrapAndAgentSocketForPairMint(t *tes
 	}
 	if calls[2].path != "/v1/auth/session/mint" || calls[2].unixSocket != agentSocket {
 		t.Fatalf("mint call = %+v, want agent socket %q", calls[2], agentSocket)
+	}
+}
+
+func TestRunAuthLoginOmitsGrantIDFromStdout(t *testing.T) {
+	operatorSocket := filepath.Join(t.TempDir(), "operator.sock")
+	agentSocket := filepath.Join(t.TempDir(), "agent.sock")
+	if err := os.WriteFile(operatorSocket, []byte(""), 0o600); err != nil {
+		t.Fatalf("write operator socket placeholder: %v", err)
+	}
+	if err := os.WriteFile(agentSocket, []byte(""), 0o600); err != nil {
+		t.Fatalf("write agent socket placeholder: %v", err)
+	}
+	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", operatorSocket)
+	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", agentSocket)
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_BROKER_URL", "")
+
+	origDoPostJSONAuth := doPostJSONAuth
+	t.Cleanup(func() { doPostJSONAuth = origDoPostJSONAuth })
+	doPostJSONAuth = func(baseURL, unixSocket, path, bearer string, in any, out any) error {
+		switch typed := out.(type) {
+		case *authBootstrapResult:
+			typed.BootstrapToken = "boot_1"
+			typed.ExpiresAt = time.Unix(1, 0)
+		case *authPairResult:
+			typed.GrantID = "grant_1"
+			typed.IdleExpiresAt = time.Unix(1, 0)
+			typed.AbsoluteExpiresAt = time.Unix(2, 0)
+		case *authMintResult:
+			typed.SessionToken = "sess_1"
+			typed.ExpiresAt = time.Unix(3, 0)
+		default:
+			t.Fatalf("unexpected output type %T", out)
+		}
+		return nil
+	}
+
+	out := captureCommandStdout(t, func() {
+		runAuthLogin([]string{"--operator-token", "op_tok", "--agent", "agent_1", "--container", "ctr_1"})
+	})
+	if strings.Contains(out, "grant_id") {
+		t.Fatalf("expected auth login stdout to omit grant_id, got %q", out)
+	}
+	if strings.Contains(out, "session_token") {
+		t.Fatalf("expected auth login stdout to omit session_token by default, got %q", out)
 	}
 }

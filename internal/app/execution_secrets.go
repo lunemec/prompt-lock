@@ -85,7 +85,7 @@ func (s Service) resolveEnvPathExecutionSecrets(request domain.LeaseRequest, lea
 
 	s.AuditEnvPathConfirmed(request.AgentID, request.TaskID, request.ID, request.EnvPath, resolvedCanonical)
 	for _, secretName := range requested {
-		s.writeAuditEvent(ports.AuditEvent{
+		if err := s.auditCritical(ports.AuditEvent{
 			Event:      "secret_access",
 			Timestamp:  s.now(),
 			AgentID:    lease.AgentID,
@@ -93,7 +93,9 @@ func (s Service) resolveEnvPathExecutionSecrets(request domain.LeaseRequest, lea
 			RequestID:  lease.RequestID,
 			LeaseToken: lease.Token,
 			Secret:     secretName,
-		})
+		}); err != nil {
+			return nil, err
+		}
 	}
 	return resolved, nil
 }

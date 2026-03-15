@@ -24,20 +24,19 @@ PROMPTLOCK_SESSION_TOKEN=sess_local_test \
 
 ```bash
 # list pending requests
-PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 PROMPTLOCK_OPERATOR_TOKEN=... \
   go run ./cmd/promptlock watch list
 
 # allow specific request
-PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 PROMPTLOCK_OPERATOR_TOKEN=... \
   go run ./cmd/promptlock watch allow --ttl 5 <request_id>
 
 # deny specific request
-PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 PROMPTLOCK_OPERATOR_TOKEN=... \
   go run ./cmd/promptlock watch deny --reason "scope too broad" <request_id>
 ```
+
+These examples assume the supported local hardened default: `promptlock watch` auto-selects `/tmp/promptlock-operator.sock`. Add `--broker` only when you intentionally want TCP transport.
 
 ## Container launch shortcut
 
@@ -90,10 +89,11 @@ PROMPTLOCK_DEV_MODE=1 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 - `redacted` output mode is best-effort log-safety only. It is not a strong barrier against secret exfiltration through command output.
 - When auth is enabled, wrapper uses `--session-token` (or `PROMPTLOCK_SESSION_TOKEN`) for agent endpoints.
 - `promptlock auth docker-run` can mint a short-lived session and inject it into a new `docker run` invocation with secure defaults (`--read-only`, `--cap-drop ALL`, `--security-opt no-new-privileges`, tmpfs `/tmp`, current user identity).
+- `promptlock auth login` omits raw bearer output by default; use `--show-grant-id` or `--show-secrets` only when you intentionally need those values for plumbing/debugging.
 - In local hardened mode, wrapper commands default to role-separated sockets with no broker flags:
   - operator flows use `/tmp/promptlock-operator.sock`
   - agent flows use `/tmp/promptlock-agent.sock`
-- `promptlock auth docker-run` mounts only the agent socket into the container and injects `PROMPTLOCK_AGENT_UNIX_SOCKET`.
+- `promptlock auth docker-run` mounts only the agent socket into the container, injects `PROMPTLOCK_AGENT_UNIX_SOCKET`, and passes `PROMPTLOCK_SESSION_TOKEN` through the child environment rather than embedding bearer material in `docker run` argv.
 - Wrapper still supports explicit TCP broker URL (`--broker`) and compatibility unix socket transport (`--broker-unix-socket`) when needed.
 - If the expected local role socket is missing, wrapper commands fail closed instead of silently downgrading to localhost TCP. Use `--broker` only when you intentionally want TCP transport.
 - Default mode waits for external human approval (`--wait-approve`, `--poll-interval`).

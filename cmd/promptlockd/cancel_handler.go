@@ -3,8 +3,6 @@ package main
 import (
 	"net/http"
 	"strings"
-
-	"github.com/lunemec/promptlock/internal/core/ports"
 )
 
 type cancelReq struct {
@@ -12,6 +10,7 @@ type cancelReq struct {
 }
 
 func (s *server) handleCancel(w http.ResponseWriter, r *http.Request) {
+	s.ensureRequestLeaseStateCommitter()
 	var ok bool
 	r, ok = s.requireAgentSession(w, r)
 	if !ok {
@@ -48,18 +47,5 @@ func (s *server) handleCancel(w http.ResponseWriter, r *http.Request) {
 		writeMappedError(w, kind, msg)
 		return
 	}
-	if err := s.persistRequestLeaseState(); err != nil {
-		writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
-		return
-	}
-	at, aid := actorFromRequest(r)
-	_ = s.svc.Audit.Write(ports.AuditEvent{
-		Event:     "agent_cancelled_request",
-		Timestamp: s.now(),
-		ActorType: at,
-		ActorID:   aid,
-		RequestID: requestID,
-		Metadata:  map[string]string{"reason": req.Reason},
-	})
 	writeJSON(w, map[string]any{"request_id": cancelled.ID, "status": cancelled.Status})
 }

@@ -43,6 +43,7 @@ func (s *server) handleRequestStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
+	s.ensureRequestLeaseStateCommitter()
 	var ok bool
 	r, ok = s.requireAgentSession(w, r)
 	if !ok {
@@ -123,14 +124,11 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"request_id": result.Lease.RequestID, "status": "reused", "lease_token": result.Lease.Token, "expires_at": result.Lease.ExpiresAt})
 		return
 	}
-	if err := s.persistRequestLeaseState(); err != nil {
-		writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
-		return
-	}
 	writeJSON(w, map[string]any{"request_id": result.Request.ID, "status": result.Request.Status})
 }
 
 func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
+	s.ensureRequestLeaseStateCommitter()
 	var ok bool
 	r, ok = s.requireOperator(w, r)
 	if !ok {
@@ -148,28 +146,27 @@ func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		writeMappedError(w, ErrBadRequest, "request_id required")
 		return
 	}
+	requestSnapshot, err := s.svc.Requests.GetRequest(requestID)
+	if err != nil {
+		kind, msg := stateStoreReadError(err)
+		writeMappedError(w, kind, msg)
+		return
+	}
 	var req approveReq
 	if err := decodeOptionalJSONBody(r, &req); err != nil {
 		writeMappedError(w, ErrBadRequest, err.Error())
 		return
 	}
-	lease, err := s.svc.ApproveRequest(requestID, req.TTLMinutes)
+	at, aid := actorFromRequest(r)
+	lease, err := s.svc.ApproveRequestWithActor(requestID, req.TTLMinutes, at, aid)
 	if err != nil {
 		kind, msg := stateStoreMutationError(err)
 		writeMappedError(w, kind, msg)
 		return
 	}
-	if err := s.persistRequestLeaseState(); err != nil {
-		writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
-		return
+	if strings.TrimSpace(requestSnapshot.EnvPath) != "" {
+		_ = s.svc.AuditEnvPathConfirmed(requestSnapshot.AgentID, requestSnapshot.TaskID, requestSnapshot.ID, requestSnapshot.EnvPath, requestSnapshot.EnvPathCanonical)
 	}
-	at, aid := actorFromRequest(r)
-	if approvedReq, readErr := s.svc.Requests.GetRequest(requestID); readErr == nil {
-		if strings.TrimSpace(approvedReq.EnvPath) != "" {
-			s.svc.AuditEnvPathConfirmed(approvedReq.AgentID, approvedReq.TaskID, approvedReq.ID, approvedReq.EnvPath, approvedReq.EnvPathCanonical)
-		}
-	}
-	_ = s.svc.Audit.Write(ports.AuditEvent{Event: "operator_approved_request", Timestamp: s.now(), ActorType: at, ActorID: aid, RequestID: requestID, LeaseToken: lease.Token})
 	writeJSON(w, map[string]any{"status": "approved", "lease_token": lease.Token, "expires_at": lease.ExpiresAt})
 }
 
@@ -188,7 +185,10 @@ func (s *server) handleAccess(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.authCfg.AllowPlaintextSecretReturn {
 		at, aid := actorFromRequest(r)
-		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "plaintext_secret_access_blocked", Timestamp: s.now(), ActorType: at, ActorID: aid})
+		if err := s.auditCritical(ports.AuditEvent{Event: "plaintext_secret_access_blocked", Timestamp: s.now(), ActorType: at, ActorID: aid}); err != nil {
+			writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
+			return
+		}
 		writeMappedError(w, ErrForbidden, "plaintext secret return disabled by policy")
 		return
 	}

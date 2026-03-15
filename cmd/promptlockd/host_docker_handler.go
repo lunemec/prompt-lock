@@ -25,6 +25,9 @@ func (s *server) handleHostDockerExecute(w http.ResponseWriter, r *http.Request)
 		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !s.requireDurabilityReady(w) {
+		return
+	}
 	var req hostDockerReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeMappedError(w, ErrBadRequest, err.Error())
@@ -46,10 +49,25 @@ func (s *server) handleHostDockerExecute(w http.ResponseWriter, r *http.Request)
 		writeMappedError(w, ErrForbidden, withPolicyHint(err.Error()))
 		return
 	}
+	at, aid := actorFromRequest(r)
+	if err := s.auditCritical(ports.AuditEvent{
+		Event:     "host_docker_execute_started",
+		Timestamp: s.now(),
+		ActorType: at,
+		ActorID:   aid,
+		Metadata: map[string]string{
+			"command":     strings.Join(req.Command, " "),
+			"timeout_sec": itoa(uint64(timeout)),
+		},
+	}); err != nil {
+		writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
+		return
+	}
 	cmd := exec.CommandContext(ctx, resolvedCommand.Path, resolvedCommand.Args...)
 	if len(req.Command) > 0 {
 		cmd.Args[0] = req.Command[0]
 	}
+	cmd.Env = buildBrokerExecutionEnv(nil, resolvedCommand.SearchPath)
 	captureLimit := effectiveOutputCaptureLimit("redacted", s.execPolicy.MaxOutputBytes)
 	out, exitCode, err := runCommandWithBoundedOutput(cmd, captureLimit)
 	if err != nil {
@@ -57,8 +75,8 @@ func (s *server) handleHostDockerExecute(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	at, aid := actorFromRequest(r)
-	_ = s.svc.Audit.Write(ports.AuditEvent{
+	auditWarning := ""
+	if err := s.auditCritical(ports.AuditEvent{
 		Event:     "host_docker_execute",
 		Timestamp: s.now(),
 		ActorType: at,
@@ -67,12 +85,18 @@ func (s *server) handleHostDockerExecute(w http.ResponseWriter, r *http.Request)
 			"command":   strings.Join(req.Command, " "),
 			"exit_code": itoa(uint64(exitCode)),
 		},
-	})
+	}); err != nil {
+		auditWarning = durabilityUnavailableMessage
+	}
 	outStr := redactOutput(out)
 	if max := s.execPolicy.MaxOutputBytes; max > 0 && len(outStr) > max {
 		outStr = outStr[:max]
 	}
-	writeJSON(w, map[string]any{"exit_code": exitCode, "stdout_stderr": outStr})
+	resp := map[string]any{"exit_code": exitCode, "stdout_stderr": outStr}
+	if auditWarning != "" {
+		resp["audit_warning"] = auditWarning
+	}
+	writeJSON(w, resp)
 }
 
 func (s *server) validateHostDockerCommand(cmd []string) error {

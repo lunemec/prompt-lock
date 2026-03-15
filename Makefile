@@ -60,11 +60,12 @@ production-readiness-gate:
 
 release-readiness-gate-core:
 	$(MAKE) validate-final
+	$(MAKE) vulncheck
 	$(MAKE) production-readiness-gate
 	$(MAKE) fuzz
 
 release-readiness-gate: release-readiness-gate-core
-	$(MAKE) e2e-compose
+	$(MAKE) real-e2e-smoke
 
 leak-guard:
 	bash scripts/validate_no_secret_leaks.sh

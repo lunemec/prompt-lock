@@ -2,6 +2,8 @@ package app
 
 import (
 	"errors"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,13 +13,65 @@ import (
 )
 
 type auditBuf struct{ events []ports.AuditEvent }
+type failingAuditBuf struct{}
+type scriptedAuditBuf struct {
+	events []ports.AuditEvent
+	failAt int
+	calls  int
+}
 
 type failingSecretStore struct{}
+type sensitiveErrorSecretStore struct{}
+
+type failingLeaseStore struct{ err error }
+type failingRequestLeaseStateCommitter struct{ err error }
+type persistThenFailRequestLeaseStateCommitter struct {
+	source *memory.Store
+	path   string
+	failAt int
+	calls  int
+}
 
 func (failingSecretStore) GetSecret(string) (string, error) { return "", errors.New("backend timeout") }
+func (sensitiveErrorSecretStore) GetSecret(string) (string, error) {
+	return "", errors.New("external backend returned status 500: raw-secret-value")
+}
+
+func (f failingLeaseStore) SaveLease(domain.Lease) error { return f.err }
+func (failingLeaseStore) DeleteLease(string) error       { return errors.New("lease not found") }
+func (failingLeaseStore) GetLease(string) (domain.Lease, error) {
+	return domain.Lease{}, errors.New("lease not found")
+}
+func (failingLeaseStore) GetLeaseByRequestID(string) (domain.Lease, error) {
+	return domain.Lease{}, errors.New("lease not found")
+}
+
+func (f failingRequestLeaseStateCommitter) CommitRequestLeaseState() error { return f.err }
+
+func (c *persistThenFailRequestLeaseStateCommitter) CommitRequestLeaseState() error {
+	c.calls++
+	if err := c.source.SaveStateToFile(c.path); err != nil {
+		return err
+	}
+	if c.failAt > 0 && c.calls == c.failAt {
+		return errors.New("parent dir sync failed after rename")
+	}
+	return nil
+}
 
 func (a *auditBuf) Write(e ports.AuditEvent) error {
 	a.events = append(a.events, e)
+	return nil
+}
+
+func (failingAuditBuf) Write(ports.AuditEvent) error { return errors.New("audit unavailable") }
+
+func (a *scriptedAuditBuf) Write(e ports.AuditEvent) error {
+	a.calls++
+	a.events = append(a.events, e)
+	if a.failAt > 0 && a.calls == a.failAt {
+		return errors.New("audit unavailable")
+	}
 	return nil
 }
 
@@ -77,6 +131,687 @@ func TestLeaseFlow(t *testing.T) {
 	}
 }
 
+func TestApproveRequestRollsBackPendingStateWhenLeaseSaveFails(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	if err := store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_rollback",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		Reason:             "test",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	}); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       failingLeaseStore{err: errors.New("lease backend unavailable")},
+		Secrets:      store,
+		Audit:        &auditBuf{},
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_unused" },
+		NewLeaseTok:  func() string { return "lease_new" },
+	}
+
+	if _, err := svc.ApproveRequest("req_rollback", 5); err == nil || err.Error() != "lease backend unavailable" {
+		t.Fatalf("expected lease save failure, got %v", err)
+	}
+
+	stored, err := store.GetRequest("req_rollback")
+	if err != nil {
+		t.Fatalf("get request: %v", err)
+	}
+	if stored.Status != domain.RequestPending {
+		t.Fatalf("expected rollback to pending, got %s", stored.Status)
+	}
+}
+
+func TestRequestLeaseRollsBackWhenAuditFails(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      store,
+		Audit:        failingAuditBuf{},
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_audit_rollback" },
+		NewLeaseTok:  func() string { return "lease_unused" },
+	}
+
+	if _, err := svc.RequestLease("agent1", "task1", "test", 5, []string{"github_token"}, "fp1", "wd1", "", ""); !errors.Is(err, ErrAuditUnavailable) {
+		t.Fatalf("expected audit failure, got %v", err)
+	}
+	if _, err := store.GetRequest("req_audit_rollback"); err == nil {
+		t.Fatalf("expected request rollback after audit failure")
+	}
+}
+
+func TestApproveRequestRollsBackWhenAuditFails(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	if err := store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_audit_approve",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		Reason:             "test",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	}); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      store,
+		Audit:        failingAuditBuf{},
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_unused" },
+		NewLeaseTok:  func() string { return "lease_audit_approve" },
+	}
+
+	if _, err := svc.ApproveRequest("req_audit_approve", 5); !errors.Is(err, ErrAuditUnavailable) {
+		t.Fatalf("expected audit failure, got %v", err)
+	}
+	stored, err := store.GetRequest("req_audit_approve")
+	if err != nil {
+		t.Fatalf("get request: %v", err)
+	}
+	if stored.Status != domain.RequestPending {
+		t.Fatalf("expected request rollback to pending, got %s", stored.Status)
+	}
+	if _, err := store.GetLease("lease_audit_approve"); err == nil {
+		t.Fatalf("expected lease rollback after audit failure")
+	}
+}
+
+func TestApproveRequestCarriesEnvPathMetadataOnPrimaryAudit(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	if err := store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_env_audit_approve",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		Reason:             "test",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		EnvPath:            "./.env",
+		EnvPathCanonical:   "/workspace/.env",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	}); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      store,
+		Audit:        &scriptedAuditBuf{failAt: 2},
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_unused" },
+		NewLeaseTok:  func() string { return "lease_env_audit_approve" },
+	}
+
+	lease, err := svc.ApproveRequest("req_env_audit_approve", 5)
+	if err != nil {
+		t.Fatalf("expected approve success, got %v", err)
+	}
+	stored, err := store.GetRequest("req_env_audit_approve")
+	if err != nil {
+		t.Fatalf("get request: %v", err)
+	}
+	if stored.Status != domain.RequestApproved {
+		t.Fatalf("expected request to stay approved, got %s", stored.Status)
+	}
+	if _, err := store.GetLease(lease.Token); err != nil {
+		t.Fatalf("expected lease to stay committed, got %v", err)
+	}
+	foundPrimary := false
+	for _, ev := range svc.Audit.(*scriptedAuditBuf).events {
+		if ev.Event != "request_approved" {
+			continue
+		}
+		foundPrimary = true
+		if ev.Metadata["env_path_original"] != "./.env" {
+			t.Fatalf("expected primary approval audit to carry env_path_original, got %q", ev.Metadata["env_path_original"])
+		}
+		if ev.Metadata["env_path_canonical"] != "/workspace/.env" {
+			t.Fatalf("expected primary approval audit to carry env_path_canonical, got %q", ev.Metadata["env_path_canonical"])
+		}
+	}
+	if !foundPrimary {
+		t.Fatalf("expected request_approved audit event")
+	}
+}
+
+func TestDenyRequestRollsBackWhenAuditFails(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	if err := store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_audit_deny",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		Reason:             "test",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	}); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      store,
+		Audit:        failingAuditBuf{},
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_unused" },
+		NewLeaseTok:  func() string { return "lease_unused" },
+	}
+
+	if _, err := svc.DenyRequest("req_audit_deny", "deny"); !errors.Is(err, ErrAuditUnavailable) {
+		t.Fatalf("expected audit failure, got %v", err)
+	}
+	stored, err := store.GetRequest("req_audit_deny")
+	if err != nil {
+		t.Fatalf("get request: %v", err)
+	}
+	if stored.Status != domain.RequestPending {
+		t.Fatalf("expected request rollback to pending, got %s", stored.Status)
+	}
+}
+
+func TestDenyRequestCarriesEnvPathMetadataOnPrimaryAudit(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	if err := store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_env_audit_deny",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		Reason:             "test",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		EnvPath:            "./.env",
+		EnvPathCanonical:   "/workspace/.env",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	}); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      store,
+		Audit:        &scriptedAuditBuf{failAt: 2},
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_unused" },
+		NewLeaseTok:  func() string { return "lease_unused" },
+	}
+
+	if _, err := svc.DenyRequest("req_env_audit_deny", "deny"); err != nil {
+		t.Fatalf("expected deny success, got %v", err)
+	}
+	stored, err := store.GetRequest("req_env_audit_deny")
+	if err != nil {
+		t.Fatalf("get request: %v", err)
+	}
+	if stored.Status != domain.RequestDenied {
+		t.Fatalf("expected request to stay denied, got %s", stored.Status)
+	}
+	foundPrimary := false
+	for _, ev := range svc.Audit.(*scriptedAuditBuf).events {
+		if ev.Event != "request_denied" {
+			continue
+		}
+		foundPrimary = true
+		if ev.Metadata["env_path_original"] != "./.env" {
+			t.Fatalf("expected primary deny audit to carry env_path_original, got %q", ev.Metadata["env_path_original"])
+		}
+		if ev.Metadata["env_path_canonical"] != "/workspace/.env" {
+			t.Fatalf("expected primary deny audit to carry env_path_canonical, got %q", ev.Metadata["env_path_canonical"])
+		}
+	}
+	if !foundPrimary {
+		t.Fatalf("expected request_denied audit event")
+	}
+}
+
+func TestCancelRequestByAgentRollsBackWhenAuditFails(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	if err := store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_audit_cancel",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		Reason:             "test",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	}); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      store,
+		Audit:        failingAuditBuf{},
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_unused" },
+		NewLeaseTok:  func() string { return "lease_unused" },
+	}
+
+	if _, err := svc.CancelRequestByAgent("req_audit_cancel", "agent1", "cancel"); !errors.Is(err, ErrAuditUnavailable) {
+		t.Fatalf("expected audit failure, got %v", err)
+	}
+	stored, err := store.GetRequest("req_audit_cancel")
+	if err != nil {
+		t.Fatalf("get request: %v", err)
+	}
+	if stored.Status != domain.RequestPending {
+		t.Fatalf("expected request rollback to pending, got %s", stored.Status)
+	}
+}
+
+func TestRequestLeaseRollsBackWhenStateCommitFails(t *testing.T) {
+	store := memory.NewStore()
+	audit := &auditBuf{}
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	svc := Service{
+		Policy:                     domain.DefaultPolicy(),
+		Requests:                   store,
+		Leases:                     store,
+		RequestLeaseStateCommitter: failingRequestLeaseStateCommitter{err: errors.New("disk full")},
+		Secrets:                    store,
+		Audit:                      audit,
+		Now:                        func() time.Time { return now },
+		NewRequestID:               func() string { return "req_commit_rollback" },
+		NewLeaseTok:                func() string { return "lease_unused" },
+	}
+
+	if _, err := svc.RequestLease("agent1", "task1", "test", 5, []string{"github_token"}, "fp1", "wd1", "", ""); err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("expected commit failure, got %v", err)
+	}
+	if _, err := store.GetRequest("req_commit_rollback"); err == nil {
+		t.Fatalf("expected request rollback after state commit failure")
+	}
+	if len(audit.events) != 0 {
+		t.Fatalf("expected no success audit events after state commit failure, got %d", len(audit.events))
+	}
+}
+
+func TestApproveRequestRollsBackWhenStateCommitFails(t *testing.T) {
+	store := memory.NewStore()
+	audit := &auditBuf{}
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	if err := store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_commit_approve",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		Reason:             "test",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	}); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+
+	svc := Service{
+		Policy:                     domain.DefaultPolicy(),
+		Requests:                   store,
+		Leases:                     store,
+		RequestLeaseStateCommitter: failingRequestLeaseStateCommitter{err: errors.New("disk full")},
+		Secrets:                    store,
+		Audit:                      audit,
+		Now:                        func() time.Time { return now },
+		NewRequestID:               func() string { return "req_unused" },
+		NewLeaseTok:                func() string { return "lease_commit_approve" },
+	}
+
+	if _, err := svc.ApproveRequest("req_commit_approve", 5); err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("expected commit failure, got %v", err)
+	}
+	stored, err := store.GetRequest("req_commit_approve")
+	if err != nil {
+		t.Fatalf("get request: %v", err)
+	}
+	if stored.Status != domain.RequestPending {
+		t.Fatalf("expected request rollback to pending, got %s", stored.Status)
+	}
+	if _, err := store.GetLease("lease_commit_approve"); err == nil {
+		t.Fatalf("expected lease rollback after state commit failure")
+	}
+	if len(audit.events) != 0 {
+		t.Fatalf("expected no success audit events after state commit failure, got %d", len(audit.events))
+	}
+}
+
+func TestDenyRequestRollsBackWhenStateCommitFails(t *testing.T) {
+	store := memory.NewStore()
+	audit := &auditBuf{}
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	if err := store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_commit_deny",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		Reason:             "test",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	}); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+
+	svc := Service{
+		Policy:                     domain.DefaultPolicy(),
+		Requests:                   store,
+		Leases:                     store,
+		RequestLeaseStateCommitter: failingRequestLeaseStateCommitter{err: errors.New("disk full")},
+		Secrets:                    store,
+		Audit:                      audit,
+		Now:                        func() time.Time { return now },
+		NewRequestID:               func() string { return "req_unused" },
+		NewLeaseTok:                func() string { return "lease_unused" },
+	}
+
+	if _, err := svc.DenyRequest("req_commit_deny", "deny"); err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("expected commit failure, got %v", err)
+	}
+	stored, err := store.GetRequest("req_commit_deny")
+	if err != nil {
+		t.Fatalf("get request: %v", err)
+	}
+	if stored.Status != domain.RequestPending {
+		t.Fatalf("expected request rollback to pending, got %s", stored.Status)
+	}
+	if len(audit.events) != 0 {
+		t.Fatalf("expected no success audit events after state commit failure, got %d", len(audit.events))
+	}
+}
+
+func TestCancelRequestByAgentRollsBackWhenStateCommitFails(t *testing.T) {
+	store := memory.NewStore()
+	audit := &auditBuf{}
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	if err := store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req_commit_cancel",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		Reason:             "test",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	}); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+
+	svc := Service{
+		Policy:                     domain.DefaultPolicy(),
+		Requests:                   store,
+		Leases:                     store,
+		RequestLeaseStateCommitter: failingRequestLeaseStateCommitter{err: errors.New("disk full")},
+		Secrets:                    store,
+		Audit:                      audit,
+		Now:                        func() time.Time { return now },
+		NewRequestID:               func() string { return "req_unused" },
+		NewLeaseTok:                func() string { return "lease_unused" },
+	}
+
+	if _, err := svc.CancelRequestByAgent("req_commit_cancel", "agent1", "cancel"); err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("expected commit failure, got %v", err)
+	}
+	stored, err := store.GetRequest("req_commit_cancel")
+	if err != nil {
+		t.Fatalf("get request: %v", err)
+	}
+	if stored.Status != domain.RequestPending {
+		t.Fatalf("expected request rollback to pending, got %s", stored.Status)
+	}
+	if len(audit.events) != 0 {
+		t.Fatalf("expected no success audit events after state commit failure, got %d", len(audit.events))
+	}
+}
+
+func TestRequestLeaseRePersistsRollbackWhenStateCommitFailsAfterDurableWrite(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "state-store.json")
+	committer := &persistThenFailRequestLeaseStateCommitter{source: store, path: path, failAt: 1}
+	svc := Service{
+		Policy:                     domain.DefaultPolicy(),
+		Requests:                   store,
+		Leases:                     store,
+		RequestLeaseStateCommitter: committer,
+		Secrets:                    store,
+		Audit:                      &auditBuf{},
+		Now:                        func() time.Time { return now },
+		NewRequestID:               func() string { return "req_commit_after_write" },
+		NewLeaseTok:                func() string { return "lease_unused" },
+	}
+
+	if _, err := svc.RequestLease("agent1", "task1", "test", 5, []string{"github_token"}, "fp1", "wd1", "", ""); err == nil {
+		t.Fatalf("expected commit failure")
+	}
+	if committer.calls != 2 {
+		t.Fatalf("expected commit + rollback persist, got %d commits", committer.calls)
+	}
+
+	reloaded := memory.NewStore()
+	if err := reloaded.LoadStateFromFile(path); err != nil {
+		t.Fatalf("load persisted state: %v", err)
+	}
+	if _, err := reloaded.GetRequest("req_commit_after_write"); err == nil {
+		t.Fatalf("expected persisted request rollback after commit failure")
+	}
+}
+
+func TestApproveRequestRePersistsRollbackWhenStateCommitFailsAfterDurableWrite(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "state-store.json")
+	req := domain.LeaseRequest{
+		ID:                 "req_commit_approve_after_write",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		Reason:             "test",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	}
+	if err := store.SaveRequest(req); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+	if err := store.SaveStateToFile(path); err != nil {
+		t.Fatalf("seed state file: %v", err)
+	}
+	committer := &persistThenFailRequestLeaseStateCommitter{source: store, path: path, failAt: 1}
+	svc := Service{
+		Policy:                     domain.DefaultPolicy(),
+		Requests:                   store,
+		Leases:                     store,
+		RequestLeaseStateCommitter: committer,
+		Secrets:                    store,
+		Audit:                      &auditBuf{},
+		Now:                        func() time.Time { return now },
+		NewRequestID:               func() string { return "req_unused" },
+		NewLeaseTok:                func() string { return "lease_commit_approve_after_write" },
+	}
+
+	if _, err := svc.ApproveRequest(req.ID, 5); err == nil {
+		t.Fatalf("expected commit failure")
+	}
+	if committer.calls != 2 {
+		t.Fatalf("expected commit + rollback persist, got %d commits", committer.calls)
+	}
+
+	reloaded := memory.NewStore()
+	if err := reloaded.LoadStateFromFile(path); err != nil {
+		t.Fatalf("load persisted state: %v", err)
+	}
+	stored, err := reloaded.GetRequest(req.ID)
+	if err != nil {
+		t.Fatalf("get persisted request: %v", err)
+	}
+	if stored.Status != domain.RequestPending {
+		t.Fatalf("expected persisted request rollback to pending, got %s", stored.Status)
+	}
+	if _, err := reloaded.GetLease("lease_commit_approve_after_write"); err == nil {
+		t.Fatalf("expected persisted lease rollback after commit failure")
+	}
+}
+
+func TestDenyRequestRePersistsRollbackWhenStateCommitFailsAfterDurableWrite(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "state-store.json")
+	req := domain.LeaseRequest{
+		ID:                 "req_commit_deny_after_write",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		Reason:             "test",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	}
+	if err := store.SaveRequest(req); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+	if err := store.SaveStateToFile(path); err != nil {
+		t.Fatalf("seed state file: %v", err)
+	}
+	committer := &persistThenFailRequestLeaseStateCommitter{source: store, path: path, failAt: 1}
+	svc := Service{
+		Policy:                     domain.DefaultPolicy(),
+		Requests:                   store,
+		Leases:                     store,
+		RequestLeaseStateCommitter: committer,
+		Secrets:                    store,
+		Audit:                      &auditBuf{},
+		Now:                        func() time.Time { return now },
+		NewRequestID:               func() string { return "req_unused" },
+		NewLeaseTok:                func() string { return "lease_unused" },
+	}
+
+	if _, err := svc.DenyRequest(req.ID, "deny"); err == nil {
+		t.Fatalf("expected commit failure")
+	}
+	if committer.calls != 2 {
+		t.Fatalf("expected commit + rollback persist, got %d commits", committer.calls)
+	}
+
+	reloaded := memory.NewStore()
+	if err := reloaded.LoadStateFromFile(path); err != nil {
+		t.Fatalf("load persisted state: %v", err)
+	}
+	stored, err := reloaded.GetRequest(req.ID)
+	if err != nil {
+		t.Fatalf("get persisted request: %v", err)
+	}
+	if stored.Status != domain.RequestPending {
+		t.Fatalf("expected persisted request rollback to pending, got %s", stored.Status)
+	}
+}
+
+func TestCancelRequestByAgentRePersistsRollbackWhenStateCommitFailsAfterDurableWrite(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "state-store.json")
+	req := domain.LeaseRequest{
+		ID:                 "req_commit_cancel_after_write",
+		AgentID:            "agent1",
+		TaskID:             "task1",
+		Reason:             "test",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp1",
+		WorkdirFingerprint: "wd1",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	}
+	if err := store.SaveRequest(req); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+	if err := store.SaveStateToFile(path); err != nil {
+		t.Fatalf("seed state file: %v", err)
+	}
+	committer := &persistThenFailRequestLeaseStateCommitter{source: store, path: path, failAt: 1}
+	svc := Service{
+		Policy:                     domain.DefaultPolicy(),
+		Requests:                   store,
+		Leases:                     store,
+		RequestLeaseStateCommitter: committer,
+		Secrets:                    store,
+		Audit:                      &auditBuf{},
+		Now:                        func() time.Time { return now },
+		NewRequestID:               func() string { return "req_unused" },
+		NewLeaseTok:                func() string { return "lease_unused" },
+	}
+
+	if _, err := svc.CancelRequestByAgent(req.ID, "agent1", "cancel"); err == nil {
+		t.Fatalf("expected commit failure")
+	}
+	if committer.calls != 2 {
+		t.Fatalf("expected commit + rollback persist, got %d commits", committer.calls)
+	}
+
+	reloaded := memory.NewStore()
+	if err := reloaded.LoadStateFromFile(path); err != nil {
+		t.Fatalf("load persisted state: %v", err)
+	}
+	stored, err := reloaded.GetRequest(req.ID)
+	if err != nil {
+		t.Fatalf("get persisted request: %v", err)
+	}
+	if stored.Status != domain.RequestPending {
+		t.Fatalf("expected persisted request rollback to pending, got %s", stored.Status)
+	}
+}
+
 func TestAccessSecretBackendFailureIsAuditedAndDeterministic(t *testing.T) {
 	store := memory.NewStore()
 	a := &auditBuf{}
@@ -111,6 +846,41 @@ func TestAccessSecretBackendFailureIsAuditedAndDeterministic(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected secret_backend_error audit event")
+	}
+}
+
+func TestAccessSecretBackendFailureAuditDoesNotLeakRawBackendError(t *testing.T) {
+	store := memory.NewStore()
+	a := &auditBuf{}
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      sensitiveErrorSecretStore{},
+		Audit:        a,
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_test" },
+		NewLeaseTok:  func() string { return "lease_test" },
+	}
+
+	_ = store.SaveRequest(domain.LeaseRequest{ID: "req_test", AgentID: "agent1", TaskID: "task1", TTLMinutes: 5, Secrets: []string{"github_token"}, CommandFingerprint: "fp1", WorkdirFingerprint: "wd1", Status: domain.RequestApproved, CreatedAt: now})
+	_ = store.SaveLease(domain.Lease{Token: "lease_test", RequestID: "req_test", AgentID: "agent1", TaskID: "task1", Secrets: []string{"github_token"}, CommandFingerprint: "fp1", WorkdirFingerprint: "wd1", ExpiresAt: now.Add(5 * time.Minute)})
+
+	_, err := svc.AccessSecret("lease_test", "github_token", "fp1", "wd1")
+	if err == nil || err.Error() != "secret backend unavailable" {
+		t.Fatalf("expected deterministic backend error, got %v", err)
+	}
+
+	ev, ok := findAuditEvent(a.events, "secret_backend_error")
+	if !ok {
+		t.Fatalf("expected secret_backend_error audit event")
+	}
+	if strings.Contains(ev.Metadata["reason"], "raw-secret-value") {
+		t.Fatalf("expected audit reason to avoid raw backend error content, got %q", ev.Metadata["reason"])
+	}
+	if ev.Metadata["reason"] == "" {
+		t.Fatalf("expected non-empty sanitized reason")
 	}
 }
 

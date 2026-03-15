@@ -20,8 +20,8 @@ func New(prefix string) *Store {
 
 func (s *Store) GetSecret(name string) (string, error) {
 	key := s.Prefix + strings.ToUpper(strings.TrimSpace(name))
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
 		return "", fmt.Errorf("secret %q not found in env source (%s)", name, key)
 	}
 	return v, nil

@@ -14,13 +14,15 @@ PromptLock is currently pre-1.0; this checklist defines the gate for a public OS
 make release-readiness-gate
 ```
 
-If Docker daemon is unavailable in your local environment, run the non-compose subset first and complete `make e2e-compose` on a Docker-capable runner before release sign-off:
+If Docker daemon is unavailable in your local environment, you can still run the release gate directly because it now uses the hardened host-side smoke path instead of the old compose demo. Run the non-compose subset only when you want a quicker preflight:
 
 ```bash
 make release-readiness-gate-core
 ```
 
-3. (Optional re-run) smoke integration in isolation if you skipped it above:
+`make release-readiness-gate` now runs the supported hardened dual-socket smoke path (`make real-e2e-smoke`) instead of the older dev/insecure compose demo.
+
+3. (Optional re-run) smoke integration in isolation if you want the extra dev/demo compose coverage in addition to the release gate:
 
 ```bash
 make e2e-compose

@@ -1,5 +1,7 @@
 # Example workflow
 
+This is a mock-broker localhost-TCP demo only. It is not the supported hardened deployment path.
+
 ## 1) Start broker
 ```bash
 go run ./cmd/promptlock-mock-broker
@@ -18,7 +20,7 @@ scripts/secretctl.sh request \
 
 ## 3) Human approves request
 ```bash
-scripts/human-approve.sh <request_id> 15
+APPROVE_ENDPOINT_STYLE=path scripts/human-approve.sh <request_id> 15
 ```
 
 ## 4) Agent accesses approved secret

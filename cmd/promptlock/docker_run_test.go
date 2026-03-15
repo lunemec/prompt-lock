@@ -46,7 +46,7 @@ func TestBuildDockerRunArgsWithUnixSocket(t *testing.T) {
 		"/bin/sh",
 		"--workdir",
 		"/workspace",
-		"PROMPTLOCK_SESSION_TOKEN=sess_123",
+		"PROMPTLOCK_SESSION_TOKEN",
 		"PROMPTLOCK_AGENT_UNIX_SOCKET=/run/promptlock/promptlock.sock",
 		"CODEX_HOME=/workspace/.codex",
 		"type=bind,src=/host/workspace,dst=/workspace",
@@ -58,6 +58,9 @@ func TestBuildDockerRunArgsWithUnixSocket(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected docker args to contain %q, got %q", want, joined)
 		}
+	}
+	if strings.Contains(joined, "PROMPTLOCK_SESSION_TOKEN=sess_123") {
+		t.Fatalf("expected session token value to stay out of docker argv, got %q", joined)
 	}
 }
 
@@ -75,13 +78,19 @@ func TestBuildDockerRunArgsWithBrokerURL(t *testing.T) {
 
 	joined := strings.Join(args, "\n")
 	checks := []string{
-		"PROMPTLOCK_SESSION_TOKEN=sess_123",
-		"PROMPTLOCK_BROKER_URL=https://promptlock.example.internal:8765",
+		"PROMPTLOCK_SESSION_TOKEN",
+		"PROMPTLOCK_BROKER_URL",
 	}
 	for _, want := range checks {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected docker args to contain %q, got %q", want, joined)
 		}
+	}
+	if strings.Contains(joined, "PROMPTLOCK_SESSION_TOKEN=sess_123") {
+		t.Fatalf("expected session token value to stay out of docker argv, got %q", joined)
+	}
+	if strings.Contains(joined, "PROMPTLOCK_BROKER_URL=https://promptlock.example.internal:8765") {
+		t.Fatalf("expected broker URL value to stay out of docker argv, got %q", joined)
 	}
 	for _, removed := range []string{
 		"PROMPTLOCK_BROKER_TLS_CA_FILE=",

@@ -2,16 +2,10 @@ package main
 
 import (
 	"bytes"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
+	"context"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -32,6 +26,13 @@ type result struct {
 type report struct {
 	OK      bool     `json:"ok"`
 	Results []result `json:"results"`
+}
+
+type harnessTransport struct {
+	operatorClient *http.Client
+	operatorBase   string
+	agentClient    *http.Client
+	agentBase      string
 }
 
 func main() {
@@ -124,24 +125,11 @@ func run(outPath, profile string) (report, int) {
 		authCfg["store_encryption_key_env"] = "PROMPTLOCK_AUTH_STORE_KEY"
 	}
 
-	base := fmt.Sprintf("http://127.0.0.1:%d", port)
-	insecureTLS := false
-	if profile == "hardened" {
-		certPath := filepath.Join(td, "server.crt")
-		keyPath := filepath.Join(td, "server.key")
-		if err := writeSelfSignedCert(certPath, keyPath); err != nil {
-			rep.Results = append(rep.Results, result{Name: "broker_setup", OK: false, Detail: err.Error()})
-			rep.OK = false
-			return rep, 1
-		}
-		cfg["tls"] = map[string]any{
-			"enable":              true,
-			"cert_file":           certPath,
-			"key_file":            keyPath,
-			"require_client_cert": false,
-		}
-		base = fmt.Sprintf("https://127.0.0.1:%d", port)
-		insecureTLS = true
+	transport, err := configureHarnessTransport(profile, td, port, cfg)
+	if err != nil {
+		rep.Results = append(rep.Results, result{Name: "broker_setup", OK: false, Detail: err.Error()})
+		rep.OK = false
+		return rep, 1
 	}
 
 	cfgPath := filepath.Join(td, "config.json")
@@ -210,11 +198,7 @@ func run(outPath, profile string) (report, int) {
 		}
 	}()
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	if insecureTLS {
-		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} //nolint:gosec
-	}
-	if !waitForUp(client, base, 45*time.Second) {
+	if !waitForUp(transport.operatorClient, transport.operatorBase, 45*time.Second) {
 		rep.Results = append(rep.Results, result{Name: "broker_start", OK: false, Detail: "broker did not start in time", LogTail: tailLog(logPath, 20)})
 		rep.OK = false
 		return rep, 1
@@ -223,11 +207,11 @@ func run(outPath, profile string) (report, int) {
 	results := make([]result, 0, 8)
 	add := func(r result) { results = append(results, r) }
 
-	status, _, _ := httpJSON(client, http.MethodPost, base+"/v1/leases/approve?request_id=x", nil, nil)
+	status, _, _ := httpJSON(transport.operatorClient, http.MethodPost, transport.operatorBase+"/v1/leases/approve?request_id=x", nil, nil)
 	add(result{Name: "auth_bypass_operator_endpoint", OK: status == http.StatusUnauthorized, Status: status, Expected: http.StatusUnauthorized})
 
 	opHeaders := map[string]string{"Authorization": "Bearer " + operatorToken}
-	status, body, _ := httpJSON(client, http.MethodPost, base+"/v1/auth/bootstrap/create", map[string]any{"agent_id": "a1", "container_id": "c1"}, opHeaders)
+	status, body, _ := httpJSON(transport.operatorClient, http.MethodPost, transport.operatorBase+"/v1/auth/bootstrap/create", map[string]any{"agent_id": "a1", "container_id": "c1"}, opHeaders)
 	boot, _ := body["bootstrap_token"].(string)
 	okBoot := status == http.StatusOK && boot != ""
 	add(result{Name: "bootstrap_create", OK: okBoot, Status: status})
@@ -235,7 +219,7 @@ func run(outPath, profile string) (report, int) {
 		return finalize(results), 1
 	}
 
-	status, body, _ = httpJSON(client, http.MethodPost, base+"/v1/auth/pair/complete", map[string]any{"token": boot, "container_id": "c1"}, nil)
+	status, body, _ = httpJSON(transport.agentClient, http.MethodPost, transport.agentBase+"/v1/auth/pair/complete", map[string]any{"token": boot, "container_id": "c1"}, nil)
 	grant, _ := body["grant_id"].(string)
 	okPair := status == http.StatusOK && grant != ""
 	add(result{Name: "pair_complete", OK: okPair, Status: status})
@@ -243,10 +227,10 @@ func run(outPath, profile string) (report, int) {
 		return finalize(results), 1
 	}
 
-	status, _, _ = httpJSON(client, http.MethodPost, base+"/v1/auth/pair/complete", map[string]any{"token": boot, "container_id": "c1"}, nil)
+	status, _, _ = httpJSON(transport.agentClient, http.MethodPost, transport.agentBase+"/v1/auth/pair/complete", map[string]any{"token": boot, "container_id": "c1"}, nil)
 	add(result{Name: "bootstrap_replay_denied", OK: status == http.StatusForbidden, Status: status, Expected: http.StatusForbidden})
 
-	status, body, _ = httpJSON(client, http.MethodPost, base+"/v1/auth/session/mint", map[string]any{"grant_id": grant}, nil)
+	status, body, _ = httpJSON(transport.agentClient, http.MethodPost, transport.agentBase+"/v1/auth/session/mint", map[string]any{"grant_id": grant}, nil)
 	sess, _ := body["session_token"].(string)
 	okSess := status == http.StatusOK && sess != ""
 	add(result{Name: "session_mint", OK: okSess, Status: status})
@@ -255,7 +239,7 @@ func run(outPath, profile string) (report, int) {
 	}
 
 	agentHeaders := map[string]string{"Authorization": "Bearer " + sess}
-	status, _, _ = httpJSON(client, http.MethodPost, base+"/v1/leases/approve?request_id=x", map[string]any{}, agentHeaders)
+	status, _, _ = httpJSON(transport.operatorClient, http.MethodPost, transport.operatorBase+"/v1/leases/approve?request_id=x", map[string]any{}, agentHeaders)
 	add(result{Name: "role_confusion_agent_on_operator", OK: status == http.StatusUnauthorized, Status: status, Expected: http.StatusUnauthorized})
 
 	payload := map[string]any{
@@ -266,7 +250,7 @@ func run(outPath, profile string) (report, int) {
 		"command_fingerprint": "fp",
 		"workdir_fingerprint": "wd",
 	}
-	status, _, _ = httpJSON(client, http.MethodPost, base+"/v1/leases/execute", payload, agentHeaders)
+	status, _, _ = httpJSON(transport.agentClient, http.MethodPost, transport.agentBase+"/v1/leases/execute", payload, agentHeaders)
 	add(result{Name: "egress_bypass_denied", OK: status == http.StatusForbidden, Status: status, Expected: http.StatusForbidden})
 
 	rep = finalize(results)
@@ -285,6 +269,30 @@ func finalize(results []result) report {
 		}
 	}
 	return report{OK: ok, Results: results}
+}
+
+func configureHarnessTransport(profile, tempDir string, port int, cfg map[string]any) (harnessTransport, error) {
+	delete(cfg, "tls")
+	if profile == "hardened" {
+		agentSocket := filepath.Join(tempDir, "promptlock-agent.sock")
+		operatorSocket := filepath.Join(tempDir, "promptlock-operator.sock")
+		cfg["agent_unix_socket"] = agentSocket
+		cfg["operator_unix_socket"] = operatorSocket
+		return harnessTransport{
+			operatorClient: newUnixSocketClient(operatorSocket),
+			operatorBase:   "http://unix",
+			agentClient:    newUnixSocketClient(agentSocket),
+			agentBase:      "http://unix",
+		}, nil
+	}
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
+	client := &http.Client{Timeout: 5 * time.Second}
+	return harnessTransport{
+		operatorClient: client,
+		operatorBase:   base,
+		agentClient:    client,
+		agentBase:      base,
+	}, nil
 }
 
 func pickPort() (int, error) {
@@ -306,6 +314,19 @@ func waitForUp(client *http.Client, base string, timeout time.Duration) bool {
 		time.Sleep(200 * time.Millisecond)
 	}
 	return false
+}
+
+func newUnixSocketClient(socketPath string) *http.Client {
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			dialer := &net.Dialer{Timeout: 5 * time.Second}
+			return dialer.DialContext(ctx, "unix", socketPath)
+		},
+	}
+	return &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: transport,
+	}
 }
 
 func httpJSON(client *http.Client, method, url string, body any, headers map[string]string) (int, map[string]any, string) {
@@ -346,52 +367,4 @@ func tailLog(path string, n int) string {
 		return string(bytes.TrimSpace(b))
 	}
 	return string(bytes.Join(lines[len(lines)-n:], []byte{'\n'}))
-}
-
-func writeSelfSignedCert(certPath, keyPath string) error {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return err
-	}
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	template := &x509.Certificate{
-		SerialNumber: serial,
-		Subject: pkix.Name{
-			CommonName: "127.0.0.1",
-		},
-		NotBefore:             now.Add(-1 * time.Hour),
-		NotAfter:              now.Add(24 * time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	if err != nil {
-		return err
-	}
-	cf, err := os.Create(certPath)
-	if err != nil {
-		return err
-	}
-	if err := pem.Encode(cf, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
-		_ = cf.Close()
-		return err
-	}
-	if err := cf.Close(); err != nil {
-		return err
-	}
-	kf, err := os.Create(keyPath)
-	if err != nil {
-		return err
-	}
-	if err := pem.Encode(kf, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}); err != nil {
-		_ = kf.Close()
-		return err
-	}
-	return kf.Close()
 }

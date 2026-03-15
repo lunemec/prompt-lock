@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-type persistedState struct {
+type StoreSnapshot struct {
 	Bootstrap map[string]BootstrapToken `json:"bootstrap"`
 	Grants    map[string]PairingGrant   `json:"grants"`
 	Sessions  map[string]SessionToken   `json:"sessions"`
@@ -41,10 +41,10 @@ var syncParentDir = func(path string) error {
 	return nil
 }
 
-func (s *Store) snapshotState() persistedState {
+func (s *Store) Snapshot() StoreSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := persistedState{
+	out := StoreSnapshot{
 		Bootstrap: make(map[string]BootstrapToken, len(s.bootstrap)),
 		Grants:    make(map[string]PairingGrant, len(s.grants)),
 		Sessions:  make(map[string]SessionToken, len(s.sessions)),
@@ -61,7 +61,7 @@ func (s *Store) snapshotState() persistedState {
 	return out
 }
 
-func (s *Store) restoreState(state persistedState) {
+func (s *Store) Restore(state StoreSnapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if state.Bootstrap != nil {
@@ -186,7 +186,7 @@ func decryptState(in encryptedPersistedState, key []byte) ([]byte, error) {
 }
 
 func (s *Store) SaveToFile(path string) error {
-	state := s.snapshotState()
+	state := s.Snapshot()
 	b, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
@@ -198,7 +198,7 @@ func (s *Store) SaveToFile(path string) error {
 }
 
 func (s *Store) SaveToFileEncrypted(path string, key []byte) error {
-	state := s.snapshotState()
+	state := s.Snapshot()
 	rawState, err := json.Marshal(state)
 	if err != nil {
 		return err
@@ -228,11 +228,11 @@ func (s *Store) LoadFromFile(path string) error {
 	if len(b) == 0 {
 		return nil
 	}
-	var state persistedState
+	var state StoreSnapshot
 	if err := json.Unmarshal(b, &state); err != nil {
 		return fmt.Errorf("parse auth store: %w", err)
 	}
-	s.restoreState(state)
+	s.Restore(state)
 	return nil
 }
 
@@ -258,10 +258,10 @@ func (s *Store) LoadFromFileEncrypted(path string, key []byte) error {
 	if err != nil {
 		return err
 	}
-	var state persistedState
+	var state StoreSnapshot
 	if err := json.Unmarshal(rawState, &state); err != nil {
 		return fmt.Errorf("parse encrypted auth store payload: %w", err)
 	}
-	s.restoreState(state)
+	s.Restore(state)
 	return nil
 }

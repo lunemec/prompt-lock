@@ -19,10 +19,7 @@ Environment variables `PROMPTLOCK_ADDR`, `PROMPTLOCK_AUDIT_PATH`, `PROMPTLOCK_UN
   "audit_path": "/var/log/promptlock/audit.jsonl",
   "state_store_file": "/var/lib/promptlock/state-store.json",
   "state_store": {
-    "type": "file",
-    "external_url": "https://state.example.internal",
-    "external_auth_token_env": "PROMPTLOCK_EXTERNAL_STATE_TOKEN",
-    "external_timeout_sec": 10
+    "type": "file"
   },
   "policy": {
     "default_ttl_minutes": 5,
@@ -47,9 +44,6 @@ Environment variables `PROMPTLOCK_ADDR`, `PROMPTLOCK_AUDIT_PATH`, `PROMPTLOCK_UN
   "secret_source": {
     "type": "env",
     "env_prefix": "PROMPTLOCK_SECRET_",
-    "external_url": "https://secrets.example.internal",
-    "external_auth_token_env": "PROMPTLOCK_EXTERNAL_SECRET_TOKEN",
-    "external_timeout_sec": 10,
     "in_memory_hardened": "fail"
   }
 }
@@ -58,6 +52,7 @@ Environment variables `PROMPTLOCK_ADDR`, `PROMPTLOCK_AUDIT_PATH`, `PROMPTLOCK_UN
 This example shows the recommended modern pattern: hardened profile plus `secret_source`.
 For demos that intentionally use `in_memory`, set `secret_source.type` to `in_memory` and provide `secrets[]` values explicitly.
 For external HTTP-backed secret retrieval, set `secret_source.type` to `external` and keep `external_url` + `external_auth_token_env` configured.
+Do not leave backend fields for inactive modes in canonical configs. `state_store.external_*` applies only when `state_store.type=external`, and `secret_source.file_path` / `secret_source.external_*` apply only to `secret_source.type=file|external`.
 If hardened local config omits all socket fields and keeps the listener local-only, PromptLock defaults to `/tmp/promptlock-agent.sock` and `/tmp/promptlock-operator.sock`.
 
 ## Auth notes
@@ -78,8 +73,8 @@ If hardened local config omits all socket fields and keeps the listener local-on
 - `state_store.external_timeout_sec` controls HTTP timeout when `state_store.type=external`.
 - Current limitation: `state_store.type=external` provides durability/availability integration but does not add concurrency-safe multi-writer request/lease transitions. Treat it as a single-writer or carefully controlled deployment path until atomic transition semantics are added.
 - External state backend API contract:
-  - `PUT /v1/state/requests/{id}`, `GET /v1/state/requests/{id}`, `GET /v1/state/requests/pending`
-  - `PUT /v1/state/leases/{token}`, `GET /v1/state/leases/{token}`, `GET /v1/state/leases/by-request/{request_id}`
+  - `PUT /v1/state/requests/{id}`, `GET /v1/state/requests/{id}`, `DELETE /v1/state/requests/{id}`, `GET /v1/state/requests/pending`
+  - `PUT /v1/state/leases/{token}`, `GET /v1/state/leases/{token}`, `DELETE /v1/state/leases/{token}`, `GET /v1/state/leases/by-request/{request_id}`
 - Persistence writes now fail closed: if auth-store or request/lease state persistence fails at runtime, PromptLock closes a durability gate, audit-logs the failure, and mutating auth/lease endpoints return `503 Service Unavailable`.
 - Persistence writes fsync both data files and parent directories after atomic rename. Use host storage/filesystems that support directory sync semantics for crash-consistent metadata updates.
 - PromptLock acquires fail-closed single-writer locks for configured persistence files (`state_store_file.lock`, `auth.store_file.lock`) at startup; concurrent writer startups against the same files are blocked.

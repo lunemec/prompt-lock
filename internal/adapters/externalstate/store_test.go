@@ -35,6 +35,11 @@ func TestStoreRoundTripRequestsAndLeases(t *testing.T) {
 			requests[req.ID] = req
 			w.WriteHeader(http.StatusNoContent)
 			return
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/state/requests/"):
+			id := strings.TrimPrefix(r.URL.Path, "/v1/state/requests/")
+			delete(requests, id)
+			w.WriteHeader(http.StatusNoContent)
+			return
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/state/requests/pending":
 			pending := make([]domain.LeaseRequest, 0)
 			for _, req := range requests {
@@ -60,6 +65,11 @@ func TestStoreRoundTripRequestsAndLeases(t *testing.T) {
 				return
 			}
 			leases[lease.Token] = lease
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/state/leases/"):
+			token := strings.TrimPrefix(r.URL.Path, "/v1/state/leases/")
+			delete(leases, token)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/state/leases/by-request/"):
@@ -155,6 +165,20 @@ func TestStoreRoundTripRequestsAndLeases(t *testing.T) {
 	}
 	if gotByReq.Token != lease.Token {
 		t.Fatalf("expected lease token %q, got %q", lease.Token, gotByReq.Token)
+	}
+
+	if err := store.DeleteLease(lease.Token); err != nil {
+		t.Fatalf("delete lease: %v", err)
+	}
+	if _, err := store.GetLease(lease.Token); err == nil {
+		t.Fatalf("expected deleted lease lookup to fail")
+	}
+
+	if err := store.DeleteRequest(request.ID); err != nil {
+		t.Fatalf("delete request: %v", err)
+	}
+	if _, err := store.GetRequest(request.ID); err == nil {
+		t.Fatalf("expected deleted request lookup to fail")
 	}
 }
 

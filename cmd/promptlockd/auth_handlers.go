@@ -23,8 +23,9 @@ type mintSessionReq struct {
 }
 
 type revokeReq struct {
-	GrantID   string `json:"grant_id,omitempty"`
-	SessionID string `json:"session_id,omitempty"`
+	GrantID      string `json:"grant_id,omitempty"`
+	SessionToken string `json:"session_token,omitempty"`
+	SessionID    string `json:"session_id,omitempty"`
 }
 
 func (s *server) handleAuthBootstrapCreate(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +53,7 @@ func (s *server) handleAuthBootstrapCreate(w http.ResponseWriter, r *http.Reques
 	at, aid := actorFromRequest(r)
 	t, err := s.authLifecycleSvc().CreateBootstrap(req.AgentID, req.ContainerID, at, aid)
 	if err != nil {
-		if errors.Is(err, ErrDurabilityClosed) {
+		if errors.Is(err, ErrDurabilityClosed) || errors.Is(err, app.ErrAuditUnavailable) {
 			writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
 			return
 		}
@@ -65,6 +66,9 @@ func (s *server) handleAuthBootstrapCreate(w http.ResponseWriter, r *http.Reques
 func (s *server) handleAuthPairComplete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.enforceAuthRateLimit(w, r, "auth_pair_complete") {
 		return
 	}
 	if !s.authEnabled {
@@ -81,10 +85,11 @@ func (s *server) handleAuthPairComplete(w http.ResponseWriter, r *http.Request) 
 	}
 	g, err := s.authLifecycleSvc().CompletePairing(req.Token, req.ContainerID)
 	if err != nil {
-		if errors.Is(err, ErrDurabilityClosed) {
+		if errors.Is(err, ErrDurabilityClosed) || errors.Is(err, app.ErrAuditUnavailable) {
 			writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
 			return
 		}
+		s.recordAuthFailure(r, "auth_pair_complete", err.Error())
 		if err.Error() == "token and container_id are required" {
 			writeMappedError(w, ErrBadRequest, err.Error())
 			return
@@ -98,6 +103,9 @@ func (s *server) handleAuthPairComplete(w http.ResponseWriter, r *http.Request) 
 func (s *server) handleAuthSessionMint(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeMappedError(w, ErrMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.enforceAuthRateLimit(w, r, "auth_session_mint") {
 		return
 	}
 	if !s.authEnabled {
@@ -114,10 +122,11 @@ func (s *server) handleAuthSessionMint(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := s.authLifecycleSvc().MintSession(req.GrantID)
 	if err != nil {
-		if errors.Is(err, ErrDurabilityClosed) {
+		if errors.Is(err, ErrDurabilityClosed) || errors.Is(err, app.ErrAuditUnavailable) {
 			writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
 			return
 		}
+		s.recordAuthFailure(r, "auth_session_mint", err.Error())
 		switch err.Error() {
 		case "grant not found":
 			writeMappedError(w, ErrNotFound, err.Error())
@@ -153,10 +162,18 @@ func (s *server) handleAuthRevoke(w http.ResponseWriter, r *http.Request) {
 		writeMappedError(w, ErrBadRequest, err.Error())
 		return
 	}
+	sessionToken := req.SessionToken
+	if sessionToken == "" {
+		sessionToken = req.SessionID
+	}
 	at, aid := actorFromRequest(r)
-	if err := s.authLifecycleSvc().Revoke(req.GrantID, req.SessionID, at, aid); err != nil {
-		if errors.Is(err, ErrDurabilityClosed) {
+	if err := s.authLifecycleSvc().Revoke(req.GrantID, sessionToken, at, aid); err != nil {
+		if errors.Is(err, ErrDurabilityClosed) || errors.Is(err, app.ErrAuditUnavailable) {
 			writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
+			return
+		}
+		if err.Error() == "grant_id or session_token is required" {
+			writeMappedError(w, ErrBadRequest, err.Error())
 			return
 		}
 		writeMappedError(w, ErrNotFound, err.Error())
@@ -180,5 +197,8 @@ func (s *server) authLifecycleSvc() app.AuthLifecycle {
 		NewGrantID:        func() string { return mustSecureToken("grant_") },
 		NewSessionToken:   func() string { return mustSecureToken("sess_") },
 		Persist:           s.persistAuthStore,
+		AuditFailureHandler: func(err error) error {
+			return s.closeDurabilityGate("audit", err)
+		},
 	}
 }

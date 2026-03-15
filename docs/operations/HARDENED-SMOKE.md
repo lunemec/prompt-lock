@@ -10,7 +10,7 @@ make hardened-smoke
 
 ## What it covers
 1. Transport safety checks for the supported local hardened path, including dual-socket guardrails and local transport defaults.
-2. Live hardened broker abuse-path smoke run (`security-redteam-live-hardened`).
+2. Live hardened broker abuse-path smoke run (`security-redteam-live-hardened`) against the supported dual-socket local-only transport shape.
 
 ## Expected output
 - `Hardened smoke suite passed.`

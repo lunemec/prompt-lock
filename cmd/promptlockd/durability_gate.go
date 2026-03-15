@@ -52,7 +52,7 @@ func (s *server) closeDurabilityGate(component string, err error) error {
 	}
 	s.durabilityMu.Unlock()
 
-	if s.svc.Audit != nil {
+	if s.svc.Audit != nil && component != "audit" {
 		event := ports.AuditEvent{
 			Event:     "durability_persist_failed",
 			Timestamp: s.nowUTC(),
@@ -80,4 +80,17 @@ func (s *server) requireDurabilityReady(w http.ResponseWriter) bool {
 		return false
 	}
 	return true
+}
+
+func (s *server) auditCritical(event ports.AuditEvent) error {
+	if s == nil || s.svc.Audit == nil {
+		return nil
+	}
+	if err := s.svc.Audit.Write(event); err != nil {
+		if handled := s.closeDurabilityGate("audit", err); handled != nil {
+			return handled
+		}
+		return ErrServiceUnavailable
+	}
+	return nil
 }

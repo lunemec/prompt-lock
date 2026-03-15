@@ -1,26 +1,43 @@
 # ACTIVE PLAN
 
-Updated: 2026-03-14
+Updated: 2026-03-15
 
 This is the canonical run-to-run handoff file for agents. Read it together with `docs/plans/BACKLOG.md` before starting implementation work.
 
 ## Current focus
 - Keep plan state centralized in `ACTIVE-PLAN.md`, `BACKLOG.md`, and initiative/checklist docs.
-- Address the review-discovered open work in `docs/plans/BACKLOG.md` before treating the release or assurance story as settled, especially `SEC-017` through `SEC-021`, `AUTH-005`, `AUTH-006`, `API-005`, `MCP-001`, `QA-004`, `QA-005`, `DOC-005`, and `CFG-009`.
 - Keep `make validate-final`, `make ci-redteam-full`, and `make real-e2e-smoke` passing.
 - Open any newly discovered gaps only in `docs/plans/BACKLOG.md`.
 
 ## Next focus
-- Make the audit trail claims true in runtime behavior, startup behavior, and verification tooling by fixing `SEC-017`, `SEC-018`, and `SEC-019` before calling the audit path tamper-evident.
-- Strip remaining secret-handling and child-process trust-boundary leaks from host-docker and CLI auth helper paths before presenting them as secure hardened workflows.
-- Restore release-grade validation coverage for the supported hardened dual-socket deployment story, or narrow public support claims until the gates match reality.
-- Tighten MCP malformed-input handling and broker transport selection so protocol conformance fails closed and the adapter no longer depends on hidden localhost TCP defaults.
-- Align MCP, example configs, and demo/operator docs with the supported local-only dual-socket story so the published UX no longer depends on dead or weaker compatibility paths.
+- Keep the supported hardened dual-socket validation path stable in release/readiness automation and red-team smoke harnesses.
+- Preserve exact secret-byte semantics and state-store consistency across adapters when adding new backends or retry behavior.
 - Prepare the first public pre-1.0 tag and release notes around the supported local-only hardened dual-socket deployment story.
 - Preserve the current local-only security story and assurance gates while new work stays backlog-driven.
 - Any newly discovered gaps should be opened only in `docs/plans/BACKLOG.md`.
 
+## Fresh review notes
+- A fresh 2026-03-15 re-review confirmed and fixed `SEC-027`: request/lease mutations plus auth lifecycle and auth cleanup now re-persist the restored snapshot when persistence reports a post-write failure, so post-`rename` parent-directory `fsync` failures no longer leave durable state mutated behind a `503`.
+- The same 2026-03-15 re-review confirmed and fixed `AUTH-007`: multi-target auth revoke now restores the full auth snapshot if one target fails before persistence/audit, so a bad `session_token` can no longer leave the requested `grant_id` revoked behind a `404`.
+- The same 2026-03-15 re-review confirmed and fixed `SEC-028`: env-path approval/deny now carry `env_path_original` and `env_path_canonical` on the primary `request_approved` / `request_denied` audit records, so those decision paths no longer rely on a second post-commit critical audit write that could force a misleading rollback behind a `503`.
+- The same 2026-03-15 re-review confirmed and fixed `SEC-029`: secret backend failure audit now records coarse safe reason classes instead of raw backend error text, so upstream error bodies can no longer leak into host audit logs through `secret_backend_error`.
+- The same 2026-03-15 re-review confirmed and fixed `API-006`: request/lease rollback delete operations are now explicit in the state-store port contract and the documented external state API contract, so adapters must implement the delete endpoints required by audit-failure recovery.
+- A fresh 2026-03-14 re-review confirmed and fixed `SEC-024`: file-backed request/approve/deny/cancel flows now commit request/lease state through an app-layer durability hook before emitting the primary success audit event, and they roll back the in-memory mutation if that file-backed commit fails.
+- A follow-up 2026-03-14 re-review confirmed and fixed `SEC-025`: if the primary success audit write fails after a file-backed request/lease state commit, the rollback now re-persists the restored snapshot so durable state matches the rolled-back in-memory store.
+- The same follow-up 2026-03-14 re-review originally addressed `SEC-026` by making env-path approval/deny depend on a second critical audit write; the 2026-03-15 `SEC-028` follow-up superseded that approach by moving env-path context onto the primary decision audit records and keeping the supplemental env-path events best-effort.
+
 ## Recently completed
+- Closed `SEC-027` by re-persisting rollback snapshots when request/lease state, auth lifecycle state, or auth cleanup persistence returns a post-write failure, and adding regression coverage that proves durable state is restored after simulated post-`rename` failures.
+- Closed `AUTH-007` by restoring the auth snapshot when multi-target revoke fails before persistence/audit, and adding regression coverage that proves a missing `session_token` no longer leaves the requested grant partially revoked.
+- Closed `SEC-028` by moving env-path approval/deny context onto the primary decision audit records and downgrading the supplemental `env_path_confirmed` / `env_path_rejected` events to best-effort, with regression coverage that proves supplemental env-path audit failure no longer forces a false rollback after the primary audited decision succeeded.
+- Closed `SEC-029` by classifying secret backend audit reasons into safe coarse codes and adding regression coverage that proves raw upstream error text no longer lands in `secret_backend_error` audit metadata.
+- Closed `API-006` by making `DeleteRequest` / `DeleteLease` part of the request/lease state-store port contract and documenting the matching external state backend `DELETE` endpoints required for rollback recovery.
+- Closed `SEC-026` with an intermediate handler/service hardening pass for env-path approval/deny auditing; that design was superseded by `SEC-028`, which keeps env-path context on the primary decision audit while treating the supplemental env-path events as best-effort.
+- Closed `SEC-025` by re-persisting rollback state after post-commit audit failures in the file-backed request/approve/deny/cancel flows, and adding regression coverage that reloads the state file to prove it no longer retains rolled-back mutations.
+- Closed `SEC-024` by moving file-backed request/lease durability commits ahead of the primary success audit events, removing the old post-service handler flush, and adding regression coverage that proves persist failures roll back state and avoid false success audit records.
+- Closed `SEC-017`, `SEC-022`, and `SEC-023` by making auth lifecycle and auth cleanup rollback on audit failure, adding rollback-safe request/lease mutations across the external state backend, moving operator deny/approve attribution onto the primary service events, and adding pre-dispatch audit gates plus honest post-dispatch warning semantics for broker-exec and host-Docker execution paths.
+- Closed `SEC-018`, `SEC-019`, `SEC-020`, `SEC-021`, `AUTH-005`, `AUTH-006`, `API-005`, `MCP-001`, `QA-004`, `QA-005`, `DOC-005`, and `CFG-009` by re-verifying the current tree, fixing the remaining code/docs drift, moving release-readiness to the supported hardened dual-socket smoke path, removing the dead hardened TLS harness path, stabilizing MCP conformance reporting on Unix-socket test paths, correcting auth revoke/operator docs, relabeling the mock-broker workflow, and cleaning canonical config examples to show only enforced settings.
+- Fixed newly discovered review regressions by rolling back request state when lease persistence fails mid-approval, preserving exact secret bytes across env/external secret adapters, and keeping the helper/demo scripts compatible with both the real broker and the shipped mock broker without teaching the mock path as the supported hardened flow.
 - Closed `AUTH-004`, `ARCH-003`, `QA-003`, and `DOC-004` by aligning pairing-grant docs with the current bearer-style mint semantics, extending `make arch-conformance` with behavior-conformance tests, adding `go vet`, pinned `govulncheck`, targeted race coverage, and PR CI Docker E2E, and removing stale prototype wording/planning drift.
 - Closed `SEC-010`, `SEC-011`, `SEC-012`, `CFG-008`, `SEC-013`, `SEC-014`, `SEC-015`, `SEC-016`, `OPS-007`, `DOC-003`, and `API-004` by hardening external secret backends to fail closed in non-dev, honoring configured request policy at runtime, rejecting dangerous secret-derived env names, denying previously unclassified egress target forms, replacing post-buffer truncation with bounded execution capture, fixing audit checkpoint semantics + checkpoint/create durability, narrowing external-state claims to match current semantics, removing silent local socket fallback, documenting the `env_path` trust boundary, and keeping malformed JSON from mutating state.
 - Closed `TRANSPORT-001` by removing retained TCP TLS/mTLS broker transport, removing CLI broker TLS flags/envs, deleting the active mTLS operations doc, and aligning README/ops/ADR content to the local-only Unix-socket transport story.

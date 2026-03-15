@@ -1194,6 +1194,8 @@ func runAuthLogin(args []string) {
 	opToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	agent := fs.String("agent", "", "agent id")
 	container := fs.String("container", "", "container id")
+	showGrantID := fs.Bool("show-grant-id", false, "include pairing grant id in stdout output")
+	showSecrets := fs.Bool("show-secrets", false, "include raw bearer credentials in stdout output")
 	fs.Parse(args)
 	if strings.TrimSpace(*opToken) == "" || strings.TrimSpace(*agent) == "" || strings.TrimSpace(*container) == "" {
 		fatal(fmt.Errorf("--operator-token, --agent and --container are required"))
@@ -1202,11 +1204,16 @@ func runAuthLogin(args []string) {
 	if err != nil {
 		fatal(err)
 	}
-	writeJSONStdout(map[string]any{
-		"session_token": out.SessionToken,
-		"expires_at":    out.ExpiresAt,
-		"grant_id":      out.GrantID,
-	})
+	outJSON := map[string]any{
+		"expires_at": out.ExpiresAt,
+	}
+	if *showSecrets {
+		outJSON["session_token"] = out.SessionToken
+	}
+	if *showGrantID || *showSecrets {
+		outJSON["grant_id"] = out.GrantID
+	}
+	writeJSONStdout(outJSON)
 }
 
 type dockerRunConfig struct {
@@ -1277,6 +1284,12 @@ func runAuthDockerRun(args []string) {
 	}
 
 	cmd := exec.Command("docker", runArgs...)
+	cmd.Env = buildDockerRunEnv(os.Environ(), dockerRunConfig{
+		SessionToken:          loginResult.SessionToken,
+		BrokerURL:             agentBroker.BaseURL,
+		BrokerUnixSocket:      agentBroker.UnixSocket,
+		ContainerBrokerSocket: *containerSocket,
+	})
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -1327,10 +1340,10 @@ func buildDockerRunArgs(cfg dockerRunConfig) ([]string, error) {
 			"-e", "PROMPTLOCK_AGENT_UNIX_SOCKET="+containerSocket,
 		)
 	} else {
-		args = append(args, "-e", "PROMPTLOCK_BROKER_URL="+cfg.BrokerURL)
+		args = append(args, "-e", "PROMPTLOCK_BROKER_URL")
 	}
 
-	args = append(args, "-e", "PROMPTLOCK_SESSION_TOKEN="+cfg.SessionToken)
+	args = append(args, "-e", "PROMPTLOCK_SESSION_TOKEN")
 	if strings.TrimSpace(cfg.Entrypoint) != "" {
 		args = append(args, "--entrypoint", cfg.Entrypoint)
 	}
@@ -1358,6 +1371,21 @@ func buildDockerRunArgs(cfg dockerRunConfig) ([]string, error) {
 	args = append(args, cfg.Image)
 	args = append(args, cfg.Command...)
 	return args, nil
+}
+
+func buildDockerRunEnv(base []string, cfg dockerRunConfig) []string {
+	env := append([]string{}, base...)
+	env = append(env, "PROMPTLOCK_SESSION_TOKEN="+cfg.SessionToken)
+	if strings.TrimSpace(cfg.BrokerUnixSocket) != "" {
+		containerSocket := strings.TrimSpace(cfg.ContainerBrokerSocket)
+		if containerSocket == "" {
+			containerSocket = "/run/promptlock/promptlock-agent.sock"
+		}
+		env = append(env, "PROMPTLOCK_AGENT_UNIX_SOCKET="+containerSocket)
+		return env
+	}
+	env = append(env, "PROMPTLOCK_BROKER_URL="+cfg.BrokerURL)
+	return env
 }
 
 func currentUserDockerIdentity() string {

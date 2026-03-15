@@ -125,6 +125,35 @@ func TestInitializedResponseSchema(t *testing.T) {
 	}
 }
 
+func TestCancelledRejectsBooleanRequestID(t *testing.T) {
+	msg := exchangeLine(t, `{"jsonrpc":"2.0","id":true,"method":"notifications/cancelled","params":{"requestId":1}}`)
+	errObj, ok := msg["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error object, got %+v", msg)
+	}
+	if int(errObj["code"].(float64)) != -32600 {
+		t.Fatalf("expected -32600 for invalid cancellation request id, got %+v", errObj)
+	}
+	if id, ok := msg["id"]; !ok || id != nil {
+		t.Fatalf("expected id=null for invalid cancellation request id, got %+v", msg)
+	}
+}
+
+func TestInvalidRequestIDErrorUsesNullID(t *testing.T) {
+	msg := exchangeLine(t, `{"jsonrpc":"2.0","id":[1,2,3],"method":"ping","params":{}}`)
+	assertBaseJSONRPCShape(t, msg, true)
+	if id, ok := msg["id"]; !ok || id != nil {
+		t.Fatalf("expected invalid request id response to use null id, got %+v", msg)
+	}
+	errObj, ok := msg["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error object, got %+v", msg)
+	}
+	if code, ok := errObj["code"].(float64); !ok || int(code) != -32600 {
+		t.Fatalf("expected invalid request error code, got %+v", errObj)
+	}
+}
+
 func TestNotificationsCancelledResponseSchema(t *testing.T) {
 	msg := exchangeLine(t, `{"jsonrpc":"2.0","id":102,"method":"notifications/cancelled","params":{"requestId":1}}`)
 	assertBaseJSONRPCShape(t, msg, true)

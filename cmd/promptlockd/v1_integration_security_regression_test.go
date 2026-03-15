@@ -18,6 +18,7 @@ import (
 	"github.com/lunemec/promptlock/internal/auth"
 	"github.com/lunemec/promptlock/internal/config"
 	"github.com/lunemec/promptlock/internal/core/domain"
+	"github.com/lunemec/promptlock/internal/core/ports"
 )
 
 func TestPromptLockV1IntegrationSecurityRegression(t *testing.T) {
@@ -325,7 +326,7 @@ func TestPromptLockV1IntegrationSecurityRegression(t *testing.T) {
 		"auth_session_minted",
 		app.AuditEventEnvPathConfirmed,
 		app.AuditEventEnvPathRejected,
-		"operator_denied_request",
+		"request_denied",
 		app.AuditEventRequestReusedActiveLease,
 		app.AuditEventRequestThrottledCooldown,
 		app.AuditEventRequestThrottledPendingCap,
@@ -335,6 +336,22 @@ func TestPromptLockV1IntegrationSecurityRegression(t *testing.T) {
 		if !hasAuditEventNamed(audit, name) {
 			t.Fatalf("expected audit event %q to be present", name)
 		}
+	}
+	denyEvent, ok := findAuditEventNamed(audit, "request_denied")
+	if !ok {
+		t.Fatalf("expected request_denied audit event")
+	}
+	if denyEvent.RequestID != denyRequestResp.RequestID {
+		t.Fatalf("deny audit request_id = %q, want %q", denyEvent.RequestID, denyRequestResp.RequestID)
+	}
+	if denyEvent.ActorType != "operator" {
+		t.Fatalf("deny audit actor_type = %q, want operator", denyEvent.ActorType)
+	}
+	if denyEvent.ActorID != "token-operator" {
+		t.Fatalf("deny audit actor_id = %q, want token-operator", denyEvent.ActorID)
+	}
+	if denyEvent.Metadata["reason"] != "operator_rejected" {
+		t.Fatalf("deny audit reason = %q, want operator_rejected", denyEvent.Metadata["reason"])
 	}
 }
 
@@ -357,13 +374,18 @@ func decodeJSONBody(t *testing.T, recorder *httptest.ResponseRecorder, out any) 
 }
 
 func hasAuditEventNamed(audit *captureAudit, name string) bool {
+	_, ok := findAuditEventNamed(audit, name)
+	return ok
+}
+
+func findAuditEventNamed(audit *captureAudit, name string) (ports.AuditEvent, bool) {
 	if audit == nil {
-		return false
+		return ports.AuditEvent{}, false
 	}
 	for _, event := range audit.events {
 		if event.Event == name {
-			return true
+			return event, true
 		}
 	}
-	return false
+	return ports.AuditEvent{}, false
 }

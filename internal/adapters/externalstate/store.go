@@ -86,6 +86,14 @@ func (s *Store) UpdateRequest(req domain.LeaseRequest) error {
 	return s.send(http.MethodPut, s.requestURL(req.ID), req, nil, "")
 }
 
+func (s *Store) DeleteRequest(id string) error {
+	reqID := strings.TrimSpace(id)
+	if reqID == "" {
+		return errors.New("request id is required")
+	}
+	return s.send(http.MethodDelete, s.requestURL(reqID), nil, nil, "request not found")
+}
+
 func (s *Store) ListPendingRequests() ([]domain.LeaseRequest, error) {
 	var out struct {
 		Pending []domain.LeaseRequest `json:"pending"`
@@ -104,6 +112,14 @@ func (s *Store) SaveLease(lease domain.Lease) error {
 		return errors.New("lease token is required")
 	}
 	return s.send(http.MethodPut, s.leaseURL(lease.Token), lease, nil, "")
+}
+
+func (s *Store) DeleteLease(token string) error {
+	leaseToken := strings.TrimSpace(token)
+	if leaseToken == "" {
+		return errors.New("lease token is required")
+	}
+	return s.send(http.MethodDelete, s.leaseURL(leaseToken), nil, nil, "lease not found")
 }
 
 func (s *Store) GetLease(token string) (domain.Lease, error) {

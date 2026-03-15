@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- Request approval/deny/cancel audit attribution now stays on the primary service-level events (`request_approved`, `request_denied`, `request_cancelled_by_agent`) instead of relying on extra post-persist handler events that could drift from durable state outcomes.
+- `make release-readiness-gate` now runs the supported hardened dual-socket smoke path (`make real-e2e-smoke`) instead of the older dev/insecure compose demo, and the hardened red-team smoke harness now exercises the same transport boundary.
+- Helper and operations docs now make the local hardened Unix-socket flow the primary path, relabel the mock broker as demo-only, document the canonical `session_token` revoke field, and remove dead backend settings from canonical config examples.
 - The supported OSS v1 deployment target is now explicitly local-only hardened operation with dual Unix sockets; non-local TCP TLS/mTLS remains in the repository as experimental/private transport work and is no longer part of the release story.
 - PromptLock public docs and planning state now consistently describe the project as a pre-1.0 OSS release candidate rather than a draft/experimental v1 claim.
 - GitHub Actions CI now stays Go/shell-native by using `make validate-final` plus `make leak-guard` instead of installing Python and running `bandit`.
@@ -19,6 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Planning and ADR docs now record the broker-managed executable-resolution decision and close the follow-up backlog items for schema cleanup, executable provenance hardening, and graceful compose teardown.
 
 ### Fixed
+- Request/lease mutations, auth lifecycle writes, and auth cleanup now re-persist the restored snapshot when persistence fails after writing durable state but before reporting success, preventing stale durable state after post-`rename` parent-directory `fsync` failures.
+- Multi-target auth revoke now restores the full auth snapshot if one target fails before persistence or audit, preventing partial revocation when a request supplies both `grant_id` and an invalid `session_token`.
+- Env-path approval/deny now records `env_path_original` and `env_path_canonical` on the primary `request_approved` / `request_denied` audit records, and supplemental `env_path_confirmed` / `env_path_rejected` writes are now best-effort so a broken secondary audit write cannot force a misleading rollback after the primary audited decision already succeeded.
+- File-backed request/approve/deny/cancel flows now re-persist the rollback snapshot if the primary success audit write fails after state commit, so the durable state file cannot retain a mutation that the broker already rolled back in memory and rejected with `503`.
+- File-backed request/approve/deny/cancel flows now durably commit request/lease state before emitting `request_created`, `request_approved`, `request_denied`, or `request_cancelled_by_agent`, and they roll back the in-memory mutation if that commit fails so the audit trail cannot claim success for non-durable state.
+- Auth lifecycle, auth cleanup, and request/lease mutation flows now roll back state on audit failure, including the external request/lease state backend, so the broker no longer durably commits those changes while returning `503`.
+- Broker `/v1/leases/execute` and `/v1/host/docker/execute` now require a successful pre-dispatch audit gate before irreversible commands run, and return `audit_warning` plus close the durability gate if the post-exec result audit fails after the command already executed.
+- `secret_backend_error` audit records now use coarse safe failure classes instead of raw backend error text, preventing upstream secret backend error bodies from leaking into host audit logs.
+- Approval rollback now restores pending request state if lease persistence fails after the request status update, preventing stuck `approved` requests when multi-step state writes partially fail.
+- Env and external secret adapters now preserve exact secret bytes instead of trimming leading/trailing whitespace, so backend choice no longer mutates leased credential values.
+- MCP conformance reporting is stable again on macOS-style temp paths by using short unix-socket harness paths for the agent-socket tests.
 - Broker-side `/v1/leases/execute` and local CLI non-broker exec now stop inheriting the full ambient environment by default, passing only an explicit minimal baseline plus approved leased secrets into child processes.
 - Broker execution policy now requires exact executable identity matching instead of prefix matching, closing bypasses where binaries like `goevil` or `git-backdoor` previously matched `go` or `git`.
 - Authenticated agent identity is now bound to the validated session on lease creation, and agent-facing request/lease status, access, and execute paths now reject cross-agent ownership violations with `403` instead of allowing impersonation or object reuse across sessions.

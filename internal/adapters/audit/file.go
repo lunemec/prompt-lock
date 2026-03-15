@@ -1,15 +1,16 @@
 package audit
 
 import (
-	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/lunemec/promptlock/internal/core/ports"
 )
@@ -23,6 +24,8 @@ type auditRecord struct {
 type FileSink struct {
 	mu       sync.Mutex
 	f        *os.File
+	lock     *os.File
+	lockPath string
 	lastHash string
 	needSync bool
 }
@@ -32,17 +35,47 @@ var syncAuditFile = func(f *os.File) error {
 }
 
 func NewFileSink(path string) (*FileSink, error) {
-	_, statErr := os.Stat(path)
+	cleanPath := filepath.Clean(path)
+	if err := os.MkdirAll(filepath.Dir(cleanPath), 0o700); err != nil {
+		return nil, err
+	}
+	lockPath := cleanPath + ".lock"
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("acquire audit lock %s: %w", lockPath, err)
+	}
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = lockFile.Close()
+		return nil, fmt.Errorf("acquire audit lock %s: %w", lockPath, err)
+	}
+	cleanupLock := true
+	defer func() {
+		if cleanupLock {
+			_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+			_ = lockFile.Close()
+		}
+	}()
+
+	_, statErr := os.Stat(cleanPath)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return nil, statErr
+	}
 	needSync := os.IsNotExist(statErr)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(cleanPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}
 	last := ""
-	if prev, err := readLastHash(path); err == nil {
-		last = prev
+	if !needSync {
+		var verifyErr error
+		last, _, verifyErr = verifyFile(cleanPath, "")
+		if verifyErr != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("verify audit log %s: %w", cleanPath, verifyErr)
+		}
 	}
-	return &FileSink{f: f, lastHash: last, needSync: needSync}, nil
+	cleanupLock = false
+	return &FileSink{f: f, lock: lockFile, lockPath: lockPath, lastHash: last, needSync: needSync}, nil
 }
 
 func (s *FileSink) Write(event ports.AuditEvent) error {
@@ -77,7 +110,30 @@ func (s *FileSink) Write(event ports.AuditEvent) error {
 	return nil
 }
 
-func (s *FileSink) Close() error { return s.f.Close() }
+func (s *FileSink) Close() error {
+	if s == nil {
+		return nil
+	}
+	var closeErr error
+	if s.f != nil {
+		closeErr = s.f.Close()
+		s.f = nil
+	}
+	var unlockErr error
+	if s.lock != nil {
+		unlockErr = syscall.Flock(int(s.lock.Fd()), syscall.LOCK_UN)
+		closeLockErr := s.lock.Close()
+		s.lock = nil
+		if unlockErr == nil {
+			unlockErr = closeLockErr
+		}
+		s.lockPath = ""
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return unlockErr
+}
 
 var tokenLikeRe = regexp.MustCompile(`(?i)\b(boot|grant|sess|lease)_[a-f0-9]{16,}\b`)
 var secretKVRe = regexp.MustCompile(`(?i)\b(api[_-]?key|secret|token)\s*[:=]\s*([^\s,;]+)`)
@@ -125,30 +181,6 @@ func shortHash(in string) string {
 		return full[:16]
 	}
 	return full
-}
-
-func readLastHash(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	s := bufio.NewScanner(f)
-	lastLine := ""
-	for s.Scan() {
-		line := strings.TrimSpace(s.Text())
-		if line != "" {
-			lastLine = line
-		}
-	}
-	if lastLine == "" {
-		return "", nil
-	}
-	var rec auditRecord
-	if err := json.Unmarshal([]byte(lastLine), &rec); err != nil {
-		return "", err
-	}
-	return rec.Hash, nil
 }
 
 var syncAuditParentDir = func(path string) error {

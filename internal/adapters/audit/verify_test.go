@@ -42,6 +42,33 @@ func TestVerifyFileDetectsTamper(t *testing.T) {
 	}
 }
 
+func TestVerifyFileRejectsNonCanonicalStoredBytes(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "audit.jsonl")
+	s, err := NewFileSink(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Write(ports.AuditEvent{Event: "e1", Timestamp: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := strings.Replace(string(b), `"hash":"`, `"extra":"tamper","hash":"`, 1)
+	if err := os.WriteFile(p, []byte(tampered), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := VerifyFile(p); err == nil {
+		t.Fatalf("expected verify failure for non-canonical stored bytes")
+	}
+}
+
 func TestCheckpointRoundTrip(t *testing.T) {
 	d := t.TempDir()
 	p := filepath.Join(d, "checkpoint.txt")
@@ -102,6 +129,33 @@ func TestVerifyFileAnchoredRejectsMissingCheckpoint(t *testing.T) {
 	}
 	if _, _, err := VerifyFileAnchored(p, "missing-hash"); err == nil {
 		t.Fatalf("expected missing checkpoint hash to fail")
+	}
+}
+
+func TestVerifyFileRejectsUnknownFieldTamper(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "audit.jsonl")
+	s, err := NewFileSink(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Write(ports.AuditEvent{Event: "e1", Timestamp: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := strings.Replace(string(b), `,"hash":`, `,"forged":"x","hash":`, 1)
+	if err := os.WriteFile(p, []byte(tampered), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := VerifyFile(p); err == nil {
+		t.Fatalf("expected unknown field tamper to fail verification")
 	}
 }
 

@@ -69,6 +69,16 @@ func (s *Store) UpdateRequest(req domain.LeaseRequest) error {
 	return nil
 }
 
+func (s *Store) DeleteRequest(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.requests[id]; !ok {
+		return errors.New("request not found")
+	}
+	delete(s.requests, id)
+	return nil
+}
+
 func (s *Store) ListPendingRequests() ([]domain.LeaseRequest, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -85,6 +95,16 @@ func (s *Store) SaveLease(lease domain.Lease) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.leases[lease.Token] = lease
+	return nil
+}
+
+func (s *Store) DeleteLease(token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.leases[token]; !ok {
+		return errors.New("lease not found")
+	}
+	delete(s.leases, token)
 	return nil
 }
 

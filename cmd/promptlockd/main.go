@@ -223,7 +223,7 @@ func run() error {
 	newLease := func() string { return mustSecureToken("lease_") }
 
 	svc := app.Service{
-		Policy:         cfg.ToPolicy(),
+		Policy: cfg.ToPolicy(),
 		RequestPolicy: app.RequestPolicy{
 			IdenticalRequestCooldown: time.Duration(cfg.RequestPolicy.IdenticalRequestCooldownSeconds) * time.Second,
 			MaxPendingPerAgent:       cfg.RequestPolicy.MaxPendingPerAgent,
@@ -283,6 +283,10 @@ func run() error {
 	}
 	policyEngine := app.NewDefaultControlPlanePolicy(cfg.ExecutionPolicy, cfg.HostOpsPolicy, cfg.NetworkEgressPolicy)
 	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, securityProfile: strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)), authStore: authStore, authStorePersister: authStore, authStoreFile: cfg.Auth.StoreFile, authStoreKey: authStoreKey, stateStoreFile: stateStoreFile, stateStorePersister: statePersister, authLimiter: newAuthRateLimiter(cfg.Auth), policyEngine: policyEngine, unixSocketConfigured: cfg.UsesUnixSocketTransport(), insecureDevMode: insecureDevMode, now: func() time.Time { return time.Now().UTC() }}
+	s.ensureRequestLeaseStateCommitter()
+	s.svc.AuditFailureHandler = func(err error) error {
+		return s.closeDurabilityGate("audit", err)
+	}
 	if strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)) == "hardened" && strings.EqualFold(strings.TrimSpace(cfg.SecretSource.Type), "in_memory") {
 		log.Printf("WARNING: hardened profile using in_memory secret source (set secret_source.type=env or external backend)")
 		_ = s.svc.Audit.Write(ports.AuditEvent{Event: "startup_inmemory_secret_source_warning", Timestamp: s.now(), ActorType: "system", ActorID: "promptlockd"})

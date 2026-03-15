@@ -277,6 +277,42 @@ func TestToolsListIncludesInputSchemaConstraints(t *testing.T) {
 	}
 }
 
+func TestInitializeRejectsObjectRequestID(t *testing.T) {
+	msg := runMCPAndExchange(t, `{"jsonrpc":"2.0","id":{"bad":1},"method":"initialize","params":{}}`)
+	errObj, ok := msg["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error object, got %+v", msg)
+	}
+	if int(errObj["code"].(float64)) != -32600 {
+		t.Fatalf("expected -32600 for invalid object id, got %+v", errObj)
+	}
+	if id, ok := msg["id"]; !ok || id != nil {
+		t.Fatalf("expected id=null for invalid object id, got %+v", msg)
+	}
+}
+
+func TestToolsCallRejectsBooleanRequestID(t *testing.T) {
+	msg := runMCPAndExchange(t, `{"jsonrpc":"2.0","id":true,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["go","version"]}}}`)
+	errObj, ok := msg["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error object, got %+v", msg)
+	}
+	if int(errObj["code"].(float64)) != -32600 {
+		t.Fatalf("expected -32600 for invalid boolean id, got %+v", errObj)
+	}
+}
+
+func TestCancelledRejectsArrayRequestID(t *testing.T) {
+	msg := runMCPAndExchange(t, `{"jsonrpc":"2.0","id":[1],"method":"notifications/cancelled","params":{"requestId":1}}`)
+	errObj, ok := msg["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error object, got %+v", msg)
+	}
+	if int(errObj["code"].(float64)) != -32600 {
+		t.Fatalf("expected -32600 for invalid array id, got %+v", errObj)
+	}
+}
+
 func TestResourcesListSupported(t *testing.T) {
 	msg := runMCPAndExchange(t, `{"jsonrpc":"2.0","id":25,"method":"resources/list","params":{}}`)
 	if got, ok := msg["id"].(float64); !ok || int(got) != 25 {

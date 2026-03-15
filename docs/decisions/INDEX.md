@@ -24,7 +24,7 @@ ADR metadata was normalized to the current status and supersession conventions o
 | 0017 | accepted | 2026-03-09 | Dev-mode risk signaling and unauthenticated non-local TCP guard | - |
 | 0018 | accepted | 2026-03-09 | Production deployment guardrails and state durability | - |
 | 0019 | accepted | 2026-03-09 | Storage fsync report HMAC attestation | - |
-| 0020 | accepted | 2026-03-10 | Production hardening: client mTLS UX, release gates, and persistence safety | - |
+| 0020 | accepted | 2026-03-10 | Production hardening: release gates and persistence safety | - |
 | 0021 | accepted | 2026-03-10 | External request/lease state backend path | - |
 | 0022 | accepted | 2026-03-10 | SOPS-managed runtime and fsync key-material loading | - |
 | 0023 | accepted | 2026-03-14 | Operator watch command and minimal terminal approval UI | - |
@@ -33,3 +33,6 @@ ADR metadata was normalized to the current status and supersession conventions o
 | 0026 | accepted | 2026-03-14 | Exact executable identity and minimal child-process environment | - |
 | 0027 | accepted | 2026-03-14 | Broker-managed executable resolution | - |
 | 0028 | accepted | 2026-03-14 | Local-only transport and removal of TCP TLS/mTLS paths | 0025 |
+
+Clarification notes:
+- `0014` was clarified on 2026-03-14: host-Docker mediation guarantees a pre-dispatch audit gate, while post-dispatch result recording is best-effort with an explicit durability warning if it fails after side effects.

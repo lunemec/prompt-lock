@@ -26,6 +26,14 @@ Response:
 }
 ```
 
+If the Docker command already ran but the final result audit cannot be persisted, the response also includes:
+
+```json
+{
+  "audit_warning": "durability persistence unavailable; broker closed for safety"
+}
+```
+
 ## Policy controls
 
 Configured via `host_ops_policy`:
@@ -41,4 +49,6 @@ This is a structured allowlist/denylist policy (subcommands, verbs, flags), not 
 ## Security notes
 - this MVP is intentionally restrictive
 - avoid adding `docker run`/`docker exec` until stronger policy model is ready
-- all invocations are audit logged with actor attribution
+- the broker must pass the durability gate and write `host_docker_execute_started` before dispatching the host command
+- result audit is attempted immediately after the command returns; if that write fails after side effects, the broker returns `audit_warning` and closes the durability gate
+- all invocations keep actor attribution in audit events, but post-exec result recording is best-effort because host-side side effects cannot be rolled back by the broker

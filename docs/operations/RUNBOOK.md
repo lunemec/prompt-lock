@@ -1,7 +1,7 @@
 # RUNBOOK
 
 ## Local dev
-- Start mock broker: `go run ./cmd/promptlock-mock-broker`
+- Start mock broker (mock-only localhost-TCP demo, not the supported hardened path): `go run ./cmd/promptlock-mock-broker`
 - Start real broker in dev profile (explicit opt-in): `PROMPTLOCK_ALLOW_DEV_PROFILE=1 go run ./cmd/promptlockd`
 - Request lease: `go run ./cmd/promptlock exec ...`
 - Approve lease interactively: `go run ./cmd/promptlock watch`

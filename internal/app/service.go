@@ -13,16 +13,18 @@ import (
 type Clock func() time.Time
 
 type Service struct {
-	Policy         domain.Policy
-	RequestPolicy  RequestPolicy
-	Requests       ports.RequestStore
-	Leases         ports.LeaseStore
-	Secrets        ports.SecretStore
-	EnvPathSecrets ports.EnvPathSecretStore
-	Audit          ports.AuditSink
-	Now            Clock
-	NewRequestID   func() string
-	NewLeaseTok    func() string
+	Policy                     domain.Policy
+	RequestPolicy              RequestPolicy
+	Requests                   ports.RequestStore
+	Leases                     ports.LeaseStore
+	RequestLeaseStateCommitter ports.RequestLeaseStateCommitter
+	Secrets                    ports.SecretStore
+	EnvPathSecrets             ports.EnvPathSecretStore
+	Audit                      ports.AuditSink
+	AuditFailureHandler        func(error) error
+	Now                        Clock
+	NewRequestID               func() string
+	NewLeaseTok                func() string
 }
 
 func (s Service) now() time.Time {
@@ -37,6 +39,13 @@ func (s Service) requestPolicy() RequestPolicy {
 		return DefaultRequestPolicy()
 	}
 	return s.RequestPolicy.Normalize()
+}
+
+func (s Service) commitRequestLeaseState() error {
+	if s.RequestLeaseStateCommitter == nil {
+		return nil
+	}
+	return s.RequestLeaseStateCommitter.CommitRequestLeaseState()
 }
 
 func (s Service) RequestLease(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint, workdirFingerprint, envPath, envPathCanonical string) (domain.LeaseRequest, error) {
@@ -62,11 +71,24 @@ func (s Service) RequestLease(agentID, taskID, reason string, ttl int, secrets [
 	if err := s.Requests.SaveRequest(req); err != nil {
 		return domain.LeaseRequest{}, err
 	}
-	_ = s.Audit.Write(ports.AuditEvent{Event: "request_created", Timestamp: s.now(), AgentID: agentID, TaskID: taskID, RequestID: req.ID})
+	if err := s.commitRequestLeaseState(); err != nil {
+		return domain.LeaseRequest{}, wrapRollbackError(err, s.rollbackRequestLeaseMutation(func() error {
+			return rollbackCreatedRequest(s.Requests, req.ID)
+		}))
+	}
+	if err := s.auditCritical(ports.AuditEvent{Event: "request_created", Timestamp: s.now(), AgentID: agentID, TaskID: taskID, RequestID: req.ID}); err != nil {
+		return domain.LeaseRequest{}, wrapRollbackError(err, s.rollbackRequestLeaseMutation(func() error {
+			return rollbackCreatedRequest(s.Requests, req.ID)
+		}))
+	}
 	return req, nil
 }
 
 func (s Service) ApproveRequest(requestID string, ttlMinutes int) (domain.Lease, error) {
+	return s.ApproveRequestWithActor(requestID, ttlMinutes, "", "")
+}
+
+func (s Service) ApproveRequestWithActor(requestID string, ttlMinutes int, actorType, actorID string) (domain.Lease, error) {
 	req, err := s.Requests.GetRequest(requestID)
 	if err != nil {
 		return domain.Lease{}, err
@@ -80,6 +102,7 @@ func (s Service) ApproveRequest(requestID string, ttlMinutes int) (domain.Lease,
 	if err := s.Policy.ValidateRequest(ttlMinutes, req.Secrets); err != nil {
 		return domain.Lease{}, err
 	}
+	original := req
 	req.Status = domain.RequestApproved
 	if err := s.Requests.UpdateRequest(req); err != nil {
 		return domain.Lease{}, err
@@ -95,9 +118,33 @@ func (s Service) ApproveRequest(requestID string, ttlMinutes int) (domain.Lease,
 		ExpiresAt:          s.now().Add(time.Duration(ttlMinutes) * time.Minute),
 	}
 	if err := s.Leases.SaveLease(lease); err != nil {
+		if rollbackErr := s.Requests.UpdateRequest(original); rollbackErr != nil {
+			return domain.Lease{}, fmt.Errorf("save lease: %w (request rollback failed: %v)", err, rollbackErr)
+		}
 		return domain.Lease{}, err
 	}
-	_ = s.Audit.Write(ports.AuditEvent{Event: "request_approved", Timestamp: s.now(), AgentID: req.AgentID, TaskID: req.TaskID, RequestID: req.ID, LeaseToken: lease.Token})
+	if err := s.commitRequestLeaseState(); err != nil {
+		return domain.Lease{}, wrapRollbackError(err, s.rollbackRequestLeaseMutation(
+			func() error { return rollbackCreatedLease(s.Leases, lease.Token) },
+			func() error { return s.Requests.UpdateRequest(original) },
+		))
+	}
+	if err := s.auditCritical(ports.AuditEvent{
+		Event:      "request_approved",
+		Timestamp:  s.now(),
+		ActorType:  actorType,
+		ActorID:    actorID,
+		AgentID:    req.AgentID,
+		TaskID:     req.TaskID,
+		RequestID:  req.ID,
+		LeaseToken: lease.Token,
+		Metadata:   requestDecisionAuditMetadata(req, nil),
+	}); err != nil {
+		return domain.Lease{}, wrapRollbackError(err, s.rollbackRequestLeaseMutation(
+			func() error { return rollbackCreatedLease(s.Leases, lease.Token) },
+			func() error { return s.Requests.UpdateRequest(original) },
+		))
+	}
 	return lease, nil
 }
 
@@ -132,13 +179,12 @@ func (s Service) accessSecretForLease(lease domain.Lease, secretName, commandFin
 	}
 	val, err := s.Secrets.GetSecret(secretName)
 	if err != nil {
-		reason := strings.TrimSpace(err.Error())
-		if reason == "" {
-			reason = "unknown_secret_backend_error"
-		}
-		_ = s.Audit.Write(ports.AuditEvent{Event: "secret_backend_error", Timestamp: s.now(), AgentID: lease.AgentID, TaskID: lease.TaskID, RequestID: lease.RequestID, LeaseToken: lease.Token, Secret: secretName, Metadata: map[string]string{"reason": reason}})
+		reason := secretBackendAuditReason(err)
+		s.writeAuditEvent(ports.AuditEvent{Event: "secret_backend_error", Timestamp: s.now(), AgentID: lease.AgentID, TaskID: lease.TaskID, RequestID: lease.RequestID, LeaseToken: lease.Token, Secret: secretName, Metadata: map[string]string{"reason": reason}})
 		return "", ErrSecretBackendUnavailable
 	}
-	_ = s.Audit.Write(ports.AuditEvent{Event: "secret_access", Timestamp: s.now(), AgentID: lease.AgentID, TaskID: lease.TaskID, RequestID: lease.RequestID, LeaseToken: lease.Token, Secret: secretName})
+	if err := s.auditCritical(ports.AuditEvent{Event: "secret_access", Timestamp: s.now(), AgentID: lease.AgentID, TaskID: lease.TaskID, RequestID: lease.RequestID, LeaseToken: lease.Token, Secret: secretName}); err != nil {
+		return "", err
+	}
 	return val, nil
 }

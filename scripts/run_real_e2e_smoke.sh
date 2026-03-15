@@ -5,13 +5,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 mkdir -p reports
 
-BROKER_BIND_HOST="${BROKER_BIND_HOST:-0.0.0.0}"
-if [[ -z "${BROKER_PORT:-}" ]]; then
-  # Pick a random high port to reduce collisions with ambient local daemons.
-  BROKER_PORT="$(( (RANDOM % 20000) + 20000 ))"
-fi
-BROKER_CONNECT_HOST="${BROKER_CONNECT_HOST:-127.0.0.1}"
-BROKER_URL="${PROMPTLOCK_SMOKE_BROKER_URL:-http://${BROKER_CONNECT_HOST}:${BROKER_PORT}}"
 OP_TOKEN="${PROMPTLOCK_OPERATOR_TOKEN:-op_smoke_token}"
 AGENT_ID="${PROMPTLOCK_SMOKE_AGENT_ID:-smoke-agent}"
 CONTAINER_ID="${PROMPTLOCK_SMOKE_CONTAINER_ID:-smoke-container}"
@@ -24,13 +17,15 @@ STATE_STORE="$TMPDIR/state-store.json"
 LOG="$TMPDIR/broker.log"
 REPORT="reports/real-e2e-smoke.json"
 KEEP_TMPDIR="${PROMPTLOCK_SMOKE_KEEP_TMPDIR:-0}"
+AGENT_SOCKET="$TMPDIR/promptlock-agent.sock"
+OPERATOR_SOCKET="$TMPDIR/promptlock-operator.sock"
 
 find_pending_request_id() {
   local task="$1"
   local attempts="${2:-40}"
   local out req
   for _ in $(seq 1 "$attempts"); do
-    out="$(go run ./cmd/promptlock watch list --broker "$BROKER_URL" --operator-token "$OP_TOKEN" 2>/dev/null || true)"
+    out="$(go run ./cmd/promptlock watch list --operator-token "$OP_TOKEN" 2>/dev/null || true)"
     req="$(printf '%s\n' "$out" | awk -v task="$task" '$1 ~ /^req_/ && index($0, "task=" task " ") > 0 {print $1; exit}')"
     if [[ -n "$req" ]]; then
       echo "$req"
@@ -41,7 +36,7 @@ find_pending_request_id() {
   return 1
 }
 
-for dep in go curl jq; do
+for dep in go jq; do
   if ! command -v "$dep" >/dev/null 2>&1; then
     jq -n --arg dep "$dep" \
       '{ok:false,error:("missing required dependency: "+$dep),allow_path_ok:false,deny_path_ok:false,deny_audit_ok:false}' > "$REPORT"
@@ -53,8 +48,8 @@ done
 cat > "$CFG" <<JSON
 {
   "security_profile": "hardened",
-  "address": "${BROKER_BIND_HOST}:${BROKER_PORT}",
-  "unix_socket": "",
+  "agent_unix_socket": "$AGENT_SOCKET",
+  "operator_unix_socket": "$OPERATOR_SOCKET",
   "audit_path": "$AUDIT",
   "state_store_file": "$STATE_STORE",
   "auth": {
@@ -88,7 +83,9 @@ cat > "$CFG" <<JSON
 JSON
 
 export PROMPTLOCK_SECRET_GITHUB_TOKEN="demo_github_token_value"
-PROMPTLOCK_ALLOW_INSECURE_TCP=1 PROMPTLOCK_AUTH_STORE_KEY="smoke_auth_store_key_012345" PROMPTLOCK_CONFIG="$CFG" go run ./cmd/promptlockd >"$LOG" 2>&1 &
+export PROMPTLOCK_AGENT_UNIX_SOCKET="$AGENT_SOCKET"
+export PROMPTLOCK_OPERATOR_UNIX_SOCKET="$OPERATOR_SOCKET"
+PROMPTLOCK_AUTH_STORE_KEY="smoke_auth_store_key_012345" PROMPTLOCK_CONFIG="$CFG" go run ./cmd/promptlockd >"$LOG" 2>&1 &
 BROKER_PID=$!
 cleanup() {
   kill "$BROKER_PID" >/dev/null 2>&1 || true
@@ -102,7 +99,7 @@ trap cleanup EXIT
 
 READY=false
 for _ in $(seq 1 50); do
-  if curl -sS "$BROKER_URL/v1/meta/capabilities" >/dev/null 2>&1; then
+  if go run ./cmd/promptlock watch list --operator-token "$OP_TOKEN" >/dev/null 2>&1; then
     READY=true
     break
   fi
@@ -110,10 +107,7 @@ for _ in $(seq 1 50); do
 done
 
 if [[ "$READY" != "true" ]]; then
-  DIAG="broker readiness probe failed at $BROKER_URL/v1/meta/capabilities"
-  if grep -q "listening on unix socket" "$LOG"; then
-    DIAG="$DIAG; broker selected unix-socket mode (likely hardened profile with local TCP bind). Use BROKER_BIND_HOST=0.0.0.0 or set BROKER_URL for unix-socket clients."
-  fi
+  DIAG="broker readiness probe failed via operator unix socket $OPERATOR_SOCKET"
   jq -n --arg error "$DIAG" --arg log "$LOG" --arg tmp "$TMPDIR" \
     '{ok:false,error:$error,allow_path_ok:false,deny_path_ok:false,deny_audit_ok:false,broker_log:$log,tmpdir:$tmp}' > "$REPORT"
   cat "$REPORT"
@@ -124,11 +118,10 @@ if [[ "$READY" != "true" ]]; then
   exit 1
 fi
 
-boot=$(go run ./cmd/promptlock auth bootstrap --broker "$BROKER_URL" --operator-token "$OP_TOKEN" --agent "$AGENT_ID" --container "$CONTAINER_ID" | jq -r '.bootstrap_token')
-grant=$(go run ./cmd/promptlock auth pair --broker "$BROKER_URL" --token "$boot" --container "$CONTAINER_ID" | jq -r '.grant_id')
-session=$(go run ./cmd/promptlock auth mint --broker "$BROKER_URL" --grant "$grant" | jq -r '.session_token')
+boot=$(go run ./cmd/promptlock auth bootstrap --operator-token "$OP_TOKEN" --agent "$AGENT_ID" --container "$CONTAINER_ID" | jq -r '.bootstrap_token')
+grant=$(go run ./cmd/promptlock auth pair --token "$boot" --container "$CONTAINER_ID" | jq -r '.grant_id')
+session=$(go run ./cmd/promptlock auth mint --grant "$grant" | jq -r '.session_token')
 
-export PROMPTLOCK_BROKER_URL="$BROKER_URL"
 export PROMPTLOCK_SESSION_TOKEN="$session"
 
 # approve path
@@ -137,7 +130,7 @@ ALLOW_PID=$!
 ALLOW_DECISION_OK=true
 REQ_ID="$(find_pending_request_id "smoke-allow" 40 || true)"
 if [[ -n "$REQ_ID" ]]; then
-  if ! go run ./cmd/promptlock watch allow --broker "$BROKER_URL" --operator-token "$OP_TOKEN" "$REQ_ID" >/dev/null; then
+  if ! go run ./cmd/promptlock watch allow --operator-token "$OP_TOKEN" "$REQ_ID" >/dev/null; then
     ALLOW_DECISION_OK=false
   fi
 else
@@ -154,7 +147,7 @@ DENY_PID=$!
 DENY_DECISION_OK=true
 REQ_ID2="$(find_pending_request_id "smoke-deny" 30 || true)"
 if [[ -n "$REQ_ID2" ]]; then
-  if ! go run ./cmd/promptlock watch deny --broker "$BROKER_URL" --operator-token "$OP_TOKEN" --reason "smoke deny" "$REQ_ID2" >/dev/null; then
+  if ! go run ./cmd/promptlock watch deny --operator-token "$OP_TOKEN" --reason "smoke deny" "$REQ_ID2" >/dev/null; then
     DENY_DECISION_OK=false
   fi
 else
@@ -168,7 +161,7 @@ if [[ "$DENY_EXIT" -ne 0 ]] && [[ "$DENY_DECISION_OK" == "true" ]] && grep -qi "
 DENY_AUDIT_OK=false
 if [[ -n "${REQ_ID2:-}" ]] && [[ -f "$AUDIT" ]]; then
   if jq -e --arg req "$REQ_ID2" '
-    select(.event.event == "operator_denied_request")
+    select(.event.event == "request_denied")
     | select(.event.request_id == $req)
     | select(.event.metadata.reason == "smoke deny")
   ' "$AUDIT" >/dev/null 2>&1; then

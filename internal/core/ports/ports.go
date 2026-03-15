@@ -10,13 +10,19 @@ type RequestStore interface {
 	SaveRequest(req domain.LeaseRequest) error
 	GetRequest(id string) (domain.LeaseRequest, error)
 	UpdateRequest(req domain.LeaseRequest) error
+	DeleteRequest(id string) error
 	ListPendingRequests() ([]domain.LeaseRequest, error)
 }
 
 type LeaseStore interface {
 	SaveLease(lease domain.Lease) error
+	DeleteLease(token string) error
 	GetLease(token string) (domain.Lease, error)
 	GetLeaseByRequestID(requestID string) (domain.Lease, error)
+}
+
+type RequestLeaseStateCommitter interface {
+	CommitRequestLeaseState() error
 }
 
 type SecretStore interface {

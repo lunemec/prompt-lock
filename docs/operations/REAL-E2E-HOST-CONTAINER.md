@@ -31,10 +31,7 @@ Create config (example):
   "audit_path": "/tmp/promptlock-audit.jsonl",
   "state_store_file": "/tmp/promptlock-state-store.json",
   "state_store": {
-    "type": "file",
-    "external_url": "https://state.example.internal",
-    "external_auth_token_env": "PROMPTLOCK_EXTERNAL_STATE_TOKEN",
-    "external_timeout_sec": 10
+    "type": "file"
   },
   "auth": {
     "enable_auth": true,

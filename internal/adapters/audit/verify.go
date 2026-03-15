@@ -2,6 +2,7 @@ package audit
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,6 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 )
+
+type storedAuditLine struct {
+	EventRaw  json.RawMessage
+	PrevHash  string
+	Hash      string
+	Canonical string
+}
 
 // VerifyFile validates hash-chain continuity for an audit jsonl file.
 func VerifyFile(path string) (string, int, error) {
@@ -39,19 +47,14 @@ func verifyFile(path string, checkpointHash string) (string, int, error) {
 		if line == "" {
 			continue
 		}
-		var rec auditRecord
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			return "", count, fmt.Errorf("line %d: invalid json: %w", count+1, err)
+		rec, err := parseStoredAuditLine(line)
+		if err != nil {
+			return "", count, fmt.Errorf("line %d: %w", count+1, err)
 		}
 		if rec.PrevHash != prev {
 			return "", count, fmt.Errorf("line %d: prev hash mismatch", count+1)
 		}
-		tmp := rec
-		tmp.Hash = ""
-		b, err := json.Marshal(tmp)
-		if err != nil {
-			return "", count, fmt.Errorf("line %d: marshal: %w", count+1, err)
-		}
+		b := formatStoredAuditLine(rec.EventRaw, rec.PrevHash, "")
 		h := sha256.Sum256(b)
 		exp := hex.EncodeToString(h[:])
 		if rec.Hash != exp {
@@ -117,4 +120,69 @@ func ReadCheckpoint(path string) (string, error) {
 
 var syncCheckpointParentDir = func(path string) error {
 	return syncDir(path)
+}
+
+func parseStoredAuditLine(line string) (storedAuditLine, error) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return storedAuditLine{}, fmt.Errorf("invalid json: empty line")
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
+		return storedAuditLine{}, fmt.Errorf("invalid json: %w", err)
+	}
+	if len(raw) != 3 {
+		return storedAuditLine{}, fmt.Errorf("unexpected top-level fields")
+	}
+	eventRaw, ok := raw["event"]
+	if !ok {
+		return storedAuditLine{}, fmt.Errorf("missing event field")
+	}
+	prevRaw, ok := raw["prev_hash"]
+	if !ok {
+		return storedAuditLine{}, fmt.Errorf("missing prev_hash field")
+	}
+	hashRaw, ok := raw["hash"]
+	if !ok {
+		return storedAuditLine{}, fmt.Errorf("missing hash field")
+	}
+	var prevHash string
+	if err := json.Unmarshal(prevRaw, &prevHash); err != nil {
+		return storedAuditLine{}, fmt.Errorf("invalid prev_hash: %w", err)
+	}
+	var hash string
+	if err := json.Unmarshal(hashRaw, &hash); err != nil {
+		return storedAuditLine{}, fmt.Errorf("invalid hash: %w", err)
+	}
+	if !json.Valid(eventRaw) {
+		return storedAuditLine{}, fmt.Errorf("invalid event payload")
+	}
+	var compactEvent bytes.Buffer
+	if err := json.Compact(&compactEvent, eventRaw); err != nil {
+		return storedAuditLine{}, fmt.Errorf("compact event payload: %w", err)
+	}
+	canonical := string(formatStoredAuditLine(json.RawMessage(compactEvent.Bytes()), prevHash, hash))
+	if trimmed != canonical {
+		return storedAuditLine{}, fmt.Errorf("non-canonical audit record encoding")
+	}
+	return storedAuditLine{
+		EventRaw:  json.RawMessage(compactEvent.Bytes()),
+		PrevHash:  prevHash,
+		Hash:      hash,
+		Canonical: canonical,
+	}, nil
+}
+
+func formatStoredAuditLine(eventRaw json.RawMessage, prevHash, hash string) []byte {
+	prevQuoted, _ := json.Marshal(prevHash)
+	hashQuoted, _ := json.Marshal(hash)
+	buf := make([]byte, 0, len(eventRaw)+len(prevQuoted)+len(hashQuoted)+32)
+	buf = append(buf, `{"event":`...)
+	buf = append(buf, eventRaw...)
+	buf = append(buf, `,"prev_hash":`...)
+	buf = append(buf, prevQuoted...)
+	buf = append(buf, `,"hash":`...)
+	buf = append(buf, hashQuoted...)
+	buf = append(buf, '}')
+	return buf
 }

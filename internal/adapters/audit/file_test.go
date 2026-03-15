@@ -156,3 +156,56 @@ func TestWriteFailsWhenInitialParentDirSyncFails(t *testing.T) {
 		t.Fatalf("expected parent dir sync failure on initial create")
 	}
 }
+
+func TestNewFileSinkRejectsMalformedExistingAuditLog(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "audit.jsonl")
+	if err := os.WriteFile(p, []byte("{not-json}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NewFileSink(p); err == nil {
+		t.Fatalf("expected malformed existing audit log to fail startup")
+	}
+}
+
+func TestNewFileSinkBlocksConcurrentWriters(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "audit.jsonl")
+	first, err := NewFileSink(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+
+	second, err := NewFileSink(p)
+	if err == nil {
+		_ = second.Close()
+		t.Fatalf("expected concurrent writer lock failure")
+	}
+}
+
+func TestNewFileSinkFailsOnMalformedExistingAuditLog(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "audit.jsonl")
+	if err := os.WriteFile(p, []byte("{not-json}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NewFileSink(p); err == nil {
+		t.Fatalf("expected malformed existing audit log to fail closed")
+	}
+}
+
+func TestNewFileSinkRejectsConcurrentWriters(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "audit.jsonl")
+
+	sinkA, err := NewFileSink(p)
+	if err != nil {
+		t.Fatalf("first sink: %v", err)
+	}
+	defer sinkA.Close()
+
+	sinkB, err := NewFileSink(p)
+	if err == nil {
+		_ = sinkB.Close()
+		t.Fatalf("expected second sink acquisition to fail")
+	}
+}

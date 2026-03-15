@@ -34,7 +34,7 @@ func TestGetSecretSuccessJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get secret: %v", err)
 	}
-	if v != "top-secret" {
+	if v != "  top-secret  " {
 		t.Fatalf("unexpected secret value: %q", v)
 	}
 }
@@ -54,7 +54,7 @@ func TestGetSecretSuccessPlaintext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get secret: %v", err)
 	}
-	if v != "plain-secret" {
+	if v != "\n  plain-secret  \n" {
 		t.Fatalf("unexpected secret value: %q", v)
 	}
 }

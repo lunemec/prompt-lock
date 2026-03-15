@@ -31,10 +31,16 @@ func (unavailableStateStore) GetRequest(string) (domain.LeaseRequest, error) {
 func (unavailableStateStore) UpdateRequest(domain.LeaseRequest) error {
 	return errors.Join(ports.ErrStoreUnavailable, errors.New("state backend timeout"))
 }
+func (unavailableStateStore) DeleteRequest(string) error {
+	return errors.Join(ports.ErrStoreUnavailable, errors.New("state backend timeout"))
+}
 func (unavailableStateStore) ListPendingRequests() ([]domain.LeaseRequest, error) {
 	return nil, errors.Join(ports.ErrStoreUnavailable, errors.New("state backend timeout"))
 }
 func (unavailableStateStore) SaveLease(domain.Lease) error {
+	return errors.Join(ports.ErrStoreUnavailable, errors.New("state backend timeout"))
+}
+func (unavailableStateStore) DeleteLease(string) error {
 	return errors.Join(ports.ErrStoreUnavailable, errors.New("state backend timeout"))
 }
 func (unavailableStateStore) GetLease(string) (domain.Lease, error) {

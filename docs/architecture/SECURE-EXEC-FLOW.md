@@ -17,7 +17,7 @@ This document describes the recommended PromptLock runtime flow with explicit fo
 4. Human approves or denies.
 5. On approval, PromptLock injects required env vars into the child process only.
 6. Command runs.
-7. PromptLock clears process-scoped env context and records completion/audit events.
+7. PromptLock clears process-scoped env context. The broker must already have recorded a pre-execution audit gate before dispatch, then it attempts a post-exec result audit and returns an explicit warning if that write fails after side effects have already happened.
 
 ## Why intent first
 Agents request outcomes, not secret names. Intent-based requests reduce friction and prevent over-broad secret asks.
@@ -74,12 +74,12 @@ Mitigation:
 ## Audit requirements in this flow
 Must log at minimum:
 - request_created
-- request_approved / request_denied
-- command_started
+- request_approved / request_denied / request_cancelled_by_agent
+- pre-dispatch execution start (`execute_with_secret_started` or `host_docker_execute_started`) before an irreversible command runs
 - secret_access (without secret value)
 - lease_renewed
 - lease_expired / lease_revoked
-- command_finished (status)
+- immediate post-exec completion/result event when the command returns; if that write fails after side effects, PromptLock must warn the caller and close the durability gate instead of claiming the command was blocked
 
 Audit logs are host-side and outside agent-writable paths.
 
@@ -90,7 +90,7 @@ Audit logs are host-side and outside agent-writable paths.
 - first adapter: MCP
 - later adapter: ACP if needed
 
-Adapters must preserve non-disclosure defaults and full audit semantics.
+Adapters must preserve non-disclosure defaults, pre-dispatch audit gating, and honest post-dispatch warning semantics. They must not claim irreversible commands were prevented if the command already ran.
 
 ### MCP-specific requirement
 - MCP tools must expose **capability execution** (e.g., `run_with_intent`) rather than plaintext secret retrieval.

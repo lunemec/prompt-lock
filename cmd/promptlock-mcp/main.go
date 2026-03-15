@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net"
 	"net/http"
 	neturl "net/url"
 	"os"
@@ -16,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lunemec/promptlock/internal/config"
 )
 
 type rpcReq struct {
@@ -42,6 +45,14 @@ type execArgs struct {
 	Cmd    []string
 	TTL    int
 }
+
+type brokerTransport struct {
+	BaseURL    string
+	UnixSocket string
+}
+
+type envLookup func(string) string
+type pathStat func(string) error
 
 const maxRPCLineBytes = 1 << 20 // 1 MiB
 const mcpProtocolVersion = "2024-11-05"
@@ -76,6 +87,10 @@ func main() {
 		var req rpcReq
 		if err := json.Unmarshal([]byte(line), &req); err != nil {
 			server.emit(rpcResp{JSONRPC: "2.0", Error: map[string]any{"code": -32700, "message": err.Error()}})
+			continue
+		}
+		if !isValidRPCRequestID(req.ID) {
+			server.emit(rpcResp{JSONRPC: "2.0", ID: nil, Error: map[string]any{"code": -32600, "message": "invalid request id"}})
 			continue
 		}
 		if req.JSONRPC != "2.0" || req.Method == "" {
@@ -283,9 +298,15 @@ func parseCancellationRequestID(params json.RawMessage) (any, bool) {
 		return nil, false
 	}
 	if reqID, ok := in["requestId"]; ok {
+		if !isValidRPCRequestID(reqID) || reqID == nil {
+			return nil, false
+		}
 		return reqID, true
 	}
 	if reqID, ok := in["id"]; ok {
+		if !isValidRPCRequestID(reqID) || reqID == nil {
+			return nil, false
+		}
 		return reqID, true
 	}
 	return nil, false
@@ -309,12 +330,16 @@ func rpcRequestKey(id any) (string, bool) {
 		}
 		return fmt.Sprintf("num:%g", v), true
 	default:
-		b, err := json.Marshal(v)
-		if err != nil || string(b) == "null" {
-			return "", false
-		}
-		return "raw:" + string(b), true
+		return "", false
 	}
+}
+
+func isValidRPCRequestID(id any) bool {
+	if id == nil {
+		return true
+	}
+	_, ok := rpcRequestKey(id)
+	return ok
 }
 
 func selectProtocolVersion(params json.RawMessage) string {
@@ -339,7 +364,10 @@ func isNullOrEmptyParams(raw json.RawMessage) bool {
 }
 
 func executeWithIntent(ctx context.Context, args map[string]interface{}) (string, error) {
-	broker := envDefault("PROMPTLOCK_BROKER_URL", "http://127.0.0.1:8765")
+	broker, err := resolveBrokerTransport(os.Getenv, statPath)
+	if err != nil {
+		return "", err
+	}
 	session := os.Getenv("PROMPTLOCK_SESSION_TOKEN")
 	if session == "" {
 		return "", fmt.Errorf("PROMPTLOCK_SESSION_TOKEN is required")
@@ -356,7 +384,7 @@ func executeWithIntent(ctx context.Context, args map[string]interface{}) (string
 	var resolved struct {
 		Secrets []string `json:"secrets"`
 	}
-	if err := postAuth(ctx, broker+"/v1/intents/resolve", session, map[string]any{"intent": intent}, &resolved); err != nil {
+	if err := postAuth(ctx, broker, "/v1/intents/resolve", session, map[string]any{"intent": intent}, &resolved); err != nil {
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("request cancelled")
 		}
@@ -370,7 +398,7 @@ func executeWithIntent(ctx context.Context, args map[string]interface{}) (string
 	var reqOut struct {
 		RequestID string `json:"request_id"`
 	}
-	if err := postAuth(ctx, broker+"/v1/leases/request", session, map[string]any{
+	if err := postAuth(ctx, broker, "/v1/leases/request", session, map[string]any{
 		"agent_id":            envDefault("PROMPTLOCK_AGENT_ID", "mcp-agent"),
 		"task_id":             envDefault("PROMPTLOCK_TASK_ID", "mcp-task"),
 		"reason":              "mcp execute_with_intent",
@@ -414,7 +442,7 @@ func executeWithIntent(ctx context.Context, args map[string]interface{}) (string
 		var st struct {
 			Status string `json:"status"`
 		}
-		if err := getAuth(ctx, broker+"/v1/requests/status?request_id="+reqOut.RequestID, session, &st); err != nil {
+		if err := getAuth(ctx, broker, "/v1/requests/status?request_id="+reqOut.RequestID, session, &st); err != nil {
 			if ctx.Err() != nil {
 				return "", fmt.Errorf("request cancelled")
 			}
@@ -440,7 +468,7 @@ func executeWithIntent(ctx context.Context, args map[string]interface{}) (string
 	var lease struct {
 		LeaseToken string `json:"lease_token"`
 	}
-	if err := getAuth(ctx, broker+"/v1/leases/by-request?request_id="+reqOut.RequestID, session, &lease); err != nil {
+	if err := getAuth(ctx, broker, "/v1/leases/by-request?request_id="+reqOut.RequestID, session, &lease); err != nil {
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("request cancelled")
 		}
@@ -451,7 +479,7 @@ func executeWithIntent(ctx context.Context, args map[string]interface{}) (string
 		ExitCode     int    `json:"exit_code"`
 		StdoutStderr string `json:"stdout_stderr"`
 	}
-	if err := postAuth(ctx, broker+"/v1/leases/execute", session, map[string]any{
+	if err := postAuth(ctx, broker, "/v1/leases/execute", session, map[string]any{
 		"lease_token":         lease.LeaseToken,
 		"intent":              intent,
 		"command":             cmd,
@@ -467,20 +495,23 @@ func executeWithIntent(ctx context.Context, args map[string]interface{}) (string
 	return fmt.Sprintf("exit=%d\n%s", execOut.ExitCode, execOut.StdoutStderr), nil
 }
 
-func cancelPendingRequest(broker, session, requestID string) error {
+func cancelPendingRequest(broker brokerTransport, session, requestID string) error {
 	cancelCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	cancelURL := broker + "/v1/leases/cancel?request_id=" + neturl.QueryEscape(requestID)
 	var out map[string]any
-	return postAuth(cancelCtx, cancelURL, session, map[string]any{"reason": "mcp notification cancelled"}, &out)
+	return postAuth(cancelCtx, broker, "/v1/leases/cancel?request_id="+neturl.QueryEscape(requestID), session, map[string]any{"reason": "mcp notification cancelled"}, &out)
 }
 
-func postAuth(ctx context.Context, url, token string, in any, out any) error {
+func postAuth(ctx context.Context, broker brokerTransport, path, token string, in any, out any) error {
 	b, _ := json.Marshal(in)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, brokerRequestURL(broker, path), bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
+	client, err := brokerHTTPClient(broker)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -491,10 +522,14 @@ func postAuth(ctx context.Context, url, token string, in any, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-func getAuth(ctx context.Context, url, token string, out any) error {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func getAuth(ctx context.Context, broker brokerTransport, path, token string, out any) error {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, brokerRequestURL(broker, path), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
+	client, err := brokerHTTPClient(broker)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -510,6 +545,78 @@ func envDefault(k, d string) string {
 		return v
 	}
 	return d
+}
+
+func lookupEnvMap(values map[string]string) envLookup {
+	return func(key string) string {
+		if values == nil {
+			return ""
+		}
+		return values[key]
+	}
+}
+
+func statPath(path string) error {
+	_, err := os.Stat(path)
+	return err
+}
+
+func resolveBrokerTransport(getenv envLookup, stat pathStat) (brokerTransport, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	explicitUnix := strings.TrimSpace(getenv("PROMPTLOCK_BROKER_UNIX_SOCKET"))
+	if explicitUnix != "" {
+		if stat != nil {
+			if err := stat(explicitUnix); err != nil {
+				return brokerTransport{}, fmt.Errorf("broker unix socket not found at %s", explicitUnix)
+			}
+		}
+		return brokerTransport{UnixSocket: explicitUnix}, nil
+	}
+	explicitURL := strings.TrimSpace(getenv("PROMPTLOCK_BROKER_URL"))
+	if explicitURL != "" {
+		return brokerTransport{BaseURL: explicitURL}, nil
+	}
+	agentUnix := strings.TrimSpace(getenv("PROMPTLOCK_AGENT_UNIX_SOCKET"))
+	if agentUnix == "" {
+		agentUnix = config.DefaultAgentUnixSocketPath
+	}
+	if stat != nil {
+		if err := stat(agentUnix); err != nil {
+			return brokerTransport{}, fmt.Errorf("agent broker unix socket not found at %s; set PROMPTLOCK_BROKER_URL for explicit TCP transport", agentUnix)
+		}
+	}
+	return brokerTransport{UnixSocket: agentUnix}, nil
+}
+
+func brokerRequestURL(broker brokerTransport, path string) string {
+	base := strings.TrimSpace(broker.BaseURL)
+	if strings.TrimSpace(broker.UnixSocket) != "" {
+		base = "http://promptlock"
+	}
+	if strings.HasSuffix(base, "/") && strings.HasPrefix(path, "/") {
+		return strings.TrimSuffix(base, "/") + path
+	}
+	if !strings.HasSuffix(base, "/") && !strings.HasPrefix(path, "/") {
+		return base + "/" + path
+	}
+	return base + path
+}
+
+func brokerHTTPClient(broker brokerTransport) (*http.Client, error) {
+	if strings.TrimSpace(broker.UnixSocket) == "" {
+		return http.DefaultClient, nil
+	}
+	socketPath := strings.TrimSpace(broker.UnixSocket)
+	return &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", socketPath)
+			},
+		},
+	}, nil
 }
 
 func envIntDefault(k string, d int) int {
