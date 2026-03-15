@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestBuildBrokerExecutionEnvStripsAmbientSecrets(t *testing.T) {
 	t.Setenv("PATH", "/usr/local/bin:/usr/bin")
@@ -9,7 +12,7 @@ func TestBuildBrokerExecutionEnvStripsAmbientSecrets(t *testing.T) {
 	t.Setenv("PROMPTLOCK_AUTH_STORE_KEY", "ambient-key")
 	t.Setenv("OPENAI_API_KEY", "ambient-openai-key")
 
-	env := buildBrokerExecutionEnv(map[string]string{
+	env := buildBrokerExecutionEnv(os.Environ(), map[string]string{
 		"github_token": "leased-github-token",
 	}, "/trusted/bin:/usr/bin")
 

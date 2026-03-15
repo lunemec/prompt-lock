@@ -37,5 +37,8 @@ This builds broker + runner images and executes a real promptlock flow via `prom
 ## Notes
 - `e2e-compose` is a practical integration smoke test, not a full security proof.
 - Keep hardened config defaults in normal deployments.
+- `make security` now fails closed when `promptlock-validate-security` cannot read a scanned file. Intentional skip classes are limited to `.git`, `dist`, `.goreleaser-dist`, repo-local `.gocache`, repo-local `.gomodcache`, `.pyc`, and the scanner’s own source directory.
+- CLI and MCP regression coverage includes stalled Unix-socket and TCP peer timeout paths so broker-client hangs fail deterministically during test validation.
+- `make lint` syntax-checks every shipped shell workflow under `scripts/`, including the release/security/CI helpers invoked by Make targets.
 - `.toolchain.env` is the canonical source for repository Go and Docker base-image pins.
 - Update `.toolchain.env` first, then run `make toolchain-guard` and `make release-readiness-gate` when changing Go or Docker base-image versions.

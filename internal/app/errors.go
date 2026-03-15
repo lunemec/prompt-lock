@@ -11,3 +11,5 @@ var ErrLeaseNotOwned = errors.New("lease not owned by agent")
 var ErrAuditWriteFailed = errors.New("audit write failed")
 
 var ErrAuditUnavailable = errors.New("audit sink unavailable")
+
+var ErrCommandExecutionFailed = errors.New("command execution failed")

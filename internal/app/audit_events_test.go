@@ -212,6 +212,39 @@ func TestAuditEnvPathDecisionEvents(t *testing.T) {
 	}
 }
 
+func TestRequestLeaseAndApprovePersistIntent(t *testing.T) {
+	store := memory.NewStore()
+	audit := &auditBuf{}
+	now := time.Date(2026, 3, 15, 18, 0, 0, 0, time.UTC)
+
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      store,
+		Audit:        audit,
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req-intent" },
+		NewLeaseTok:  func() string { return "lease-intent" },
+	}
+
+	result, err := svc.RequestLeaseWithPolicyAndIntent("agent1", "task1", "reason", 5, []string{"github_token"}, "run_tests", "fp1", "wd1", "")
+	if err != nil {
+		t.Fatalf("request lease with policy: %v", err)
+	}
+	if result.Request.Intent != "run_tests" {
+		t.Fatalf("request intent = %q, want run_tests", result.Request.Intent)
+	}
+
+	lease, err := svc.ApproveRequest(result.Request.ID, 5)
+	if err != nil {
+		t.Fatalf("approve request: %v", err)
+	}
+	if lease.Intent != "run_tests" {
+		t.Fatalf("lease intent = %q, want run_tests", lease.Intent)
+	}
+}
+
 func findAuditEvent(events []ports.AuditEvent, name string) (ports.AuditEvent, bool) {
 	for _, ev := range events {
 		if ev.Event == name {

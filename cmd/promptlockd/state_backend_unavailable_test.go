@@ -55,7 +55,7 @@ func TestHandleRequestReturns503WhenStateStoreUnavailable(t *testing.T) {
 	stateStore := unavailableStateStore{}
 	secretStore := memory.NewStore()
 	secretStore.SetSecret("github_token", "x")
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc: app.Service{
 			Policy:       domain.DefaultPolicy(),
 			Requests:     stateStore,
@@ -68,7 +68,7 @@ func TestHandleRequestReturns503WhenStateStoreUnavailable(t *testing.T) {
 		},
 		authEnabled: false,
 		now:         func() time.Time { return now },
-	}
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/leases/request", bytes.NewBufferString(`{"agent_id":"a1","task_id":"t1","reason":"r","ttl_minutes":5,"secrets":["github_token"],"command_fingerprint":"fp-1","workdir_fingerprint":"wd-1"}`))
 	w := httptest.NewRecorder()
@@ -83,7 +83,7 @@ func TestHandleRequestStatusReturns503WhenStateStoreUnavailable(t *testing.T) {
 	now := time.Now().UTC()
 	stateStore := unavailableStateStore{}
 	secretStore := memory.NewStore()
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc: app.Service{
 			Policy:       domain.DefaultPolicy(),
 			Requests:     stateStore,
@@ -96,7 +96,7 @@ func TestHandleRequestStatusReturns503WhenStateStoreUnavailable(t *testing.T) {
 		},
 		authEnabled: false,
 		now:         func() time.Time { return now },
-	}
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/requests/status?request_id=req-unavailable", nil)
 	w := httptest.NewRecorder()
@@ -276,7 +276,7 @@ func TestHandleAccessReturns503WhenStateStoreUnavailable(t *testing.T) {
 func TestHandleExecuteReturns503WhenStateStoreUnavailable(t *testing.T) {
 	now := time.Now().UTC()
 	stateStore := unavailableStateStore{}
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc: app.Service{
 			Policy:       domain.DefaultPolicy(),
 			Requests:     stateStore,
@@ -295,7 +295,7 @@ func TestHandleExecuteReturns503WhenStateStoreUnavailable(t *testing.T) {
 			MaxTimeoutSec:         5,
 		},
 		now: func() time.Time { return now },
-	}
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(`{"lease_token":"lease-unavailable","command":["echo","hi"],"secrets":["github_token"]}`))
 	w := httptest.NewRecorder()

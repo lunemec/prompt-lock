@@ -88,6 +88,9 @@ In hardened local mode, PromptLock defaults to:
 - agent socket: `/tmp/promptlock-agent.sock`
 - operator socket: `/tmp/promptlock-operator.sock`
 
+For the supported hardened flow, `promptlock exec`, `promptlock watch`, and `promptlock auth docker-run` auto-select these Unix sockets.
+Use `--broker` or `PROMPTLOCK_BROKER_URL` only when you intentionally want the dev/demo local TCP listener instead of the hardened socket path.
+
 ### 3. Terminal B: start the human watch UI
 
 ```bash
@@ -143,7 +146,7 @@ If you want the full host+container lab walkthrough and troubleshooting map, use
 
 ## Secondary Quickstart: Local Dev Demo
 
-This path is faster, but it is for local testing only because it bypasses the external approval flow.
+This path is faster, but it is for local testing only because it bypasses the external approval flow and uses the default local TCP listener at `http://127.0.0.1:8765` instead of the hardened dual-socket transport.
 
 ```bash
 PROMPTLOCK_ALLOW_DEV_PROFILE=1 go run ./cmd/promptlockd

@@ -50,7 +50,7 @@ func newOwnershipTestServer(now time.Time) *server {
 	authStore.SaveSession(auth.SessionToken{Token: "session-a", GrantID: "grant-a", AgentID: "agent-a", CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute)})
 	authStore.SaveSession(auth.SessionToken{Token: "session-b", GrantID: "grant-b", AgentID: "agent-b", CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute)})
 
-	return &server{
+	return wiredServerForTest(&server{
 		svc: app.Service{
 			Policy:       domain.DefaultPolicy(),
 			Requests:     store,
@@ -77,7 +77,7 @@ func newOwnershipTestServer(now time.Time) *server {
 		},
 		authStore: authStore,
 		now:       func() time.Time { return now },
-	}
+	})
 }
 
 func TestRequestRejectsAgentIDMismatchWithAuthenticatedSession(t *testing.T) {

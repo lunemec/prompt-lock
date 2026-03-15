@@ -67,7 +67,7 @@ func scan(root string) ([]violation, error) {
 		}
 		b, err := os.ReadFile(clean)
 		if err != nil {
-			return nil
+			return fmt.Errorf("read %s: %w", filepath.ToSlash(clean), err)
 		}
 		for _, token := range forbiddenPatterns {
 			if bytes.Contains(b, []byte(token)) {

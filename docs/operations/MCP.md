@@ -23,6 +23,7 @@ PromptLock now includes an experimental MCP stdio adapter:
 - `notifications/cancelled` now cancels matching in-flight `tools/call` requests by JSON-RPC request id (`requestId`/`id`), and best-effort propagates cleanup to broker `POST /v1/leases/cancel?request_id=...` so pending lease requests are not left waiting for operator action.
 - If broker cleanup propagation fails during cancellation, adapter stderr includes a warning with the pending `request_id` so operators can manually deny stale requests.
 - `tools/call` notifications without an `id` are ignored (no response, no broker side effects), preventing untracked execution attempts through notification frames.
+- Broker-facing MCP HTTP/Unix-socket calls use a bounded `10s` client deadline, so stalled peers fail with `broker request timed out after 10s` instead of hanging indefinitely.
 - Harness now covers positive and selected negative paths (deny/timeout/missing session token).
 - Harness includes a single-session lifecycle sequence check (`initialize`, `notifications/initialized`, `tools/list`, `tools/call`) to guard notification-ordering regressions.
 - Conformance coverage includes target-client profiles for string-ID and numeric-ID JSON-RPC flows, including strict error-envelope checks (`id: null` for parse/batch errors).

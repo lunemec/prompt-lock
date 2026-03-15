@@ -8,11 +8,11 @@ Payload:
 {
   "agent_id": "ralph-r1",
   "task_id": "TASK-1001",
+  "intent": "run_tests",
   "reason": "Run e2e verification",
   "ttl_minutes": 20,
   "secrets": ["github_token", "npm_token"],
   "env_path": ".env",
-  "env_path_canonical": "/workspace/project/.env",
   "command_fingerprint": "sha256:...",
   "workdir_fingerprint": "sha256:..."
 }
@@ -25,6 +25,10 @@ Response:
   "status": "pending"
 }
 ```
+
+Notes:
+- The request payload accepts `env_path`; the broker computes `env_path_canonical` itself before operators review the request.
+- Legacy clients that still send `env_path_canonical` are tolerated for compatibility, but the value is ignored and never trusted as approval input.
 
 ## 2) Human decision
 ### Approve
@@ -98,6 +102,7 @@ Payload:
 ```json
 {
   "lease_token": "lease_...",
+  "intent": "run_tests",
   "command": ["go", "test", "./..."],
   "secrets": ["github_token", "npm_token"],
   "command_fingerprint": "sha256:...",
@@ -115,14 +120,17 @@ Response:
 
 Notes:
 - Hardened profile requires `intent` and rejects raw shell-wrapper entrypoints such as `bash`, `sh`, and `zsh`.
+- Execute-time `intent` must exactly match the approved request/lease intent. PromptLock does not widen egress policy from a different caller-supplied execute payload.
+- Broker egress checks are defense-in-depth command validation, not runtime packet mediation. Direct network clients such as `curl`, `wget`, and `fetch` are denied when no inspectable destination is present in argv.
 - Child processes receive only an explicit minimal baseline environment plus leased secrets; the ambient broker or CLI environment is not forwarded by default.
-- `output_security_mode=redacted` is best-effort masking for log safety only. It is not a strong output-containment or secret-exfiltration boundary. Use `none` when output should be suppressed.
+- `output_security_mode=redacted` performs token-aware best-effort masking for common bearer and env-style secret shapes. It is not a strong output-containment or secret-exfiltration boundary. Use `none` when output should be suppressed.
 - When a request carries `env_path`, execution resolves leased secrets from that approved `.env` file instead of the broker process environment. The broker stores both the original path and a canonicalized path, and execute-time secret access fails closed if the canonical path no longer matches.
 
 ## `env_path` trust boundary
 - `--env-path` is agent-supplied approval context. The broker canonicalizes it on request and stores both the original and canonical path for operator review.
 - `env_path` is constrained to `PROMPTLOCK_ENV_PATH_ROOT`. Traversal and symlink escapes outside that root are rejected.
 - If `PROMPTLOCK_ENV_PATH_ROOT` is unset, the broker currently falls back to its current working directory. That is only safe when the broker starts from a host-owned directory outside agent-controlled workspace mounts.
+- Broker startup fails closed if the chosen `PROMPTLOCK_ENV_PATH_ROOT` (or fallback working directory) cannot be initialized as an env-path source root.
 - `env_path` disables active-lease reuse for matching requests because the approved file path becomes part of the trust boundary.
 
 ## Enforcement rules
@@ -164,6 +172,7 @@ To avoid excessive prompts:
 - `403` forbidden: policy-denied operations (execution policy, egress policy, host-ops policy, lease/secret scope mismatch).
 - `429` too many requests: auth rate-limit threshold reached.
 - `404` not found: unknown request/lease/intent identifiers.
+- `503` service unavailable: durability gate closed, audit-gated mutation blocked, or configured state/secret backend unavailable.
 - `500` internal error: unexpected execution/runtime failures.
 
 ## Later-stage feature: biometric human approval

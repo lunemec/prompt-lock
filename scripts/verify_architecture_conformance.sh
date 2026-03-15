@@ -23,6 +23,22 @@ check_forbidden "internal/core" "cmd/promptlockd"
 
 # App layer should not depend on inbound transport package.
 check_forbidden "internal/app" "cmd/promptlockd"
+check_forbidden "internal/app" "os.Environ("
+
+check_handler_forbidden() {
+  local forbidden="$1"
+  if grep -R --line-number --include='*handler*.go' --exclude='*_test.go' "${forbidden}" cmd/promptlockd >/tmp/promptlock-arch-check.$$ 2>/dev/null; then
+    echo "[arch] forbidden handler pattern '${forbidden}' found under cmd/promptlockd:" >&2
+    cat /tmp/promptlock-arch-check.$$ >&2
+    fail=1
+  fi
+  rm -f /tmp/promptlock-arch-check.$$ || true
+}
+
+check_handler_forbidden "processRunner{"
+check_handler_forbidden "NewDefaultControlPlanePolicy("
+check_handler_forbidden "ExecuteWithLeaseUseCase{"
+check_handler_forbidden "HostDockerExecuteUseCase{"
 
 # Inbound daemon should not directly depend on adapter internals except through app/config/auth wiring.
 # (allow adapters/memory + adapters/audit only in main wiring; block elsewhere by convention via docs/checklist.)

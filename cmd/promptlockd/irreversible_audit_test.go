@@ -45,14 +45,14 @@ func TestHandleHostDockerExecuteRejectsClosedDurabilityGateBeforeRunningCommand(
 	}
 
 	marker, helper := hostDockerMarkerHelper(t)
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc:              app.Service{Audit: testAudit{}},
 		execPolicy:       config.ExecutionPolicy{MaxOutputBytes: 64},
 		hostOpsPolicy:    config.HostOpsPolicy{DockerTimeoutSec: 30},
 		policyEngine:     hostDockerEnvPolicy{helperPath: helper},
 		durabilityClosed: true,
 		now:              time.Now,
-	}
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/host/docker/execute", bytes.NewBufferString(`{"command":["docker","ps"]}`))
 	w := httptest.NewRecorder()
@@ -72,13 +72,13 @@ func TestHandleHostDockerExecuteFailsBeforeRunningCommandWhenStartAuditFails(t *
 
 	marker, helper := hostDockerMarkerHelper(t)
 	audit := &scriptedAudit{failAt: map[int]error{1: errors.New("audit disk offline")}}
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc:           app.Service{Audit: audit},
 		execPolicy:    config.ExecutionPolicy{MaxOutputBytes: 64},
 		hostOpsPolicy: config.HostOpsPolicy{DockerTimeoutSec: 30},
 		policyEngine:  hostDockerEnvPolicy{helperPath: helper},
 		now:           time.Now,
-	}
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/host/docker/execute", bytes.NewBufferString(`{"command":["docker","ps"]}`))
 	w := httptest.NewRecorder()
@@ -98,13 +98,13 @@ func TestHandleHostDockerExecuteReturnsAuditWarningWhenCompletionAuditFailsAfter
 
 	marker, helper := hostDockerMarkerHelper(t)
 	audit := &scriptedAudit{failAt: map[int]error{2: errors.New("audit disk offline")}}
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc:           app.Service{Audit: audit},
 		execPolicy:    config.ExecutionPolicy{MaxOutputBytes: 64},
 		hostOpsPolicy: config.HostOpsPolicy{DockerTimeoutSec: 30},
 		policyEngine:  hostDockerEnvPolicy{helperPath: helper},
 		now:           time.Now,
-	}
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/host/docker/execute", bytes.NewBufferString(`{"command":["docker","ps"]}`))
 	w := httptest.NewRecorder()
@@ -149,7 +149,7 @@ func TestHandleExecuteFailsBeforeRunningCommandWhenStartAuditFails(t *testing.T)
 	writeExecutableScript(t, helperPath, "printf ran > "+shellQuote(markerPath)+"\nprintf command-ok")
 
 	audit := &scriptedAudit{failAt: map[int]error{3: errors.New("audit disk offline")}}
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc: app.Service{
 			Policy:       domain.DefaultPolicy(),
 			Requests:     store,
@@ -172,7 +172,7 @@ func TestHandleExecuteFailsBeforeRunningCommandWhenStartAuditFails(t *testing.T)
 		},
 		authStore: aStore,
 		now:       func() time.Time { return now },
-	}
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(`{"lease_token":"l1","command":["marker"],"secrets":["github_token"],"command_fingerprint":"fp","workdir_fingerprint":"wd"}`))
 	req.Header.Set("Authorization", "Bearer s1")
@@ -207,7 +207,7 @@ func TestHandleExecuteReturnsAuditWarningWhenCompletionAuditFailsAfterCommandRun
 	writeExecutableScript(t, helperPath, "printf ran > "+shellQuote(markerPath)+"\nprintf command-ok")
 
 	audit := &scriptedAudit{failAt: map[int]error{4: errors.New("audit disk offline")}}
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc: app.Service{
 			Policy:       domain.DefaultPolicy(),
 			Requests:     store,
@@ -230,7 +230,7 @@ func TestHandleExecuteReturnsAuditWarningWhenCompletionAuditFailsAfterCommandRun
 		},
 		authStore: aStore,
 		now:       func() time.Time { return now },
-	}
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(`{"lease_token":"l1","command":["marker"],"secrets":["github_token"],"command_fingerprint":"fp","workdir_fingerprint":"wd"}`))
 	req.Header.Set("Authorization", "Bearer s1")

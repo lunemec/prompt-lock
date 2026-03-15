@@ -59,13 +59,13 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		AgentID            string   `json:"agent_id"`
 		TaskID             string   `json:"task_id"`
+		Intent             string   `json:"intent"`
 		Reason             string   `json:"reason"`
 		TTLMinutes         int      `json:"ttl_minutes"`
 		Secrets            []string `json:"secrets"`
 		CommandFingerprint string   `json:"command_fingerprint"`
 		WorkdirFingerprint string   `json:"workdir_fingerprint"`
 		EnvPath            string   `json:"env_path"`
-		EnvPathCanonical   string   `json:"env_path_canonical"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeMappedError(w, ErrBadRequest, err.Error())
@@ -85,20 +85,6 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.EnvPath = strings.TrimSpace(req.EnvPath)
-	req.EnvPathCanonical = strings.TrimSpace(req.EnvPathCanonical)
-	if req.EnvPath != "" {
-		envPathStore, err := s.ensureEnvPathSecretStore()
-		if err != nil {
-			writeMappedError(w, ErrServiceUnavailable, err.Error())
-			return
-		}
-		canonicalPath, err := envPathStore.Canonicalize(req.EnvPath)
-		if err != nil {
-			writeMappedError(w, ErrBadRequest, err.Error())
-			return
-		}
-		req.EnvPathCanonical = canonicalPath
-	}
 	effectiveAgentID := strings.TrimSpace(req.AgentID)
 	if s.authEnabled {
 		_, sessionAgentID := actorFromRequest(r)
@@ -108,12 +94,16 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		effectiveAgentID = sessionAgentID
 	}
-	result, err := s.svc.RequestLeaseWithPolicy(effectiveAgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint, req.EnvPath, req.EnvPathCanonical)
+	result, err := s.svc.RequestLeaseWithPolicyAndIntent(effectiveAgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.Intent, req.CommandFingerprint, req.WorkdirFingerprint, req.EnvPath)
 	if err != nil {
 		var throttleErr *app.RequestThrottleError
 		if errors.As(err, &throttleErr) {
 			w.Header().Set("Retry-After", strconv.Itoa(throttleErr.RetryAfterSeconds()))
 			writeMappedError(w, ErrRateLimited, throttleErr.Error())
+			return
+		}
+		if errors.Is(err, app.ErrSecretBackendUnavailable) {
+			writeMappedError(w, ErrServiceUnavailable, secretBackendUnavailableMessage)
 			return
 		}
 		kind, msg := stateStoreMutationError(err)

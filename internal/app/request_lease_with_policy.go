@@ -18,6 +18,10 @@ type leaseLister interface {
 }
 
 func (s *Service) RequestLeaseWithPolicy(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint, workdirFingerprint, envPath, envPathCanonical string) (RequestLeaseResult, error) {
+	return s.RequestLeaseWithPolicyAndIntent(agentID, taskID, reason, ttl, secrets, "", commandFingerprint, workdirFingerprint, envPath)
+}
+
+func (s *Service) RequestLeaseWithPolicyAndIntent(agentID, taskID, reason string, ttl int, secrets []string, intent, commandFingerprint, workdirFingerprint, envPath string) (RequestLeaseResult, error) {
 	defer s.lockMutation()()
 	if err := s.Policy.ValidateRequest(ttl, secrets); err != nil {
 		return RequestLeaseResult{}, err
@@ -26,6 +30,7 @@ func (s *Service) RequestLeaseWithPolicy(agentID, taskID, reason string, ttl int
 	policy := s.requestPolicy()
 	input := RequestPolicyInput{
 		AgentID:            agentID,
+		Intent:             strings.TrimSpace(intent),
 		Secrets:            secrets,
 		CommandFingerprint: commandFingerprint,
 		WorkdirFingerprint: workdirFingerprint,
@@ -63,7 +68,7 @@ func (s *Service) RequestLeaseWithPolicy(agentID, taskID, reason string, ttl int
 		return RequestLeaseResult{}, NewRequestThrottleError(RequestThrottleReasonCooldown, retryAfter)
 	}
 
-	created, err := s.requestLeaseUnlocked(agentID, taskID, reason, ttl, secrets, commandFingerprint, workdirFingerprint, envPath, envPathCanonical)
+	created, err := s.requestLeaseUnlocked(agentID, taskID, reason, ttl, secrets, intent, commandFingerprint, workdirFingerprint, envPath)
 	if err != nil {
 		return RequestLeaseResult{}, err
 	}
@@ -88,6 +93,7 @@ func (s Service) findEquivalentActiveLease(input RequestPolicyInput) (domain.Lea
 		}
 		candidate := RequestPolicyInput{
 			AgentID:            lease.AgentID,
+			Intent:             lease.Intent,
 			Secrets:            lease.Secrets,
 			CommandFingerprint: lease.CommandFingerprint,
 			WorkdirFingerprint: lease.WorkdirFingerprint,
@@ -122,6 +128,7 @@ func (s Service) equivalentRequestCooldown(input RequestPolicyInput, pending []d
 	for _, req := range pending {
 		candidate := RequestPolicyInput{
 			AgentID:            req.AgentID,
+			Intent:             req.Intent,
 			Secrets:            req.Secrets,
 			CommandFingerprint: req.CommandFingerprint,
 			WorkdirFingerprint: req.WorkdirFingerprint,

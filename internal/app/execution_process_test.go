@@ -84,6 +84,54 @@ func TestBuildExecutionEnvironmentStripsAmbientSecrets(t *testing.T) {
 	assertEnvOmitsPrefix(t, env, "LANG=")
 }
 
+func TestValidateNetworkEgressRejectsDirectClientWithoutInspectableDestination(t *testing.T) {
+	policy := DefaultControlPlanePolicy{
+		Network: config.NetworkEgressPolicy{
+			Enabled:            true,
+			RequireIntentMatch: true,
+			IntentAllowDomains: map[string][]string{"run_tests": {"api.github.com"}},
+		},
+	}
+
+	err := policy.ValidateNetworkEgress([]string{"curl", "--config", "./agent-controlled.cfg"}, "run_tests")
+	if err == nil {
+		t.Fatalf("expected direct network client without inspectable destination to be rejected")
+	}
+	if !strings.Contains(err.Error(), "inspectable destination") {
+		t.Fatalf("expected inspectable-destination deny detail, got %v", err)
+	}
+}
+
+func TestRedactOutputScrubsBearerAndEnvTokenShapes(t *testing.T) {
+	githubToken := "gh" + "p_" + "abcdef1234567890"
+	openAIToken := "sk" + "-live-" + "abcdef1234567890"
+	input := strings.Join([]string{
+		"Authorization: Bearer super-secret-bearer-token",
+		"GITHUB_TOKEN=" + githubToken,
+		"OPENAI_API_KEY=" + openAIToken,
+	}, "\n")
+
+	redacted := redactOutput(input)
+	for _, secret := range []string{
+		"super-secret-bearer-token",
+		githubToken,
+		openAIToken,
+	} {
+		if strings.Contains(redacted, secret) {
+			t.Fatalf("expected output to redact %q, got %q", secret, redacted)
+		}
+	}
+	if !strings.Contains(redacted, "Authorization: Bearer [REDACTED_BEARER_TOKEN]") {
+		t.Fatalf("expected bearer token marker, got %q", redacted)
+	}
+	if !strings.Contains(redacted, "GITHUB_TOKEN=[REDACTED_ENV_VALUE]") {
+		t.Fatalf("expected env token marker, got %q", redacted)
+	}
+	if !strings.Contains(redacted, "OPENAI_API_KEY=[REDACTED_ENV_VALUE]") {
+		t.Fatalf("expected api key marker, got %q", redacted)
+	}
+}
+
 func assertEnvContains(t *testing.T, env []string, want string) {
 	t.Helper()
 	for _, entry := range env {

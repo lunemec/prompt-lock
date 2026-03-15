@@ -65,7 +65,7 @@ func (a *auditCapture) Write(ev ports.AuditEvent) error {
 }
 
 func newFileBackedLeaseTestServer(now time.Time, path string, store *memory.Store, auditSink ports.AuditSink, requestID, leaseToken string) *server {
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc: app.Service{
 			Policy:       domain.DefaultPolicy(),
 			Requests:     store,
@@ -81,7 +81,7 @@ func newFileBackedLeaseTestServer(now time.Time, path string, store *memory.Stor
 		stateStoreFile:      path,
 		stateStorePersister: store,
 		now:                 func() time.Time { return now },
-	}
+	})
 	s.svc.AuditFailureHandler = func(err error) error {
 		return s.closeDurabilityGate("audit", err)
 	}

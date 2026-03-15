@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -56,6 +57,8 @@ type pathStat func(string) error
 
 const maxRPCLineBytes = 1 << 20 // 1 MiB
 const mcpProtocolVersion = "2024-11-05"
+
+var brokerClientTimeout = 10 * time.Second
 
 type mcpServer struct {
 	emitMu     sync.Mutex
@@ -401,6 +404,7 @@ func executeWithIntent(ctx context.Context, args map[string]interface{}) (string
 	if err := postAuth(ctx, broker, "/v1/leases/request", session, map[string]any{
 		"agent_id":            envDefault("PROMPTLOCK_AGENT_ID", "mcp-agent"),
 		"task_id":             envDefault("PROMPTLOCK_TASK_ID", "mcp-task"),
+		"intent":              intent,
 		"reason":              "mcp execute_with_intent",
 		"ttl_minutes":         ttl,
 		"secrets":             resolved.Secrets,
@@ -504,7 +508,10 @@ func cancelPendingRequest(broker brokerTransport, session, requestID string) err
 
 func postAuth(ctx context.Context, broker brokerTransport, path, token string, in any, out any) error {
 	b, _ := json.Marshal(in)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, brokerRequestURL(broker, path), bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, brokerRequestURL(broker, path), bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 	client, err := brokerHTTPClient(broker)
@@ -513,7 +520,7 @@ func postAuth(ctx context.Context, broker brokerTransport, path, token string, i
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return normalizeBrokerRequestError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
@@ -523,7 +530,10 @@ func postAuth(ctx context.Context, broker brokerTransport, path, token string, i
 }
 
 func getAuth(ctx context.Context, broker brokerTransport, path, token string, out any) error {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, brokerRequestURL(broker, path), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, brokerRequestURL(broker, path), nil)
+	if err != nil {
+		return err
+	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	client, err := brokerHTTPClient(broker)
 	if err != nil {
@@ -531,7 +541,7 @@ func getAuth(ctx context.Context, broker brokerTransport, path, token string, ou
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return normalizeBrokerRequestError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
@@ -574,13 +584,18 @@ func resolveBrokerTransport(getenv envLookup, stat pathStat) (brokerTransport, e
 		}
 		return brokerTransport{UnixSocket: explicitUnix}, nil
 	}
-	explicitURL := strings.TrimSpace(getenv("PROMPTLOCK_BROKER_URL"))
-	if explicitURL != "" {
-		return brokerTransport{BaseURL: explicitURL}, nil
-	}
 	agentUnix := strings.TrimSpace(getenv("PROMPTLOCK_AGENT_UNIX_SOCKET"))
 	if agentUnix == "" {
 		agentUnix = config.DefaultAgentUnixSocketPath
+	}
+	if stat != nil {
+		if err := stat(agentUnix); err == nil {
+			return brokerTransport{UnixSocket: agentUnix}, nil
+		}
+	}
+	explicitURL := strings.TrimSpace(getenv("PROMPTLOCK_BROKER_URL"))
+	if explicitURL != "" {
+		return brokerTransport{BaseURL: explicitURL}, nil
 	}
 	if stat != nil {
 		if err := stat(agentUnix); err != nil {
@@ -606,10 +621,11 @@ func brokerRequestURL(broker brokerTransport, path string) string {
 
 func brokerHTTPClient(broker brokerTransport) (*http.Client, error) {
 	if strings.TrimSpace(broker.UnixSocket) == "" {
-		return http.DefaultClient, nil
+		return &http.Client{Timeout: brokerClientTimeout}, nil
 	}
 	socketPath := strings.TrimSpace(broker.UnixSocket)
 	return &http.Client{
+		Timeout: brokerClientTimeout,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				var d net.Dialer
@@ -617,6 +633,20 @@ func brokerHTTPClient(broker brokerTransport) (*http.Client, error) {
 			},
 		},
 	}, nil
+}
+
+func normalizeBrokerRequestError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("broker request timed out after %s", brokerClientTimeout)
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return fmt.Errorf("broker request timed out after %s", brokerClientTimeout)
+	}
+	return err
 }
 
 func envIntDefault(k string, d int) int {

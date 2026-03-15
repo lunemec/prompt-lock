@@ -30,7 +30,7 @@ func TestValidateExecuteCommand(t *testing.T) {
 }
 
 func TestApplyOutputSecurity(t *testing.T) {
-	in := "secret=abc"
+	in := "OPENAI_API_KEY=abc"
 	if got := applyOutputSecurity("none", in); got != "" {
 		t.Fatalf("expected none mode to suppress output")
 	}

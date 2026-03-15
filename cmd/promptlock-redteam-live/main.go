@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -36,22 +37,33 @@ type harnessTransport struct {
 }
 
 func main() {
+	os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func runCLI(args []string, stdout, stderr io.Writer) int {
 	outPath := ""
 	profile := "dev"
-	if len(os.Args) > 1 {
-		outPath = os.Args[1]
+	if len(args) > 0 {
+		outPath = args[0]
 	}
-	if len(os.Args) > 2 {
-		profile = os.Args[2]
+	if len(args) > 1 {
+		profile = args[1]
 	}
 
 	rep, code := run(outPath, profile)
+	return emitReport(rep, code, outPath, stdout, stderr)
+}
+
+func emitReport(rep report, code int, outPath string, stdout, stderr io.Writer) int {
 	rendered, _ := json.MarshalIndent(rep, "", "  ")
-	fmt.Println(string(rendered))
+	fmt.Fprintln(stdout, string(rendered))
 	if outPath != "" {
-		_ = os.WriteFile(outPath, append(rendered, '\n'), 0o644)
+		if err := os.WriteFile(outPath, append(rendered, '\n'), 0o644); err != nil {
+			fmt.Fprintf(stderr, "write report file: %v\n", err)
+			return 1
+		}
 	}
-	os.Exit(code)
+	return code
 }
 
 func run(outPath, profile string) (report, int) {
@@ -204,7 +216,15 @@ func run(outPath, profile string) (report, int) {
 		return rep, 1
 	}
 
-	results := make([]result, 0, 8)
+	rep = runChecks(transport, operatorToken)
+	if rep.OK {
+		return rep, 0
+	}
+	return rep, 1
+}
+
+func runChecks(transport harnessTransport, operatorToken string) report {
+	results := make([]result, 0, 10)
 	add := func(r result) { results = append(results, r) }
 
 	status, _, _ := httpJSON(transport.operatorClient, http.MethodPost, transport.operatorBase+"/v1/leases/approve?request_id=x", nil, nil)
@@ -216,7 +236,7 @@ func run(outPath, profile string) (report, int) {
 	okBoot := status == http.StatusOK && boot != ""
 	add(result{Name: "bootstrap_create", OK: okBoot, Status: status})
 	if !okBoot {
-		return finalize(results), 1
+		return finalize(results)
 	}
 
 	status, body, _ = httpJSON(transport.agentClient, http.MethodPost, transport.agentBase+"/v1/auth/pair/complete", map[string]any{"token": boot, "container_id": "c1"}, nil)
@@ -224,7 +244,7 @@ func run(outPath, profile string) (report, int) {
 	okPair := status == http.StatusOK && grant != ""
 	add(result{Name: "pair_complete", OK: okPair, Status: status})
 	if !okPair {
-		return finalize(results), 1
+		return finalize(results)
 	}
 
 	status, _, _ = httpJSON(transport.agentClient, http.MethodPost, transport.agentBase+"/v1/auth/pair/complete", map[string]any{"token": boot, "container_id": "c1"}, nil)
@@ -235,29 +255,67 @@ func run(outPath, profile string) (report, int) {
 	okSess := status == http.StatusOK && sess != ""
 	add(result{Name: "session_mint", OK: okSess, Status: status})
 	if !okSess {
-		return finalize(results), 1
+		return finalize(results)
 	}
 
 	agentHeaders := map[string]string{"Authorization": "Bearer " + sess}
 	status, _, _ = httpJSON(transport.operatorClient, http.MethodPost, transport.operatorBase+"/v1/leases/approve?request_id=x", map[string]any{}, agentHeaders)
 	add(result{Name: "role_confusion_agent_on_operator", OK: status == http.StatusUnauthorized, Status: status, Expected: http.StatusUnauthorized})
 
+	leaseToken, leaseResults := createApprovedLeaseForEgressCheck(transport, agentHeaders, opHeaders)
+	for _, r := range leaseResults {
+		add(r)
+		if !r.OK {
+			return finalize(results)
+		}
+	}
+
 	payload := map[string]any{
-		"lease_token":         "fake",
+		"lease_token":         leaseToken,
 		"intent":              "run_tests",
 		"command":             []string{"curl", "http://169.254.169.254/latest/meta-data"},
 		"secrets":             []string{"github_token"},
 		"command_fingerprint": "fp",
 		"workdir_fingerprint": "wd",
 	}
-	status, _, _ = httpJSON(transport.agentClient, http.MethodPost, transport.agentBase+"/v1/leases/execute", payload, agentHeaders)
-	add(result{Name: "egress_bypass_denied", OK: status == http.StatusForbidden, Status: status, Expected: http.StatusForbidden})
+	status, _, raw := httpJSON(transport.agentClient, http.MethodPost, transport.agentBase+"/v1/leases/execute", payload, agentHeaders)
+	ok, detail := verifyNetworkEgressDeny(status, raw)
+	add(result{Name: "egress_bypass_denied", OK: ok, Status: status, Expected: http.StatusForbidden, Detail: detail})
 
-	rep = finalize(results)
-	if rep.OK {
-		return rep, 0
+	return finalize(results)
+}
+
+func createApprovedLeaseForEgressCheck(transport harnessTransport, agentHeaders, opHeaders map[string]string) (string, []result) {
+	results := make([]result, 0, 2)
+	add := func(r result) { results = append(results, r) }
+
+	requestPayload := map[string]any{
+		"agent_id":            "a1",
+		"task_id":             "redteam-egress-deny",
+		"intent":              "run_tests",
+		"reason":              "redteam live execute-time egress deny",
+		"ttl_minutes":         5,
+		"secrets":             []string{"github_token"},
+		"command_fingerprint": "fp",
+		"workdir_fingerprint": "wd",
 	}
-	return rep, 1
+	status, body, _ := httpJSON(transport.agentClient, http.MethodPost, transport.agentBase+"/v1/leases/request", requestPayload, agentHeaders)
+	requestID, _ := body["request_id"].(string)
+	okRequest := status == http.StatusOK && requestID != ""
+	add(result{Name: "lease_request_create", OK: okRequest, Status: status})
+	if !okRequest {
+		return "", results
+	}
+
+	status, body, _ = httpJSON(transport.operatorClient, http.MethodPost, transport.operatorBase+"/v1/leases/approve?request_id="+requestID, map[string]any{"ttl_minutes": 5}, opHeaders)
+	leaseToken, _ := body["lease_token"].(string)
+	okApprove := status == http.StatusOK && leaseToken != ""
+	add(result{Name: "lease_request_approve", OK: okApprove, Status: status})
+	if !okApprove {
+		return "", results
+	}
+
+	return leaseToken, results
 }
 
 func finalize(results []result) report {
@@ -269,6 +327,28 @@ func finalize(results []result) report {
 		}
 	}
 	return report{OK: ok, Results: results}
+}
+
+func verifyNetworkEgressDeny(status int, raw string) (bool, string) {
+	detail := strings.TrimSpace(raw)
+	if status != http.StatusForbidden {
+		if detail == "" {
+			detail = fmt.Sprintf("expected 403 with network egress-specific deny evidence, got %d", status)
+		} else {
+			detail = detail + fmt.Sprintf("; expected 403 with network egress-specific deny evidence, got %d", status)
+		}
+		return false, detail
+	}
+	lower := strings.ToLower(detail)
+	if strings.Contains(lower, "network egress") ||
+		strings.Contains(lower, "inspectable destination") ||
+		strings.Contains(lower, "not allowed by network policy") {
+		return true, detail
+	}
+	if detail == "" {
+		return false, "expected network egress-specific deny evidence"
+	}
+	return false, detail + "; expected network egress-specific deny evidence"
 }
 
 func configureHarnessTransport(profile, tempDir string, port int, cfg map[string]any) (harnessTransport, error) {

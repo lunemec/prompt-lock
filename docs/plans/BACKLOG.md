@@ -5,4 +5,4 @@ Updated: 2026-03-15
 This is the canonical list of open work. Initiative docs may hold detail, but status should stay aligned here. Completed work belongs in `ACTIVE-PLAN.md`, initiative/checklist docs, or archived plan history rather than this file.
 
 ## Open items
-- No open backlog items. `AUTH-008`, `SEC-027`, `AUTH-007`, `SEC-028`, `SEC-029`, `API-006`, and `SEC-030` were confirmed and closed in the 2026-03-15 re-review; see `docs/plans/ACTIVE-PLAN.md` for the completion notes.
+- `COMPAT-001` — Rename the legacy `promptlock-readiness-check --require-p0` flag to a release-gating name such as `--require-release-gating` in a future compatibility window while keeping the current alias documented until the breaking change is scheduled.

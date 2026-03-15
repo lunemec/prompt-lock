@@ -1,12 +1,9 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
-	"os/exec"
-	"strings"
-	"time"
 
 	"github.com/lunemec/promptlock/internal/app"
 	"github.com/lunemec/promptlock/internal/core/ports"
@@ -44,95 +41,40 @@ func (s *server) handleExecute(w http.ResponseWriter, r *http.Request) {
 		writeMappedError(w, ErrBadRequest, "command is required")
 		return
 	}
-	if err := s.controlPolicy().ValidateExecuteRequest(s.securityProfile, app.ExecuteRequest{Intent: req.Intent, Command: req.Command}); err != nil {
-		writeMappedError(w, ErrForbidden, withPolicyHint(err.Error()))
-		return
-	}
 	if len(req.Secrets) == 0 {
 		writeMappedError(w, ErrBadRequest, "secrets are required")
 		return
 	}
-	if err := s.controlPolicy().ValidateNetworkEgress(req.Command, req.Intent); err != nil {
-		at, aid := actorFromRequest(r)
-		if auditErr := s.auditCritical(ports.AuditEvent{Event: "network_egress_blocked", Timestamp: s.now(), ActorType: at, ActorID: aid, Metadata: map[string]string{"reason": err.Error(), "command": strings.Join(req.Command, " ")}}); auditErr != nil {
-			writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
-			return
-		}
-		writeMappedError(w, ErrForbidden, withPolicyHint(err.Error()))
-		return
-	}
-	if _, err := s.ensureEnvPathSecretStore(); err != nil {
-		writeMappedError(w, ErrServiceUnavailable, err.Error())
-		return
-	}
-
-	_, actorID := actorFromRequest(r)
-	if !s.authEnabled {
-		actorID = ""
-	}
-	resolved, err := s.svc.ResolveExecutionSecretsByAgent(actorID, req.LeaseToken, req.Secrets, req.CommandFingerprint, req.WorkdirFingerprint)
-	if err != nil {
-		kind, msg := stateStoreAccessError(err)
-		writeMappedError(w, kind, msg)
-		return
-	}
-
-	timeoutSec := s.controlPolicy().ClampTimeout(req.TimeoutSec)
-	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(timeoutSec)*time.Second)
-	defer cancel()
-	resolvedCommand, err := s.controlPolicy().ResolveExecuteCommand(req.Command)
-	if err != nil {
-		writeMappedError(w, ErrForbidden, withPolicyHint(err.Error()))
-		return
-	}
 	at, aid := actorFromRequest(r)
-	if err := s.auditCritical(ports.AuditEvent{
-		Event:      "execute_with_secret_started",
-		Timestamp:  s.now(),
-		ActorType:  at,
-		ActorID:    aid,
-		LeaseToken: req.LeaseToken,
-		Metadata: map[string]string{
-			"command":     strings.Join(req.Command, " "),
-			"timeout_sec": itoa(uint64(timeoutSec)),
-		},
-	}); err != nil {
-		writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
-		return
+	if !s.authEnabled {
+		aid = ""
 	}
-	cmd := exec.CommandContext(ctx, resolvedCommand.Path, resolvedCommand.Args...)
-	if len(req.Command) > 0 {
-		cmd.Args[0] = req.Command[0]
-	}
-	cmd.Env = buildBrokerExecutionEnv(resolved, resolvedCommand.SearchPath)
-	captureLimit := effectiveOutputCaptureLimit(s.execPolicy.OutputSecurityMode, s.execPolicy.MaxOutputBytes)
-	out, code, err := runCommandWithBoundedOutput(cmd, captureLimit)
+	result, err := s.executeUseCase.Execute(r.Context(), app.ExecuteWithLeaseInput{
+		ActorType:           at,
+		ActorID:             aid,
+		LeaseToken:          req.LeaseToken,
+		Intent:              req.Intent,
+		Command:             req.Command,
+		Secrets:             req.Secrets,
+		CommandFingerprint:  req.CommandFingerprint,
+		WorkdirFingerprint:  req.WorkdirFingerprint,
+		RequestedTimeoutSec: req.TimeoutSec,
+	})
 	if err != nil {
-		writeMappedError(w, ErrInternal, err.Error())
+		switch {
+		case errors.Is(err, app.ErrCommandExecutionFailed):
+			writeMappedError(w, ErrInternal, err.Error())
+		case errors.Is(err, app.ErrAuditUnavailable), errors.Is(err, ErrDurabilityClosed), errors.Is(err, app.ErrSecretBackendUnavailable), errors.Is(err, ports.ErrStoreUnavailable), errors.Is(err, app.ErrRequestNotOwned), errors.Is(err, app.ErrLeaseNotOwned):
+			kind, msg := stateStoreAccessError(err)
+			writeMappedError(w, kind, msg)
+		default:
+			writeMappedError(w, ErrForbidden, withPolicyHint(err.Error()))
+		}
 		return
 	}
-	outStr := s.controlPolicy().ApplyOutputSecurity(out)
-	if max := s.execPolicy.MaxOutputBytes; max > 0 && len(outStr) > max {
-		outStr = outStr[:max]
-	}
-	auditWarning := ""
-	if err := s.auditCritical(ports.AuditEvent{
-		Event:      "execute_with_secret",
-		Timestamp:  s.now(),
-		ActorType:  at,
-		ActorID:    aid,
-		LeaseToken: req.LeaseToken,
-		Metadata: map[string]string{
-			"command":     strings.Join(req.Command, " "),
-			"exit_code":   itoa(uint64(code)),
-			"timeout_sec": itoa(uint64(timeoutSec)),
-		},
-	}); err != nil {
-		auditWarning = durabilityUnavailableMessage
-	}
-	resp := map[string]any{"exit_code": code, "stdout_stderr": outStr}
-	if auditWarning != "" {
-		resp["audit_warning"] = auditWarning
+	resp := map[string]any{"exit_code": result.ExitCode, "stdout_stderr": result.StdoutStderr}
+	if result.AuditWarning != "" {
+		resp["audit_warning"] = result.AuditWarning
 	}
 	writeJSON(w, resp)
 }

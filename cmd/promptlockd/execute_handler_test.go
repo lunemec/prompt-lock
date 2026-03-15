@@ -35,14 +35,14 @@ func TestExecuteWithSecrets(t *testing.T) {
 	aStore.SaveGrant(auth.PairingGrant{GrantID: "g1", AgentID: "a1", CreatedAt: now, LastUsedAt: now, IdleExpiresAt: now.Add(10 * time.Minute), AbsoluteExpiresAt: now.Add(1 * time.Hour)})
 	aStore.SaveSession(auth.SessionToken{Token: "s1", GrantID: "g1", AgentID: "a1", CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute)})
 
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc:         app.Service{Policy: domain.DefaultPolicy(), Requests: store, Leases: store, Secrets: store, Audit: testAudit{}, Now: func() time.Time { return now }, NewRequestID: func() string { return "r1" }, NewLeaseTok: func() string { return "l1" }},
 		authEnabled: true,
 		authCfg:     config.AuthConfig{EnableAuth: true, OperatorToken: "op", AllowPlaintextSecretReturn: false},
 		execPolicy:  config.ExecutionPolicy{ExactMatchExecutables: []string{"bash"}, DenylistSubstrings: []string{"printenv"}, MaxOutputBytes: 65536, DefaultTimeoutSec: 30, MaxTimeoutSec: 60},
 		authStore:   aStore,
 		now:         func() time.Time { return now },
-	}
+	})
 
 	payload := `{"lease_token":"l1","command":["bash","-lc","echo -n $GITHUB_TOKEN"],"secrets":["github_token"],"command_fingerprint":"fp","workdir_fingerprint":"wd"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(payload))
@@ -72,7 +72,7 @@ func TestExecuteHardenedRejectsMissingIntent(t *testing.T) {
 	aStore.SaveGrant(auth.PairingGrant{GrantID: "g1", AgentID: "a1", CreatedAt: now, LastUsedAt: now, IdleExpiresAt: now.Add(10 * time.Minute), AbsoluteExpiresAt: now.Add(1 * time.Hour)})
 	aStore.SaveSession(auth.SessionToken{Token: "s1", GrantID: "g1", AgentID: "a1", CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute)})
 
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc:             app.Service{Policy: domain.DefaultPolicy(), Requests: store, Leases: store, Secrets: store, Audit: testAudit{}, Now: func() time.Time { return now }, NewRequestID: func() string { return "r1" }, NewLeaseTok: func() string { return "l1" }},
 		authEnabled:     true,
 		authCfg:         config.AuthConfig{EnableAuth: true, OperatorToken: "op", AllowPlaintextSecretReturn: false},
@@ -80,7 +80,7 @@ func TestExecuteHardenedRejectsMissingIntent(t *testing.T) {
 		securityProfile: "hardened",
 		authStore:       aStore,
 		now:             func() time.Time { return now },
-	}
+	})
 
 	payload := `{"lease_token":"l1","command":["go","version"],"secrets":["github_token"],"command_fingerprint":"fp","workdir_fingerprint":"wd"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(payload))
@@ -103,7 +103,7 @@ func TestExecuteHardenedRejectsShellWrapper(t *testing.T) {
 	aStore.SaveGrant(auth.PairingGrant{GrantID: "g1", AgentID: "a1", CreatedAt: now, LastUsedAt: now, IdleExpiresAt: now.Add(10 * time.Minute), AbsoluteExpiresAt: now.Add(1 * time.Hour)})
 	aStore.SaveSession(auth.SessionToken{Token: "s1", GrantID: "g1", AgentID: "a1", CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute)})
 
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc:             app.Service{Policy: domain.DefaultPolicy(), Requests: store, Leases: store, Secrets: store, Audit: testAudit{}, Now: func() time.Time { return now }, NewRequestID: func() string { return "r1" }, NewLeaseTok: func() string { return "l1" }},
 		authEnabled:     true,
 		authCfg:         config.AuthConfig{EnableAuth: true, OperatorToken: "op", AllowPlaintextSecretReturn: false},
@@ -111,7 +111,7 @@ func TestExecuteHardenedRejectsShellWrapper(t *testing.T) {
 		securityProfile: "hardened",
 		authStore:       aStore,
 		now:             func() time.Time { return now },
-	}
+	})
 
 	payload := `{"lease_token":"l1","intent":"run_tests","command":["bash","-lc","echo hi"],"secrets":["github_token"],"command_fingerprint":"fp","workdir_fingerprint":"wd"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(payload))
@@ -120,6 +120,165 @@ func TestExecuteHardenedRejectsShellWrapper(t *testing.T) {
 	s.handleExecute(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for shell wrapper in hardened profile, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestExecuteRejectsIntentWideningBeyondApprovedLease(t *testing.T) {
+	now := time.Now().UTC()
+	store := memory.NewStore()
+	store.SetSecret("github_token", "ok123")
+	_ = store.SaveRequest(domain.LeaseRequest{ID: "r1", AgentID: "a1", TaskID: "t1", Intent: "run_tests", TTLMinutes: 5, Secrets: []string{"github_token"}, CommandFingerprint: "fp", WorkdirFingerprint: "wd", Status: domain.RequestApproved, CreatedAt: now})
+	_ = store.SaveLease(domain.Lease{Token: "l1", RequestID: "r1", AgentID: "a1", TaskID: "t1", Intent: "run_tests", Secrets: []string{"github_token"}, CommandFingerprint: "fp", WorkdirFingerprint: "wd", ExpiresAt: now.Add(5 * time.Minute)})
+
+	aStore := auth.NewStore()
+	aStore.SaveGrant(auth.PairingGrant{GrantID: "g1", AgentID: "a1", CreatedAt: now, LastUsedAt: now, IdleExpiresAt: now.Add(10 * time.Minute), AbsoluteExpiresAt: now.Add(1 * time.Hour)})
+	aStore.SaveSession(auth.SessionToken{Token: "s1", GrantID: "g1", AgentID: "a1", CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute)})
+
+	s := wiredServerForTest(&server{
+		svc: app.Service{
+			Policy:       domain.DefaultPolicy(),
+			Requests:     store,
+			Leases:       store,
+			Secrets:      store,
+			Audit:        testAudit{},
+			Now:          func() time.Time { return now },
+			NewRequestID: func() string { return "r1" },
+			NewLeaseTok:  func() string { return "l1" },
+		},
+		authEnabled: true,
+		authCfg:     config.AuthConfig{EnableAuth: true, OperatorToken: "op", AllowPlaintextSecretReturn: false},
+		execPolicy: config.ExecutionPolicy{
+			ExactMatchExecutables: []string{"curl"},
+			CommandSearchPaths:    []string{"/usr/bin", "/bin"},
+			OutputSecurityMode:    "raw",
+			MaxOutputBytes:        65536,
+			DefaultTimeoutSec:     30,
+			MaxTimeoutSec:         60,
+		},
+		networkEgressPolicy: config.NetworkEgressPolicy{
+			Enabled:            true,
+			RequireIntentMatch: true,
+			IntentAllowDomains: map[string][]string{
+				"run_tests": {"api.github.com"},
+				"deploy":    {"deploy.example.com"},
+			},
+		},
+		authStore: aStore,
+		now:       func() time.Time { return now },
+	})
+
+	payload := `{"lease_token":"l1","intent":"deploy","command":["curl","https://deploy.example.com"],"secrets":["github_token"],"command_fingerprint":"fp","workdir_fingerprint":"wd"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(payload))
+	req.Header.Set("Authorization", "Bearer s1")
+	w := httptest.NewRecorder()
+	s.handleExecute(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for execute-time intent widening, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestExecuteRejectsBlockedNetworkEgressForApprovedLease(t *testing.T) {
+	now := time.Now().UTC()
+	store := memory.NewStore()
+	store.SetSecret("github_token", "ok123")
+	_ = store.SaveRequest(domain.LeaseRequest{ID: "r1", AgentID: "a1", TaskID: "t1", Intent: "run_tests", TTLMinutes: 5, Secrets: []string{"github_token"}, CommandFingerprint: "fp", WorkdirFingerprint: "wd", Status: domain.RequestApproved, CreatedAt: now})
+	_ = store.SaveLease(domain.Lease{Token: "l1", RequestID: "r1", AgentID: "a1", TaskID: "t1", Intent: "run_tests", Secrets: []string{"github_token"}, CommandFingerprint: "fp", WorkdirFingerprint: "wd", ExpiresAt: now.Add(5 * time.Minute)})
+
+	aStore := auth.NewStore()
+	aStore.SaveGrant(auth.PairingGrant{GrantID: "g1", AgentID: "a1", CreatedAt: now, LastUsedAt: now, IdleExpiresAt: now.Add(10 * time.Minute), AbsoluteExpiresAt: now.Add(1 * time.Hour)})
+	aStore.SaveSession(auth.SessionToken{Token: "s1", GrantID: "g1", AgentID: "a1", CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute)})
+
+	s := wiredServerForTest(&server{
+		svc: app.Service{
+			Policy:       domain.DefaultPolicy(),
+			Requests:     store,
+			Leases:       store,
+			Secrets:      store,
+			Audit:        testAudit{},
+			Now:          func() time.Time { return now },
+			NewRequestID: func() string { return "r1" },
+			NewLeaseTok:  func() string { return "l1" },
+		},
+		authEnabled: true,
+		authCfg:     config.AuthConfig{EnableAuth: true, OperatorToken: "op", AllowPlaintextSecretReturn: false},
+		execPolicy: config.ExecutionPolicy{
+			ExactMatchExecutables: []string{"curl"},
+			CommandSearchPaths:    []string{"/usr/bin", "/bin"},
+			OutputSecurityMode:    "raw",
+			MaxOutputBytes:        65536,
+			DefaultTimeoutSec:     30,
+			MaxTimeoutSec:         60,
+		},
+		networkEgressPolicy: config.NetworkEgressPolicy{
+			Enabled:            true,
+			RequireIntentMatch: true,
+			IntentAllowDomains: map[string][]string{"run_tests": {"api.github.com"}},
+			DenySubstrings:     []string{"169.254.169.254"},
+		},
+		authStore: aStore,
+		now:       func() time.Time { return now },
+	})
+
+	payload := `{"lease_token":"l1","intent":"run_tests","command":["curl","http://169.254.169.254/latest/meta-data"],"secrets":["github_token"],"command_fingerprint":"fp","workdir_fingerprint":"wd"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(payload))
+	req.Header.Set("Authorization", "Bearer s1")
+	w := httptest.NewRecorder()
+	s.handleExecute(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for approved-lease egress deny, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestExecuteRejectsDirectNetworkClientWithoutInspectableDestinationForApprovedLease(t *testing.T) {
+	now := time.Now().UTC()
+	store := memory.NewStore()
+	store.SetSecret("github_token", "ok123")
+	_ = store.SaveRequest(domain.LeaseRequest{ID: "r1", AgentID: "a1", TaskID: "t1", Intent: "run_tests", TTLMinutes: 5, Secrets: []string{"github_token"}, CommandFingerprint: "fp", WorkdirFingerprint: "wd", Status: domain.RequestApproved, CreatedAt: now})
+	_ = store.SaveLease(domain.Lease{Token: "l1", RequestID: "r1", AgentID: "a1", TaskID: "t1", Intent: "run_tests", Secrets: []string{"github_token"}, CommandFingerprint: "fp", WorkdirFingerprint: "wd", ExpiresAt: now.Add(5 * time.Minute)})
+
+	aStore := auth.NewStore()
+	aStore.SaveGrant(auth.PairingGrant{GrantID: "g1", AgentID: "a1", CreatedAt: now, LastUsedAt: now, IdleExpiresAt: now.Add(10 * time.Minute), AbsoluteExpiresAt: now.Add(1 * time.Hour)})
+	aStore.SaveSession(auth.SessionToken{Token: "s1", GrantID: "g1", AgentID: "a1", CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute)})
+
+	s := wiredServerForTest(&server{
+		svc: app.Service{
+			Policy:       domain.DefaultPolicy(),
+			Requests:     store,
+			Leases:       store,
+			Secrets:      store,
+			Audit:        testAudit{},
+			Now:          func() time.Time { return now },
+			NewRequestID: func() string { return "r1" },
+			NewLeaseTok:  func() string { return "l1" },
+		},
+		authEnabled: true,
+		authCfg:     config.AuthConfig{EnableAuth: true, OperatorToken: "op", AllowPlaintextSecretReturn: false},
+		execPolicy: config.ExecutionPolicy{
+			ExactMatchExecutables: []string{"curl"},
+			OutputSecurityMode:    "raw",
+			MaxOutputBytes:        65536,
+			DefaultTimeoutSec:     30,
+			MaxTimeoutSec:         60,
+		},
+		networkEgressPolicy: config.NetworkEgressPolicy{
+			Enabled:            true,
+			RequireIntentMatch: true,
+			IntentAllowDomains: map[string][]string{"run_tests": {"api.github.com"}},
+		},
+		authStore: aStore,
+		now:       func() time.Time { return now },
+	})
+
+	payload := `{"lease_token":"l1","intent":"run_tests","command":["curl","--config","./agent-controlled.cfg"],"secrets":["github_token"],"command_fingerprint":"fp","workdir_fingerprint":"wd"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(payload))
+	req.Header.Set("Authorization", "Bearer s1")
+	w := httptest.NewRecorder()
+	s.handleExecute(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for approved-lease direct-network no-destination deny, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("inspectable destination")) {
+		t.Fatalf("expected inspectable-destination deny detail, got %s", w.Body.String())
 	}
 }
 
@@ -134,14 +293,14 @@ func TestExecuteWithSecretsOutputModeNone(t *testing.T) {
 	aStore.SaveGrant(auth.PairingGrant{GrantID: "g1", AgentID: "a1", CreatedAt: now, LastUsedAt: now, IdleExpiresAt: now.Add(10 * time.Minute), AbsoluteExpiresAt: now.Add(1 * time.Hour)})
 	aStore.SaveSession(auth.SessionToken{Token: "s1", GrantID: "g1", AgentID: "a1", CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute)})
 
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc:         app.Service{Policy: domain.DefaultPolicy(), Requests: store, Leases: store, Secrets: store, Audit: testAudit{}, Now: func() time.Time { return now }, NewRequestID: func() string { return "r1" }, NewLeaseTok: func() string { return "l1" }},
 		authEnabled: true,
 		authCfg:     config.AuthConfig{EnableAuth: true, OperatorToken: "op", AllowPlaintextSecretReturn: false},
 		execPolicy:  config.ExecutionPolicy{ExactMatchExecutables: []string{"bash"}, DenylistSubstrings: []string{"printenv"}, OutputSecurityMode: "none", MaxOutputBytes: 65536, DefaultTimeoutSec: 30, MaxTimeoutSec: 60},
 		authStore:   aStore,
 		now:         func() time.Time { return now },
-	}
+	})
 
 	payload := `{"lease_token":"l1","command":["bash","-lc","echo -n $GITHUB_TOKEN"],"secrets":["github_token"],"command_fingerprint":"fp","workdir_fingerprint":"wd"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(payload))
@@ -183,7 +342,7 @@ func TestExecuteWithSecretsUsesControlledSearchPath(t *testing.T) {
 	writeExecutableScript(t, filepath.Join(trustedDir, "go"), "echo trusted")
 	t.Setenv("PATH", shadowDir+string(os.PathListSeparator)+trustedDir)
 
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc:         app.Service{Policy: domain.DefaultPolicy(), Requests: store, Leases: store, Secrets: store, Audit: testAudit{}, Now: func() time.Time { return now }, NewRequestID: func() string { return "r1" }, NewLeaseTok: func() string { return "l1" }},
 		authEnabled: true,
 		authCfg:     config.AuthConfig{EnableAuth: true, OperatorToken: "op", AllowPlaintextSecretReturn: false},
@@ -197,7 +356,7 @@ func TestExecuteWithSecretsUsesControlledSearchPath(t *testing.T) {
 		},
 		authStore: aStore,
 		now:       func() time.Time { return now },
-	}
+	})
 
 	payload := `{"lease_token":"l1","command":["go","version"],"secrets":["github_token"],"command_fingerprint":"fp","workdir_fingerprint":"wd"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(payload))
@@ -242,7 +401,7 @@ func TestExecuteWithSecretsPreservesOriginalArgv0ForResolvedSymlink(t *testing.T
 	}
 	t.Setenv("PATH", trustedDir)
 
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc:         app.Service{Policy: domain.DefaultPolicy(), Requests: store, Leases: store, Secrets: store, Audit: testAudit{}, Now: func() time.Time { return now }, NewRequestID: func() string { return "r1" }, NewLeaseTok: func() string { return "l1" }},
 		authEnabled: true,
 		authCfg:     config.AuthConfig{EnableAuth: true, OperatorToken: "op", AllowPlaintextSecretReturn: false},
@@ -256,7 +415,7 @@ func TestExecuteWithSecretsPreservesOriginalArgv0ForResolvedSymlink(t *testing.T
 		},
 		authStore: aStore,
 		now:       func() time.Time { return now },
-	}
+	})
 
 	payload := `{"lease_token":"l1","command":["echo"],"secrets":["github_token"],"command_fingerprint":"fp","workdir_fingerprint":"wd"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(payload))

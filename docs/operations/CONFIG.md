@@ -154,7 +154,7 @@ Startup guardrails:
 - Policy-denied responses include remediation hints (e.g., remove shell wrapper, add intent-specific domain, use allowlisted flags).
 - `output_security_mode` controls broker-exec output exposure: `none` (suppress), `redacted`, or `raw`.
 - Base config default is `redacted`, but the hardened profile defaults to `none` unless you explicitly override it.
-- `redacted` mode is best-effort string masking for log hygiene. It must not be treated as a strong containment control for hostile command output.
+- `redacted` mode applies token-aware best-effort masking for common bearer and env-style secret shapes. It must not be treated as a strong containment control for hostile command output.
 - `max_output_bytes` limits output returned from broker execution (applied after output mode processing).
 - `default_timeout_sec` and `max_timeout_sec` enforce execution time bounds.
 
@@ -177,10 +177,12 @@ Example hardened allowlist snippet:
 ## Network egress policy notes
 - `network_egress_policy.enabled` toggles domain checks for broker-exec commands.
 - Broker-level egress checks are defense-in-depth input validation, not a complete network firewall. For strong guarantees, combine with host-level egress controls.
+- The approved request/lease intent is persisted and reused at execute time. A caller cannot widen egress scope by supplying a different execute-time intent.
 - `network_egress_policy.require_intent_match` requires intent-specific domain mapping.
 - `network_egress_policy.allow_domains` defines fallback global domains.
 - `network_egress_policy.intent_allow_domains` defines per-intent destination domains.
 - `network_egress_policy.deny_substrings` blocks dangerous target patterns (metadata endpoints, local pivots, etc.).
+- Direct network clients that rely on broker argv inspection (`curl`, `wget`, `fetch`) are denied when no inspectable destination is present in argv.
 - Denials are audit-logged as `network_egress_blocked`.
 
 ## Secret source settings
@@ -200,7 +202,9 @@ Example hardened allowlist snippet:
 ## `env_path` approval boundary
 - `PROMPTLOCK_ENV_PATH_ROOT` defines the only root from which approved `.env` files may be resolved.
 - If `PROMPTLOCK_ENV_PATH_ROOT` is unset, the broker falls back to its current working directory. Treat that as a compatibility default, not a hardened one.
+- Broker startup fails closed if the chosen env-path root cannot be initialized.
 - `env_path` values are canonicalized through symlink resolution and rejected if they escape the configured root.
+- Request payloads do not define `env_path_canonical`; the broker computes it from `env_path`. Any legacy client-supplied `env_path_canonical` value is ignored for compatibility.
 - Approved requests store both `env_path` and `env_path_canonical` so operators can review the agent-supplied path and the broker-confirmed path together.
 - Execute-time secret access fails closed if the approved canonical path is missing or does not match the current resolved path.
 

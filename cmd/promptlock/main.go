@@ -27,13 +27,13 @@ import (
 type requestBody struct {
 	AgentID            string   `json:"agent_id"`
 	TaskID             string   `json:"task_id"`
+	Intent             string   `json:"intent,omitempty"`
 	Reason             string   `json:"reason"`
 	TTLMinutes         int      `json:"ttl_minutes"`
 	Secrets            []string `json:"secrets"`
 	CommandFingerprint string   `json:"command_fingerprint"`
 	WorkdirFingerprint string   `json:"workdir_fingerprint"`
 	EnvPath            string   `json:"env_path,omitempty"`
-	EnvPathCanonical   string   `json:"env_path_canonical,omitempty"`
 }
 
 type capabilities struct {
@@ -47,8 +47,12 @@ type brokerFlags struct {
 }
 
 var doPostJSONAuth = postJSONAuth
+var brokerClientTimeout = 10 * time.Second
 
-const defaultBrokerURL = "http://127.0.0.1:8765"
+const (
+	defaultBrokerURL         = "http://127.0.0.1:8765"
+	unixSocketRequestBaseURL = "http://promptlock"
+)
 
 type brokerRole string
 
@@ -101,16 +105,16 @@ func resolveBrokerSelection(role brokerRole, in brokerSelectionInput) (brokerSel
 			UnixSocket: explicitUnix,
 		}, nil
 	}
+	if explicitURL != "" {
+		return brokerSelection{
+			BaseURL:    normalizeBrokerURL(explicitURL),
+			UnixSocket: "",
+		}, nil
+	}
 	if compatUnix := strings.TrimSpace(os.Getenv("PROMPTLOCK_BROKER_UNIX_SOCKET")); compatUnix != "" {
 		return brokerSelection{
 			BaseURL:    normalizeBrokerURL(explicitURL),
 			UnixSocket: compatUnix,
-		}, nil
-	}
-	if explicitURL != "" || strings.TrimSpace(os.Getenv("PROMPTLOCK_BROKER_URL")) != "" {
-		return brokerSelection{
-			BaseURL:    normalizeBrokerURL(explicitURL),
-			UnixSocket: "",
 		}, nil
 	}
 	if roleUnix := roleSpecificBrokerUnixSocket(role); roleUnix != "" {
@@ -120,6 +124,12 @@ func resolveBrokerSelection(role brokerRole, in brokerSelectionInput) (brokerSel
 				UnixSocket: roleUnix,
 			}, nil
 		}
+		if envURL := strings.TrimSpace(os.Getenv("PROMPTLOCK_BROKER_URL")); envURL != "" {
+			return brokerSelection{
+				BaseURL:    envURL,
+				UnixSocket: "",
+			}, nil
+		}
 		return brokerSelection{}, fmt.Errorf("%s broker unix socket not found at %s; set --broker or PROMPTLOCK_BROKER_URL for explicit TCP transport", role, roleUnix)
 	}
 	defaultUnix := defaultBrokerUnixSocket(role)
@@ -127,6 +137,12 @@ func resolveBrokerSelection(role brokerRole, in brokerSelectionInput) (brokerSel
 		return brokerSelection{
 			BaseURL:    normalizeBrokerURL(explicitURL),
 			UnixSocket: defaultUnix,
+		}, nil
+	}
+	if envURL := strings.TrimSpace(os.Getenv("PROMPTLOCK_BROKER_URL")); envURL != "" {
+		return brokerSelection{
+			BaseURL:    envURL,
+			UnixSocket: "",
 		}, nil
 	}
 	return brokerSelection{}, fmt.Errorf("%s broker unix socket not found at %s; set --broker or PROMPTLOCK_BROKER_URL for explicit TCP transport", role, defaultUnix)
@@ -267,6 +283,7 @@ func runExec(args []string) {
 	reqID, err := requestLease(broker.BaseURL, broker.UnixSocket, *sessionToken, requestBody{
 		AgentID:            *agent,
 		TaskID:             *task,
+		Intent:             strings.TrimSpace(*intent),
 		Reason:             *reason,
 		TTLMinutes:         *ttl,
 		Secrets:            secrets,
@@ -379,7 +396,7 @@ func accessSecret(broker, brokerUnix, sessionToken, lease, secret, fingerprint, 
 
 func postJSONAuth(baseURL, unixSocket, path, bearer string, in any, out any) error {
 	b, _ := json.Marshal(in)
-	req, err := http.NewRequest(http.MethodPost, buildURL(baseURL, path), bytes.NewReader(b))
+	req, err := http.NewRequest(http.MethodPost, buildURL(baseURL, unixSocket, path), bytes.NewReader(b))
 	if err != nil {
 		return err
 	}
@@ -393,7 +410,7 @@ func postJSONAuth(baseURL, unixSocket, path, bearer string, in any, out any) err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return normalizeBrokerRequestError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
@@ -403,7 +420,7 @@ func postJSONAuth(baseURL, unixSocket, path, bearer string, in any, out any) err
 }
 
 func getAuth(baseURL, unixSocket, path, bearer string) (*http.Response, error) {
-	req, err := http.NewRequest(http.MethodGet, buildURL(baseURL, path), nil)
+	req, err := http.NewRequest(http.MethodGet, buildURL(baseURL, unixSocket, path), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -414,12 +431,19 @@ func getAuth(baseURL, unixSocket, path, bearer string) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	return client.Do(req)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, normalizeBrokerRequestError(err)
+	}
+	return resp, nil
 }
 
-func buildURL(baseURL, path string) string {
+func buildURL(baseURL, unixSocket, path string) string {
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 		return path
+	}
+	if strings.TrimSpace(unixSocket) != "" {
+		baseURL = unixSocketRequestBaseURL
 	}
 	return strings.TrimRight(baseURL, "/") + path
 }
@@ -431,9 +455,23 @@ func httpClient(baseURL, unixSocket string) (*http.Client, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", unixSocket)
 		}
-		return &http.Client{Transport: tr}, nil
+		return &http.Client{Transport: tr, Timeout: brokerClientTimeout}, nil
 	}
-	return http.DefaultClient, nil
+	return &http.Client{Timeout: brokerClientTimeout}, nil
+}
+
+func normalizeBrokerRequestError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("broker request timed out after %s", brokerClientTimeout)
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return fmt.Errorf("broker request timed out after %s", brokerClientTimeout)
+	}
+	return err
 }
 
 func fatal(err error) {
@@ -546,6 +584,7 @@ type pendingItem struct {
 	ID                 string   `json:"ID"`
 	AgentID            string   `json:"AgentID"`
 	TaskID             string   `json:"TaskID"`
+	Intent             string   `json:"Intent"`
 	Reason             string   `json:"Reason"`
 	TTLMinutes         int      `json:"TTLMinutes"`
 	Secrets            []string `json:"Secrets"`
@@ -895,6 +934,9 @@ func renderWatchScreen(out io.Writer, view watchView, clearScreen bool) {
 
 	it := view.Current
 	fmt.Fprintf(out, "Request %s | agent=%s task=%s ttl=%d\n", it.ID, it.AgentID, it.TaskID, it.TTLMinutes)
+	if strings.TrimSpace(it.Intent) != "" {
+		fmt.Fprintf(out, "Intent: %s\n", it.Intent)
+	}
 	fmt.Fprintf(out, "Reason: %s\n", it.Reason)
 	fmt.Fprintf(out, "Secrets: %s\n", strings.Join(it.Secrets, ", "))
 	fmt.Fprintf(out, "Command FP: %s\n", it.CommandFingerprint)
@@ -947,11 +989,16 @@ func isTerminalFile(file *os.File) bool {
 }
 
 func formatPendingListLine(it pendingItem) string {
-	line := fmt.Sprintf("%s | agent=%s task=%s ttl=%d | secrets=%s | reason=%s | command_fp=%s | workdir_fp=%s",
+	line := fmt.Sprintf("%s | agent=%s task=%s ttl=%d",
 		it.ID,
 		it.AgentID,
 		it.TaskID,
 		it.TTLMinutes,
+	)
+	if strings.TrimSpace(it.Intent) != "" {
+		line += " | intent=" + it.Intent
+	}
+	line += fmt.Sprintf(" | secrets=%s | reason=%s | command_fp=%s | workdir_fp=%s",
 		strings.Join(it.Secrets, ","),
 		it.Reason,
 		it.CommandFingerprint,

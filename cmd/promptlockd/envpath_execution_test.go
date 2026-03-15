@@ -75,7 +75,7 @@ func TestExecuteUsesApprovedEnvPathSecrets(t *testing.T) {
 		t.Fatalf("new env path store: %v", err)
 	}
 
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc: app.Service{
 			Policy:         domain.DefaultPolicy(),
 			Requests:       store,
@@ -91,7 +91,7 @@ func TestExecuteUsesApprovedEnvPathSecrets(t *testing.T) {
 		authCfg:     config.AuthConfig{EnableAuth: false, AllowPlaintextSecretReturn: false},
 		execPolicy:  config.ExecutionPolicy{ExactMatchExecutables: []string{"bash"}, DenylistSubstrings: []string{"printenv"}, MaxOutputBytes: 65536, DefaultTimeoutSec: 30, MaxTimeoutSec: 60},
 		now:         func() time.Time { return now },
-	}
+	})
 
 	payload := `{"lease_token":"lease-env-1","command":["bash","-lc","echo -n $GITHUB_TOKEN"],"secrets":["github_token"],"command_fingerprint":"fp-env","workdir_fingerprint":"wd-env"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(payload))

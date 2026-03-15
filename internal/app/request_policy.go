@@ -21,6 +21,7 @@ type RequestPolicy struct {
 
 type RequestPolicyInput struct {
 	AgentID            string
+	Intent             string
 	Secrets            []string
 	CommandFingerprint string
 	WorkdirFingerprint string
@@ -48,6 +49,7 @@ func (p RequestPolicy) Normalize() RequestPolicy {
 func (in RequestPolicyInput) EquivalenceKey() string {
 	material := strings.Join([]string{
 		strings.TrimSpace(in.AgentID),
+		strings.TrimSpace(in.Intent),
 		strings.Join(normalizeSecrets(in.Secrets), ","),
 		strings.TrimSpace(in.CommandFingerprint),
 		strings.TrimSpace(in.WorkdirFingerprint),

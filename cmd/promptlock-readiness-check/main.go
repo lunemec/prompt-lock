@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -20,40 +21,80 @@ type statusFile struct {
 }
 
 func main() {
-	file := flag.String("file", "docs/plans/status/PRODUCTION-READINESS-STATUS.json", "path to readiness status json")
-	requireP0 := flag.Bool("require-p0", false, "fail when any P0 task is not done")
-	flag.Parse()
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("promptlock-readiness-check", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	file := flags.String("file", "docs/plans/status/PRODUCTION-READINESS-STATUS.json", "path to readiness status json")
+	requireP0 := flags.Bool("require-p0", false, "legacy name: fail when any release-gating task (explicit P0 or blocking=true) is not done")
+	if err := flags.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		return 2
+	}
 
 	b, err := os.ReadFile(*file)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "read status file: %v\n", err)
-		os.Exit(2)
+		fmt.Fprintf(stderr, "read status file: %v\n", err)
+		return 2
 	}
 	var st statusFile
 	if err := json.Unmarshal(b, &st); err != nil {
-		fmt.Fprintf(os.Stderr, "parse status file: %v\n", err)
-		os.Exit(2)
+		fmt.Fprintf(stderr, "parse status file: %v\n", err)
+		return 2
 	}
 
 	if !*requireP0 {
-		fmt.Println("readiness status loaded")
-		return
+		fmt.Fprintln(stdout, "readiness status loaded")
+		return 0
+	}
+	if err := validateReleaseGatingStatus(st); err != nil {
+		fmt.Fprintf(stderr, "validate status file: %v\n", err)
+		return 2
 	}
 
 	open := []string{}
 	for _, t := range st.Tasks {
-		isP0 := strings.EqualFold(strings.TrimSpace(t.Priority), "P0") || strings.HasPrefix(strings.ToUpper(strings.TrimSpace(t.ID)), "P0-") || t.Blocking
-		if !isP0 {
+		if !isReleaseGatingTask(t) {
 			continue
 		}
-		if !strings.EqualFold(strings.TrimSpace(t.Status), "done") {
+		if !isDoneStatus(t.Status) {
 			open = append(open, t.ID+":"+t.Status)
 		}
 	}
 
 	if len(open) > 0 {
-		fmt.Fprintf(os.Stderr, "production readiness gate failed: open P0 tasks: %s\n", strings.Join(open, ", "))
-		os.Exit(1)
+		fmt.Fprintf(stderr, "production readiness gate failed: open release-gating tasks: %s\n", strings.Join(open, ", "))
+		return 1
 	}
-	fmt.Println("production readiness gate passed: all P0 tasks done")
+	fmt.Fprintln(stdout, "production readiness gate passed: all release-gating tasks done")
+	return 0
+}
+
+func validateReleaseGatingStatus(st statusFile) error {
+	if st.Tasks == nil {
+		return fmt.Errorf("tasks array is required")
+	}
+	if len(st.Tasks) == 0 {
+		return fmt.Errorf("at least one release-gating task is required")
+	}
+	for _, t := range st.Tasks {
+		if isReleaseGatingTask(t) {
+			return nil
+		}
+	}
+	return fmt.Errorf("at least one release-gating task is required")
+}
+
+func isReleaseGatingTask(t task) bool {
+	priority := strings.TrimSpace(t.Priority)
+	id := strings.TrimSpace(t.ID)
+	return strings.EqualFold(priority, "P0") || strings.HasPrefix(strings.ToUpper(id), "P0-") || t.Blocking
+}
+
+func isDoneStatus(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), "done")
 }

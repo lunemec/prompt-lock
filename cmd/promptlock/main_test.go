@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,6 +37,69 @@ func TestPostJSONAuthSendsBearerAndDecodes(t *testing.T) {
 	if out["bootstrap_token"] != "boot_x" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
+}
+
+func TestPostJSONAuthTimesOutOnStalledTCPPeer(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen tcp: %v", err)
+	}
+	defer ln.Close()
+	stallAcceptedConnections(t, ln)
+
+	oldTimeout := brokerClientTimeout
+	brokerClientTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { brokerClientTimeout = oldTimeout })
+
+	var out map[string]any
+	err = postJSONAuth("http://"+ln.Addr().String(), "", "/v1/auth/bootstrap/create", "tok", map[string]string{"agent_id": "a"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "timed out after") {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+}
+
+func TestPostJSONAuthTimesOutOnStalledUnixSocketPeer(t *testing.T) {
+	socketPath := filepath.Join(os.TempDir(), fmt.Sprintf("promptlock-stalled-%d.sock", time.Now().UnixNano()))
+	_ = os.Remove(socketPath)
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen unix: %v", err)
+	}
+	defer ln.Close()
+	stallAcceptedConnections(t, ln)
+
+	oldTimeout := brokerClientTimeout
+	brokerClientTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { brokerClientTimeout = oldTimeout })
+
+	var out map[string]any
+	err = postJSONAuth("http://promptlock", socketPath, "/v1/auth/bootstrap/create", "tok", map[string]string{"agent_id": "a"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "timed out after") {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+}
+
+func stallAcceptedConnections(t *testing.T, ln net.Listener) {
+	t.Helper()
+	stop := make(chan struct{})
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				select {
+				case <-stop:
+				default:
+				}
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				<-stop
+			}(conn)
+		}
+	}()
+	t.Cleanup(func() { close(stop) })
 }
 
 func captureCommandStdout(t *testing.T, fn func()) string {
@@ -391,11 +456,14 @@ func TestRunAuthLoginDoesNotPrintGrantIDByDefault(t *testing.T) {
 }
 
 func TestBuildURL(t *testing.T) {
-	if got := buildURL("http://x", "/v1/a"); got != "http://x/v1/a" {
+	if got := buildURL("http://x", "", "/v1/a"); got != "http://x/v1/a" {
 		t.Fatalf("unexpected url %s", got)
 	}
-	if got := buildURL("http://x/", "/v1/a"); got != "http://x/v1/a" {
+	if got := buildURL("http://x/", "", "/v1/a"); got != "http://x/v1/a" {
 		t.Fatalf("unexpected url %s", got)
+	}
+	if got := buildURL("http://[::1", "/tmp/promptlock.sock", "/v1/a"); got != unixSocketRequestBaseURL+"/v1/a" {
+		t.Fatalf("unexpected unix-socket url %s", got)
 	}
 }
 
@@ -520,6 +588,33 @@ func TestResolveBrokerSelectionPrefersRoleSpecificSocketDefaults(t *testing.T) {
 	}
 }
 
+func TestResolveIntentIgnoresMalformedAmbientBrokerURLWhenExplicitUnixSocketSelected(t *testing.T) {
+	socketPath := startUnixSocketHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/intents/resolve" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer sess_1" {
+			t.Fatalf("authorization = %q, want bearer session", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"secrets": []string{"github_token"}})
+	}))
+
+	t.Setenv("PROMPTLOCK_BROKER_URL", "http://[::1")
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "")
+
+	selection, err := resolveBrokerSelection(brokerRoleAgent, brokerSelectionInput{UnixSocket: socketPath})
+	if err != nil {
+		t.Fatalf("resolve broker selection: %v", err)
+	}
+	secrets, err := resolveIntent(selection.BaseURL, selection.UnixSocket, "sess_1", "run_tests")
+	if err != nil {
+		t.Fatalf("resolve intent over explicit unix socket: %v", err)
+	}
+	if len(secrets) != 1 || secrets[0] != "github_token" {
+		t.Fatalf("unexpected secrets: %#v", secrets)
+	}
+}
+
 func TestResolveBrokerSelectionUsesExplicitBrokerURLWhenDefaultSocketMissing(t *testing.T) {
 	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", filepath.Join(t.TempDir(), "missing.sock"))
 	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", filepath.Join(t.TempDir(), "missing.sock"))
@@ -585,6 +680,40 @@ func TestResolveBrokerSelectionExplicitBrokerURLWinsOverLocalSocketDefaults(t *t
 	}
 	if selection.BaseURL != "https://broker.example.internal" {
 		t.Fatalf("base url = %q, want explicit broker URL", selection.BaseURL)
+	}
+}
+
+func TestListPendingIgnoresMalformedAmbientBrokerURLWhenRoleSocketSelected(t *testing.T) {
+	socketPath := startUnixSocketHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/requests/pending" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer op_tok" {
+			t.Fatalf("authorization = %q, want operator token", got)
+		}
+		_ = json.NewEncoder(w).Encode(pendingResponse{
+			Pending: []pendingItem{{ID: "req_1", AgentID: "agent-1", TaskID: "task-1", TTLMinutes: 5, Secrets: []string{"github_token"}}},
+		})
+	}))
+
+	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", socketPath)
+	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", filepath.Join(t.TempDir(), "missing-agent.sock"))
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_BROKER_URL", "http://[::1")
+
+	selection, err := resolveBrokerSelection(brokerRoleOperator, brokerSelectionInput{})
+	if err != nil {
+		t.Fatalf("resolve operator broker selection: %v", err)
+	}
+	if selection.UnixSocket != socketPath {
+		t.Fatalf("operator unix socket = %q, want %q", selection.UnixSocket, socketPath)
+	}
+	items, err := listPending(selection.BaseURL, selection.UnixSocket, "op_tok")
+	if err != nil {
+		t.Fatalf("listPending over operator socket: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "req_1" {
+		t.Fatalf("unexpected pending items: %#v", items)
 	}
 }
 
@@ -655,6 +784,51 @@ func TestAuthLoginUsesOperatorSocketForBootstrapAndAgentSocketForPairMint(t *tes
 	}
 }
 
+func TestAuthLoginIgnoresMalformedAmbientBrokerURLWhenRoleSocketsSelected(t *testing.T) {
+	operatorSocket := startUnixSocketHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/auth/bootstrap/create" {
+			t.Fatalf("unexpected operator path %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer op_tok" {
+			t.Fatalf("authorization = %q, want operator token", got)
+		}
+		_ = json.NewEncoder(w).Encode(authBootstrapResult{
+			BootstrapToken: "boot_1",
+			ExpiresAt:      time.Unix(1, 0),
+		})
+	}))
+	agentSocket := startUnixSocketHTTPServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/pair/complete":
+			_ = json.NewEncoder(w).Encode(authPairResult{
+				GrantID:           "grant_1",
+				IdleExpiresAt:     time.Unix(2, 0),
+				AbsoluteExpiresAt: time.Unix(3, 0),
+			})
+		case "/v1/auth/session/mint":
+			_ = json.NewEncoder(w).Encode(authMintResult{
+				SessionToken: "sess_1",
+				ExpiresAt:    time.Unix(4, 0),
+			})
+		default:
+			t.Fatalf("unexpected agent path %q", r.URL.Path)
+		}
+	}))
+
+	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", operatorSocket)
+	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", agentSocket)
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_BROKER_URL", "http://[::1")
+
+	result, err := authLogin("", "", "op_tok", "agent_1", "ctr_1")
+	if err != nil {
+		t.Fatalf("authLogin with role sockets: %v", err)
+	}
+	if result.SessionToken != "sess_1" {
+		t.Fatalf("session token = %q, want sess_1", result.SessionToken)
+	}
+}
+
 func TestRunAuthLoginOmitsGrantIDFromStdout(t *testing.T) {
 	operatorSocket := filepath.Join(t.TempDir(), "operator.sock")
 	agentSocket := filepath.Join(t.TempDir(), "agent.sock")
@@ -698,4 +872,24 @@ func TestRunAuthLoginOmitsGrantIDFromStdout(t *testing.T) {
 	if strings.Contains(out, "session_token") {
 		t.Fatalf("expected auth login stdout to omit session_token by default, got %q", out)
 	}
+}
+
+func startUnixSocketHTTPServer(t *testing.T, handler http.Handler) string {
+	t.Helper()
+	socketPath := filepath.Join(os.TempDir(), fmt.Sprintf("promptlock-test-%d.sock", time.Now().UnixNano()))
+	_ = os.Remove(socketPath)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen unix socket: %v", err)
+	}
+	server := &http.Server{Handler: handler}
+	go func() {
+		_ = server.Serve(ln)
+	}()
+	t.Cleanup(func() {
+		_ = server.Close()
+		_ = ln.Close()
+		_ = os.Remove(socketPath)
+	})
+	return socketPath
 }

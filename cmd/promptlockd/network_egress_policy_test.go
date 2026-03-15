@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/lunemec/promptlock/internal/config"
@@ -86,5 +87,20 @@ func TestNetworkEgressBlocksPrivateIPTargets(t *testing.T) {
 	}
 	if err := s.validateNetworkEgress([]string{"curl", "10.0.0.1"}, ""); err == nil {
 		t.Fatalf("expected private IP to be blocked")
+	}
+}
+
+func TestNetworkEgressRejectsDirectNetworkClientWithoutInspectableDestination(t *testing.T) {
+	s := &server{networkEgressPolicy: config.NetworkEgressPolicy{
+		Enabled:            true,
+		RequireIntentMatch: true,
+		IntentAllowDomains: map[string][]string{"run_tests": {"api.github.com"}},
+	}}
+	err := s.validateNetworkEgress([]string{"curl", "--config", "./agent-controlled.cfg"}, "run_tests")
+	if err == nil {
+		t.Fatalf("expected direct network client without inspectable destination to be blocked")
+	}
+	if got := err.Error(); got == "" || !strings.Contains(got, "inspectable destination") {
+		t.Fatalf("expected inspectable-destination deny detail, got %v", err)
 	}
 }

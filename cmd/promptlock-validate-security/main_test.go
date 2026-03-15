@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -105,5 +106,49 @@ func TestScanSkipsGoCacheDirs(t *testing.T) {
 	}
 	if len(violations) != 0 {
 		t.Fatalf("expected no violations from go cache dirs, got %#v", violations)
+	}
+}
+
+func TestScanFailsClosedOnUnreadableFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission-denied semantics differ on windows")
+	}
+
+	root := t.TempDir()
+	target := filepath.Join(root, "restricted.txt")
+	if err := os.WriteFile(target, []byte("safe-content"), 0o600); err != nil {
+		t.Fatalf("write restricted file: %v", err)
+	}
+	if err := os.Chmod(target, 0); err != nil {
+		t.Fatalf("chmod restricted file: %v", err)
+	}
+
+	_, err := scan(root)
+	if err == nil {
+		t.Fatalf("expected unreadable file to fail the scan")
+	}
+	if !strings.Contains(err.Error(), "restricted.txt") {
+		t.Fatalf("expected error to mention unreadable path, got %v", err)
+	}
+}
+
+func TestScanFailsClosedOnUnreadableSymlinkTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink handling differs on windows")
+	}
+
+	root := t.TempDir()
+	target := filepath.Join(root, "missing.txt")
+	link := filepath.Join(root, "broken-link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	_, err := scan(root)
+	if err == nil {
+		t.Fatalf("expected broken symlink to fail the scan")
+	}
+	if !strings.Contains(err.Error(), "broken-link.txt") {
+		t.Fatalf("expected error to mention unreadable path, got %v", err)
 	}
 }

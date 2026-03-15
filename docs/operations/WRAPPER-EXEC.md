@@ -81,12 +81,14 @@ PROMPTLOCK_DEV_MODE=1 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 - Wrapper checks broker capabilities and fails fast if hardened mode disables plaintext secret return unless `--broker-exec` is used.
 - `--broker-exec` uses `/v1/leases/execute` and is the preferred secure mode.
 - In hardened policy, `--broker-exec` requires `--intent` for intent-aware egress enforcement.
+- Broker-exec binds execute-time egress validation to the approved request intent; supplying a different execute payload intent does not widen scope.
 - In hardened policy, server-side execution rejects raw shell wrappers (`bash`/`sh`/`zsh`) and expects intent-bound direct commands.
+- Direct network clients validated through argv inspection (`curl`, `wget`, `fetch`) are denied when no inspectable destination is present.
 - Broker-side execution policy can enforce exact executable allowlisting, broker-managed executable resolution, denylist checks, output limits, and timeouts.
 - Both broker-side and local CLI exec paths build the child-process environment from a minimal baseline (`PATH`, `HOME`, temp-dir vars, and platform-required Windows keys) plus leased secrets only. Ambient shell env vars are not forwarded by default.
 - Broker-host execution uses `execution_policy.command_search_paths` as its managed `PATH` and only resolves bare executable names from those directories.
 - `execution_policy.exact_match_executables` is the canonical config key. `execution_policy.allowlist_prefixes` remains a legacy alias during migration.
-- `redacted` output mode is best-effort log-safety only. It is not a strong barrier against secret exfiltration through command output.
+- `redacted` output mode applies token-aware best-effort masking for common bearer and env-style secret shapes. It is not a strong barrier against secret exfiltration through command output.
 - When auth is enabled, wrapper uses `--session-token` (or `PROMPTLOCK_SESSION_TOKEN`) for agent endpoints.
 - `promptlock auth docker-run` can mint a short-lived session and inject it into a new `docker run` invocation with secure defaults (`--read-only`, `--cap-drop ALL`, `--security-opt no-new-privileges`, tmpfs `/tmp`, current user identity).
 - `promptlock auth login` omits raw bearer output by default; use `--show-grant-id` or `--show-secrets` only when you intentionally need those values for plumbing/debugging.
@@ -96,6 +98,7 @@ PROMPTLOCK_DEV_MODE=1 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 - `promptlock auth docker-run` mounts only the agent socket into the container, injects `PROMPTLOCK_AGENT_UNIX_SOCKET`, and passes `PROMPTLOCK_SESSION_TOKEN` through the child environment rather than embedding bearer material in `docker run` argv.
 - Wrapper still supports explicit TCP broker URL (`--broker`) and compatibility unix socket transport (`--broker-unix-socket`) when needed.
 - If the expected local role socket is missing, wrapper commands fail closed instead of silently downgrading to localhost TCP. Use `--broker` only when you intentionally want TCP transport.
+- Broker-facing CLI requests use a bounded `10s` client deadline on both Unix-socket and TCP transports. Stalled peers fail with `broker request timed out after 10s`.
 - Default mode waits for external human approval (`--wait-approve`, `--poll-interval`).
 - `promptlock watch` is a host-side queue watcher with a minimal terminal UI for approving/denying pending requests.
 - In a terminal, `promptlock watch` clears and redraws when the queue changes so new requests are visually distinct.
@@ -104,6 +107,7 @@ PROMPTLOCK_DEV_MODE=1 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 
 ## `--env-path`
 - `--env-path` attaches a `.env` file path to the lease request as approval context.
+- The broker computes `env_path_canonical` from `--env-path`; wrapper/API callers should not send `env_path_canonical` as request input.
 - Operators see both the original `env_path` and the broker-confirmed `env_path_canonical` in `promptlock watch`.
 - Approved `env_path` requests switch execute-time secret lookup from broker process env to the approved `.env` file.
 - The broker resolves `env_path` only within `PROMPTLOCK_ENV_PATH_ROOT`; traversal and symlink escapes are rejected.

@@ -59,20 +59,28 @@ func (s *Service) commitRequestLeaseState() error {
 }
 
 func (s *Service) RequestLease(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint, workdirFingerprint, envPath, envPathCanonical string) (domain.LeaseRequest, error) {
-	defer s.lockMutation()()
-	return s.requestLeaseUnlocked(agentID, taskID, reason, ttl, secrets, commandFingerprint, workdirFingerprint, envPath, envPathCanonical)
+	return s.RequestLeaseWithIntent(agentID, taskID, reason, ttl, secrets, "", commandFingerprint, workdirFingerprint, envPath)
 }
 
-func (s *Service) requestLeaseUnlocked(agentID, taskID, reason string, ttl int, secrets []string, commandFingerprint, workdirFingerprint, envPath, envPathCanonical string) (domain.LeaseRequest, error) {
+func (s *Service) RequestLeaseWithIntent(agentID, taskID, reason string, ttl int, secrets []string, intent, commandFingerprint, workdirFingerprint, envPath string) (domain.LeaseRequest, error) {
+	defer s.lockMutation()()
+	return s.requestLeaseUnlocked(agentID, taskID, reason, ttl, secrets, intent, commandFingerprint, workdirFingerprint, envPath)
+}
+
+func (s *Service) requestLeaseUnlocked(agentID, taskID, reason string, ttl int, secrets []string, intent, commandFingerprint, workdirFingerprint, envPath string) (domain.LeaseRequest, error) {
 	if err := s.Policy.ValidateRequest(ttl, secrets); err != nil {
 		return domain.LeaseRequest{}, err
 	}
 	envPath = strings.TrimSpace(envPath)
-	envPathCanonical = normalizeEnvPathCanonical(envPathCanonical)
+	envPathCanonical, err := s.canonicalizeApprovedEnvPath(envPath)
+	if err != nil {
+		return domain.LeaseRequest{}, err
+	}
 	req := domain.LeaseRequest{
 		ID:                 s.NewRequestID(),
 		AgentID:            agentID,
 		TaskID:             taskID,
+		Intent:             strings.TrimSpace(intent),
 		Reason:             reason,
 		TTLMinutes:         ttl,
 		Secrets:            append([]string{}, secrets...),
@@ -132,6 +140,7 @@ func (s *Service) approveRequestWithActorUnlocked(requestID string, ttlMinutes i
 		RequestID:          req.ID,
 		AgentID:            req.AgentID,
 		TaskID:             req.TaskID,
+		Intent:             req.Intent,
 		Secrets:            append([]string{}, req.Secrets...),
 		CommandFingerprint: req.CommandFingerprint,
 		WorkdirFingerprint: req.WorkdirFingerprint,
@@ -166,6 +175,21 @@ func (s *Service) approveRequestWithActorUnlocked(requestID string, ttlMinutes i
 		))
 	}
 	return lease, nil
+}
+
+func (s Service) canonicalizeApprovedEnvPath(envPath string) (string, error) {
+	trimmedPath := strings.TrimSpace(envPath)
+	if trimmedPath == "" {
+		return "", nil
+	}
+	if s.EnvPathSecrets == nil {
+		return "", ErrSecretBackendUnavailable
+	}
+	canonicalPath, err := s.EnvPathSecrets.Canonicalize(trimmedPath)
+	if err != nil {
+		return "", err
+	}
+	return normalizeEnvPathCanonical(canonicalPath), nil
 }
 
 func (s Service) AccessSecret(leaseToken, secretName, commandFingerprint, workdirFingerprint string) (string, error) {

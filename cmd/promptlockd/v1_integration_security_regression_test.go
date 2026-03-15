@@ -47,7 +47,7 @@ func TestPromptLockV1IntegrationSecurityRegression(t *testing.T) {
 	requestSeq := 0
 	leaseSeq := 0
 
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc: app.Service{
 			Policy:         domain.DefaultPolicy(),
 			Requests:       store,
@@ -85,7 +85,7 @@ func TestPromptLockV1IntegrationSecurityRegression(t *testing.T) {
 			MaxTimeoutSec:         60,
 		},
 		now: func() time.Time { return now },
-	}
+	})
 
 	bootstrapW := callJSONHandler(t, s.handleAuthBootstrapCreate, http.MethodPost, "/v1/auth/bootstrap/create", "operator-token", `{"agent_id":"agent-1","container_id":"container-1"}`)
 	if bootstrapW.Code != http.StatusOK {

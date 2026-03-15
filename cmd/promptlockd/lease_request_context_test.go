@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lunemec/promptlock/internal/adapters/envpath"
 	"github.com/lunemec/promptlock/internal/adapters/memory"
 	"github.com/lunemec/promptlock/internal/app"
 	"github.com/lunemec/promptlock/internal/config"
@@ -19,7 +20,7 @@ import (
 
 func newRequestContextServer(now time.Time) *server {
 	store := memory.NewStore()
-	return &server{
+	return wiredServerForTest(&server{
 		svc: app.Service{
 			Policy:       domain.DefaultPolicy(),
 			Requests:     store,
@@ -33,7 +34,7 @@ func newRequestContextServer(now time.Time) *server {
 		authEnabled: false,
 		authCfg:     config.AuthConfig{EnableAuth: false},
 		now:         func() time.Time { return now },
-	}
+	})
 }
 
 func TestHandleRequestRejectsMissingCommandFingerprint(t *testing.T) {
@@ -76,6 +77,11 @@ func TestHandlePendingRequestsIncludesEnvPathContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("canonicalize env file: %v", err)
 	}
+	envPathStore, err := envpath.New(root)
+	if err != nil {
+		t.Fatalf("new env-path store: %v", err)
+	}
+	s.svc.EnvPathSecrets = envPathStore
 	req := httptest.NewRequest(http.MethodPost, "/v1/leases/request", bytes.NewBufferString(`{"agent_id":"a1","task_id":"t1","reason":"r","ttl_minutes":5,"secrets":["github_token"],"command_fingerprint":"cmd-1","workdir_fingerprint":"wd-1","env_path":"./.env","env_path_canonical":"should-be-overridden"}`))
 	w := httptest.NewRecorder()
 	s.handleRequest(w, req)

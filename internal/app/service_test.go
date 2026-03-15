@@ -1516,10 +1516,13 @@ func TestRequestLeaseWithPolicyDoesNotReuseActiveLeaseWhenEnvPathProvided(t *tes
 	})
 
 	svc := Service{
-		Policy:       domain.DefaultPolicy(),
-		Requests:     store,
-		Leases:       store,
-		Secrets:      store,
+		Policy:   domain.DefaultPolicy(),
+		Requests: store,
+		Leases:   store,
+		Secrets:  store,
+		EnvPathSecrets: &countingEnvPathSecretStore{
+			canonical: "/workspace/project/.env",
+		},
 		Audit:        &auditBuf{},
 		Now:          func() time.Time { return now },
 		NewRequestID: func() string { return "req_new_env" },

@@ -25,7 +25,7 @@ func testServer(now time.Time) *server {
 	aStore := auth.NewStore()
 	aStore.SaveGrant(auth.PairingGrant{GrantID: "g1", AgentID: "a1", CreatedAt: now, LastUsedAt: now, IdleExpiresAt: now.Add(10 * time.Minute), AbsoluteExpiresAt: now.Add(1 * time.Hour)})
 	aStore.SaveSession(auth.SessionToken{Token: "s1", GrantID: "g1", AgentID: "a1", CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute)})
-	return &server{
+	return wiredServerForTest(&server{
 		svc:         app.Service{Policy: domain.DefaultPolicy(), Requests: store, Leases: store, Secrets: store, Audit: matrixAudit{}, Now: func() time.Time { return now }, NewRequestID: func() string { return "r1" }, NewLeaseTok: func() string { return "l1" }},
 		authEnabled: true,
 		authCfg:     config.AuthConfig{EnableAuth: true, OperatorToken: "op", AllowPlaintextSecretReturn: true},
@@ -33,7 +33,7 @@ func testServer(now time.Time) *server {
 		now:         func() time.Time { return now },
 		intents:     map[string][]string{"run_tests": {"github_token"}},
 		execPolicy:  config.ExecutionPolicy{ExactMatchExecutables: []string{"bash"}, DenylistSubstrings: []string{"printenv"}, MaxOutputBytes: 1024, DefaultTimeoutSec: 30, MaxTimeoutSec: 60},
-	}
+	})
 }
 
 func TestOperatorEndpointRejectsAgentToken(t *testing.T) {

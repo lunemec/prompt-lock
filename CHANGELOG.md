@@ -7,10 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- Broker execute and host-docker orchestration now live in app-layer use-cases, and env-path adapter wiring now happens at startup/composition time instead of lazily in HTTP handlers.
 - Request approval/deny/cancel audit attribution now stays on the primary service-level events (`request_approved`, `request_denied`, `request_cancelled_by_agent`) instead of relying on extra post-persist handler events that could drift from durable state outcomes.
 - `make release-readiness-gate` now runs the supported hardened dual-socket smoke path (`make real-e2e-smoke`) instead of the older dev/insecure compose demo, and the hardened red-team smoke harness now exercises the same transport boundary.
 - Helper and operations docs now make the local hardened Unix-socket flow the primary path, relabel the mock broker as demo-only, document the canonical `session_token` revoke field, and remove dead backend settings from canonical config examples.
-- The supported OSS v1 deployment target is now explicitly local-only hardened operation with dual Unix sockets; non-local TCP TLS/mTLS remains in the repository as experimental/private transport work and is no longer part of the release story.
+- The supported OSS deployment target is explicitly local-only hardened operation with dual Unix sockets, and the public docs/release notes now describe the active product surface accordingly instead of referring to removed TLS/mTLS transport work.
 - PromptLock public docs and planning state now consistently describe the project as a pre-1.0 OSS release candidate rather than a draft/experimental v1 claim.
 - GitHub Actions CI now stays Go/shell-native by using `make validate-final` plus `make leak-guard` instead of installing Python and running `bandit`.
 - Pull-request CI now uses explicit `actions/setup-go`, runs `make release-readiness-gate-core`, preserves `make leak-guard`, and publishes MCP conformance output so PR validation reflects the repository’s claimed release-readiness posture more credibly.
@@ -22,6 +23,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Planning and ADR docs now record the broker-managed executable-resolution decision and close the follow-up backlog items for schema cleanup, executable provenance hardening, and graceful compose teardown.
 
 ### Fixed
+- `promptlock-readiness-check` now fails closed when `--require-p0` sees `{}`, an empty `tasks` array, or schema-light status entries with no release-gating tasks, so an empty scoreboard cannot satisfy the readiness gate.
+- `promptlock-redteam-live` now requires network-egress-specific deny evidence from the approved-lease SEC-031 probe instead of treating any execute-time `403` as success, and the script-based red-team gate now exercises the wired approved-lease no-inspectable-destination deny path.
+- `promptlock watch` and `promptlock watch list` now surface approved-scope `intent`, so operator approval context shows the egress-policy scope being approved.
+- Broker execute and host-docker app use-cases no longer fall back to `os.Environ()`; ambient environment is injected from the broker boundary, and architecture conformance now fails if app-layer `os.Environ()` or handler-side control-plane wiring regresses.
+- Request payload docs and CLI request schema no longer advertise `env_path_canonical` as caller input; the broker computes it from `env_path` and ignores any legacy client-supplied value.
+- `promptlock-mcp` now returns normal request-construction errors when broker URL/config values are malformed, instead of panicking while building broker POST/GET requests.
+- `promptlock-readiness-check` now has direct coverage for missing/unreadable files, malformed JSON, `blocking=true` gating, and stdout/stderr exit behavior, and its help/output text now states that `--require-p0` treats `blocking=true` tasks as release-gating.
+- `promptlock-redteam-live` now fails clearly when report writes fail and has direct coverage for finalize aggregation, startup timeout, helper request/response failure handling, log tailing, and auth-stage abort branches.
+- `promptlock-redteam-live` now creates and approves a real request/lease before its SEC-031 execute-time egress deny check, so the live harness proves the real execute-time block instead of a generic invalid-lease `403`.
+- `make lint` now syntax-checks every shipped shell workflow under `scripts/`, and the script-based red-team gate now includes the SEC-031 deny path for direct network clients without inspectable destinations.
+- Broker-exec now persists approved intent on the request/lease path, denies execute-time intent widening, and fails closed for argv-inspected direct network clients (`curl`, `wget`, `fetch`) when no inspectable destination is present.
+- Broker-exec now resolves the approved command before it reads secret backend or approved env-path material, so failed command resolution no longer triggers secret reads or `secret_access_started` / `secret_access` audit events.
+- Durability-gate audit metadata now uses stable sanitized failure codes instead of copying raw upstream backend error text into host audit records.
+- `promptlock-validate-security` now fails closed on unreadable or otherwise unscannable files while keeping explicit skip classes for trusted artifact/cache paths.
+- `output_security_mode=redacted` now applies token-aware best-effort masking for common bearer and env-style secret shapes, with docs that keep the mode scoped to log hygiene rather than strong containment.
+- CLI and MCP broker clients now use bounded `10s` deadlines on both TCP and Unix-socket transports, returning actionable timeout errors instead of hanging indefinitely on stalled peers.
+- Unix-socket CLI auth/watch/exec request construction now ignores ambient `PROMPTLOCK_BROKER_URL` when socket transport is selected, so malformed broker URLs no longer break `--broker-unix-socket` or role-socket flows, and `promptlock-mcp` now also prefers the agent Unix socket over ambient broker URL when both are present.
 - Secret access now writes a critical `secret_access_started` audit gate before reading secret material from a backend or approved env-path source, so audit sink failure can no longer cause an unaudited secret read behind a `503`.
 - Request/lease mutations, auth lifecycle writes, and auth cleanup now re-persist the restored snapshot when persistence fails after writing durable state but before reporting success, preventing stale durable state after post-`rename` parent-directory `fsync` failures.
 - Multi-target auth revoke now restores the full auth snapshot if one target fails before persistence or audit, preventing partial revocation when a request supplies both `grant_id` and an invalid `session_token`.
@@ -62,7 +80,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Storage fsync report HMAC attestation fields (`signature.alg`, `signature.key_id`, `signature.value`) and shared deterministic payload signing/verification helpers in `internal/fsyncreport` (signature payload excludes the signature envelope itself).
 - Storage fsync validator key-rotation support with optional verification keyring (`PROMPTLOCK_STORAGE_FSYNC_HMAC_KEYRING`) and overlap max-age policy (`PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_OVERLAP_MAX_AGE`) for non-primary key IDs.
 - SOPS-managed key-material loader (`internal/sopsenv`) with broker startup preload support (`PROMPTLOCK_SOPS_ENV_FILE`) and fsync tooling integration (`--sops-env-file`, Make `SOPS_ENV_FILE`).
-- PromptLock CLI broker mTLS client transport options (`--broker-tls-ca-file`, `--broker-tls-client-cert-file`, `--broker-tls-client-key-file`, `--broker-tls-server-name`) with matching `PROMPTLOCK_BROKER_TLS_*` env wiring.
 - Distributed request/lease state backend adapter (`state_store.type=external`) with HTTP API wiring (`internal/adapters/externalstate`) and env overrides (`PROMPTLOCK_STATE_STORE_*`).
 - External-state happy-path integration coverage for broker lease lifecycle handlers (request, approve, status, by-request, pending, access) using `internal/adapters/externalstate`.
 - `make release-readiness-gate` workflow target (`validate-final` + readiness gate + fuzz + compose E2E smoke) for release-quality validation parity.
@@ -93,7 +110,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable secret source settings (`secret_source`) with `env` and `file` adapters for host-provided/durable secret material.
 - Live black-box red-team harness with machine-readable report output (`reports/redteam-live.json`).
 - Optional durable auth persistence (`auth.store_file`) for bootstrap/grant/session state with reload support.
-- Native TLS/mTLS transport config scaffolding (`tls.enable`, cert/key, optional client CA and client-cert requirement) with startup validation and tests.
 - App-layer control-plane policy service (`internal/app.ControlPlanePolicy`) for execute, network-egress, and host-docker policy evaluation.
 - Explicit route registration by bounded context (`meta`, `lease`, `auth`, `host-ops`) with route registration test coverage.
 - Shared inbound HTTP error taxonomy helper and status mapping tests.
@@ -195,13 +211,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent request cancellation now fails closed with `403` when session identity does not own the target request id.
 - MCP cancellation cleanup now emits an explicit stderr warning when broker `POST /v1/leases/cancel` propagation fails, improving operator visibility for stale pending-request remediation.
 - Documentation structure now requires `docs/plans/ACTIVE-PLAN.md` as the canonical handoff, `docs/plans/BACKLOG.md` as the canonical open-task list, typed `docs/plans/` subdirectories for active material, and archived date-stamped plan history under `docs/plans/archive/`.
-- Operational docs now distinguish the CLI-first host-plus-container lab walkthrough from the hardened mTLS production baseline, modernize the config example around `secret_source`, and mark planning notes as non-canonical status documents.
+- Operational docs now distinguish the CLI-first host-plus-container lab walkthrough from the supported hardened local dual-socket baseline, modernize the config example around `secret_source`, and mark planning notes as non-canonical status documents.
 - ADR metadata is now normalized around explicit consequences, security implications, lowercase status values, and supersession fields.
 - Auth lifecycle business logic moved into `internal/app.AuthLifecycle`, with auth handlers reduced to transport/auth-gate/decode/delegate/response mapping.
 - `Makefile` security/changelog/live-redteam targets now run Go commands instead of Python scripts.
 - Release packaging now builds binaries through a pinned GoReleaser configuration (`.goreleaser.yaml`) while preserving the existing `make release-package VERSION=...` workflow.
 - Python helper scripts (`mock-broker.py`, `validate_security_basics.py`, `validate_changelog.py`, `run_redteam_live.py`) were removed from active workflows in favor of Go command equivalents.
-- Transport safety now fails fast for unauthenticated non-local TCP without TLS/UDS unless explicit override (`PROMPTLOCK_ALLOW_INSECURE_NOAUTH_TCP=1`) is set, with warning + audit signal.
 - Plaintext secret-return deny policy now applies regardless of auth-enabled state; `/v1/leases/access` is blocked whenever `allow_plaintext_secret_return=false`.
 - `/v1/meta/capabilities` now includes `insecure_dev_mode` to surface high-risk dev posture (`auth=false` + plaintext return enabled).
 - Engineering standards now require default single-stack discipline (Go-first tooling) and explicit approval/justification before adding secondary runtime dependencies.
@@ -210,8 +225,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP method mismatch and status mapping semantics are now standardized through shared inbound error taxonomy across handlers.
 - Remaining lease/intent handler logic was moved out of `main.go` into dedicated inbound handler files.
 - Policy-denied responses now include actionable remediation hints for common deny reasons.
-- Hardened profile no longer forces unix-socket mode when TLS is explicitly enabled.
-- Added canonical hardened mTLS setup runbook and aligned planning docs to phase-1/phase-2 mTLS status.
 - Live red-team harness now supports profile selection and CI runs both `dev` and `hardened` live scenarios.
 - Hardened profile now supports configurable in-memory secret-source policy (`warn`/`fail`) and warns/audits when running hardened with in-memory source.
 - File-based secret source now requires explicit `secret_source.file_path` and fails fast on invalid source config.

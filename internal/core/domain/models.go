@@ -14,6 +14,7 @@ type LeaseRequest struct {
 	ID                 string
 	AgentID            string
 	TaskID             string
+	Intent             string
 	Reason             string
 	TTLMinutes         int
 	Secrets            []string
@@ -30,6 +31,7 @@ type Lease struct {
 	RequestID          string
 	AgentID            string
 	TaskID             string
+	Intent             string
 	Secrets            []string
 	CommandFingerprint string
 	WorkdirFingerprint string

@@ -55,6 +55,7 @@ func TestRunWatchListDisplaysDecisionContext(t *testing.T) {
 					"ID":                 "req-ctx-1",
 					"AgentID":            "agent-1",
 					"TaskID":             "task-1",
+					"Intent":             "run_tests",
 					"Reason":             "run tests",
 					"TTLMinutes":         5,
 					"Secrets":            []string{"github_token"},
@@ -76,6 +77,7 @@ func TestRunWatchListDisplaysDecisionContext(t *testing.T) {
 		"req-ctx-1",
 		"agent=agent-1",
 		"task=task-1",
+		"intent=run_tests",
 		"command_fp=cmd-fp-1",
 		"workdir_fp=wd-fp-1",
 		"env_path=./.env",
@@ -249,6 +251,22 @@ func TestRenderWatchScreenClearsTTY(t *testing.T) {
 	}
 }
 
+func TestRenderWatchScreenIncludesIntent(t *testing.T) {
+	var out bytes.Buffer
+
+	renderWatchScreen(&out, watchView{
+		BrokerTarget: "http://127.0.0.1:8765",
+		PollInterval: 3 * time.Second,
+		Now:          time.Date(2026, 3, 14, 12, 0, 0, 0, time.UTC),
+		PendingCount: 1,
+		Current:      ptrPendingItem(newPendingItem("req-intent")),
+	}, false)
+
+	if !strings.Contains(out.String(), "Intent: run_tests") {
+		t.Fatalf("expected watch screen to include intent, got %q", out.String())
+	}
+}
+
 type stubWatchClient struct {
 	snapshots    [][]pendingItem
 	listCalls    int
@@ -285,6 +303,7 @@ func newPendingItem(id string) pendingItem {
 		ID:                 id,
 		AgentID:            "agent-1",
 		TaskID:             "task-1",
+		Intent:             "run_tests",
 		Reason:             "run tests",
 		TTLMinutes:         5,
 		Secrets:            []string{"github_token"},

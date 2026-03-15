@@ -6,12 +6,13 @@ FSYNC_HMAC_KEY_ID_ENV ?= PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_ID
 FSYNC_HMAC_KEYRING_ENV ?= PROMPTLOCK_STORAGE_FSYNC_HMAC_KEYRING
 FSYNC_HMAC_KEY_OVERLAP_MAX_AGE_ENV ?= PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_OVERLAP_MAX_AGE
 SOPS_ENV_FILE ?=
+SHIPPED_SHELL_WORKFLOWS := $(sort $(wildcard scripts/*.sh))
 
 help:
 	@echo "Targets: lint toolchain-guard vet vulncheck race test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate release-readiness-gate-core release-readiness-gate leak-guard storage-fsync-preflight storage-fsync-report storage-fsync-validate storage-fsync-release-gate ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose release-package"
 
 lint:
-	bash -n scripts/secretctl.sh scripts/human-approve.sh
+	bash -n $(SHIPPED_SHELL_WORKFLOWS)
 
 toolchain-guard:
 	go run ./cmd/promptlock-validate-toolchain
@@ -110,7 +111,8 @@ ci-redteam-full: validate-final security-redteam-live security-redteam-live-hard
 arch-conformance:
 	bash scripts/verify_architecture_conformance.sh
 	go test ./cmd/promptlock -run 'TestResolveBrokerSelectionFailsClosedWhenRoleSocketMissingAndNoExplicitBroker|TestResolveBrokerSelectionExplicitBrokerURLWinsOverLocalSocketDefaults'
-	go test ./cmd/promptlockd -run 'TestRegisterAgentRoutesToExposesOnlyAgentEndpoints|TestRegisterOperatorRoutesToExposesOnlyOperatorEndpoints|TestApproveRejectsMalformedJSON|TestDenyRejectsMalformedJSON|TestCancelRejectsMalformedJSON'
+	go test ./cmd/promptlockd -run 'TestRegisterAgentRoutesToExposesOnlyAgentEndpoints|TestRegisterOperatorRoutesToExposesOnlyOperatorEndpoints|TestApproveRejectsMalformedJSON|TestDenyRejectsMalformedJSON|TestCancelRejectsMalformedJSON|TestConfigureControlPlaneUseCasesInjectsAmbientEnvFromBoundary'
+	go test ./internal/app -run 'TestExecuteWithLeaseUseCaseDoesNotInheritAmbientEnvWithoutInjection|TestHostDockerExecuteUseCaseDoesNotInheritAmbientEnvWithoutInjection'
 
 docs:
 	@test -f AGENTS.md

@@ -53,14 +53,14 @@ func TestHandleExecuteCapsOutputAtMaxBytes(t *testing.T) {
 	aStore.SaveGrant(auth.PairingGrant{GrantID: "g1", AgentID: "a1", CreatedAt: now, LastUsedAt: now, IdleExpiresAt: now.Add(10 * time.Minute), AbsoluteExpiresAt: now.Add(1 * time.Hour)})
 	aStore.SaveSession(auth.SessionToken{Token: "s1", GrantID: "g1", AgentID: "a1", CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute)})
 
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc:         app.Service{Policy: domain.DefaultPolicy(), Requests: store, Leases: store, Secrets: store, Audit: testAudit{}, Now: func() time.Time { return now }, NewRequestID: func() string { return "r1" }, NewLeaseTok: func() string { return "l1" }},
 		authEnabled: true,
 		authCfg:     config.AuthConfig{EnableAuth: true, OperatorToken: "op", AllowPlaintextSecretReturn: false},
 		execPolicy:  config.ExecutionPolicy{ExactMatchExecutables: []string{"sh"}, OutputSecurityMode: "raw", MaxOutputBytes: 16, DefaultTimeoutSec: 30, MaxTimeoutSec: 60},
 		authStore:   aStore,
 		now:         func() time.Time { return now },
-	}
+	})
 
 	payload := `{"lease_token":"l1","command":["sh","-c","i=0; while [ $i -lt 128 ]; do printf x; i=$((i+1)); done"],"secrets":["github_token"],"command_fingerprint":"fp","workdir_fingerprint":"wd"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/leases/execute", bytes.NewBufferString(payload))
@@ -127,13 +127,13 @@ func TestHandleHostDockerExecuteCapsOutputAtMaxBytes(t *testing.T) {
 		t.Skip("shell helper is unix-specific")
 	}
 
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc:           app.Service{Audit: testAudit{}},
 		execPolicy:    config.ExecutionPolicy{MaxOutputBytes: 16},
 		hostOpsPolicy: config.HostOpsPolicy{DockerTimeoutSec: 30},
 		policyEngine:  hostDockerBoundedOutputPolicy{},
 		now:           time.Now,
-	}
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/host/docker/execute", bytes.NewBufferString(`{"command":["docker","ps"]}`))
 	w := httptest.NewRecorder()
@@ -166,13 +166,13 @@ func TestHandleHostDockerExecuteUsesMinimalEnvironment(t *testing.T) {
 	}
 
 	t.Setenv("PROMPTLOCK_TEST_LEAK", "leak-me")
-	s := &server{
+	s := wiredServerForTest(&server{
 		svc:           app.Service{Audit: testAudit{}},
 		execPolicy:    config.ExecutionPolicy{MaxOutputBytes: 64},
 		hostOpsPolicy: config.HostOpsPolicy{DockerTimeoutSec: 30},
 		policyEngine:  hostDockerEnvPolicy{helperPath: helperPath},
 		now:           time.Now,
-	}
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/host/docker/execute", bytes.NewBufferString(`{"command":["docker","ps"]}`))
 	w := httptest.NewRecorder()
