@@ -125,11 +125,16 @@ func isInsecureDevMode(cfg config.Config) bool {
 	return !cfg.Auth.EnableAuth && cfg.Auth.AllowPlaintextSecretReturn
 }
 
-func validateSecurityProfile(cfg config.Config, allowInsecureProfile string) error {
+func normalizedSecurityProfile(cfg config.Config) string {
 	profile := strings.TrimSpace(strings.ToLower(cfg.SecurityProfile))
 	if profile == "" {
-		profile = "dev"
+		return "dev"
 	}
+	return profile
+}
+
+func validateSecurityProfile(cfg config.Config, allowInsecureProfile string) error {
+	profile := normalizedSecurityProfile(cfg)
 	if profile == "dev" {
 		return nil
 	}
@@ -143,10 +148,7 @@ func validateSecurityProfile(cfg config.Config, allowInsecureProfile string) err
 }
 
 func validateDeploymentMode(cfg config.Config, allowDevProfile string) error {
-	profile := strings.TrimSpace(strings.ToLower(cfg.SecurityProfile))
-	if profile == "" {
-		profile = "dev"
-	}
+	profile := normalizedSecurityProfile(cfg)
 	if profile == "dev" && allowDevProfile != "1" {
 		return fmt.Errorf("security_profile=dev is disabled by default; set PROMPTLOCK_ALLOW_DEV_PROFILE=1 for local testing or use security_profile=hardened")
 	}

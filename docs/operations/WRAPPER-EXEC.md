@@ -68,9 +68,9 @@ go run ./cmd/promptlock auth docker-run \
 
 Useful flags:
 - `--mount` to pass through workspace mounts.
-- `--env` to add container env vars.
+- `--env` to add container env vars, except reserved PromptLock transport variables like `PROMPTLOCK_SESSION_TOKEN`, `PROMPTLOCK_BROKER_URL`, and `PROMPTLOCK_AGENT_UNIX_SOCKET`.
 - `--workdir` to set the in-container working directory.
-- `--docker-arg` as an escape hatch for extra `docker run` flags.
+- `--docker-arg` as a narrow escape hatch for a small allowlist of extra `docker run` flags (`--pull`, `--init`, `--label`, `--label-file`, `--hostname`, `--add-host`, `--dns`, `--dns-option`, `--dns-search`, `--shm-size`, `--stop-timeout`, `--tmpfs`, `--ulimit`); PromptLock rejects raw env, env-file, mount, volume, user, workdir, and entrypoint overrides in both `--flag=value` and `--flag value` forms so the session/socket boundary cannot be bypassed accidentally.
 
 For local demo only (no external approval watcher):
 
@@ -119,7 +119,8 @@ PROMPTLOCK_DEV_MODE=1 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 - Operators see both the original `env_path` and the broker-confirmed `env_path_canonical` in `promptlock watch`.
 - Approved `env_path` requests switch execute-time secret lookup from broker process env to the approved `.env` file.
 - The broker resolves `env_path` only within `PROMPTLOCK_ENV_PATH_ROOT`; traversal and symlink escapes are rejected.
-- If `PROMPTLOCK_ENV_PATH_ROOT` is unset, the broker uses its current working directory as the root. Do not rely on that default in hardened deployments.
+- In `security_profile=dev`, an unset `PROMPTLOCK_ENV_PATH_ROOT` falls back to the broker working directory for local testing.
+- In non-dev profiles, `--env-path` requests fail closed until `PROMPTLOCK_ENV_PATH_ROOT` is set explicitly.
 - Requests with `--env-path` do not reuse active leases across identical requests because the approved file path is part of the decision context.
 
 ## Security direction

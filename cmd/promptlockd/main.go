@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/lunemec/promptlock/internal/adapters/audit"
-	"github.com/lunemec/promptlock/internal/adapters/envpath"
 	"github.com/lunemec/promptlock/internal/adapters/envsecret"
 	"github.com/lunemec/promptlock/internal/adapters/externalsecret"
 	"github.com/lunemec/promptlock/internal/adapters/externalstate"
@@ -57,17 +56,17 @@ func run() error {
 	secretStore := any(store).(ports.SecretStore)
 	requestStore := any(store).(ports.RequestStore)
 	leaseStore := any(store).(ports.LeaseStore)
-	envPathRoot := strings.TrimSpace(getenv("PROMPTLOCK_ENV_PATH_ROOT", ""))
-	if envPathRoot == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("resolve env-path root from working directory: %w", err)
-		}
-		envPathRoot = cwd
-	}
-	envPathStore, err := envpath.New(envPathRoot)
+	envPathStore, envPathRoot, err := newEnvPathSecretStore(cfg, os.Getwd)
 	if err != nil {
-		return fmt.Errorf("init env-path secret source root %q: %w", envPathRoot, err)
+		return err
+	}
+	if strings.TrimSpace(getenv("PROMPTLOCK_ENV_PATH_ROOT", "")) == "" {
+		switch normalizedSecurityProfile(cfg) {
+		case "dev":
+			log.Printf("WARNING: using working directory as env-path root in dev profile: %s", envPathRoot)
+		default:
+			log.Printf("INFO: env_path requests disabled until PROMPTLOCK_ENV_PATH_ROOT is set")
+		}
 	}
 	stateStoreFile := cfg.StateStoreFile
 	var statePersister stateStorePersister = store

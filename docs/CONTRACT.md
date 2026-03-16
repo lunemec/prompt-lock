@@ -129,8 +129,9 @@ Notes:
 ## `env_path` trust boundary
 - `--env-path` is agent-supplied approval context. The broker canonicalizes it on request and stores both the original and canonical path for operator review.
 - `env_path` is constrained to `PROMPTLOCK_ENV_PATH_ROOT`. Traversal and symlink escapes outside that root are rejected.
-- If `PROMPTLOCK_ENV_PATH_ROOT` is unset, the broker currently falls back to its current working directory. That is only safe when the broker starts from a host-owned directory outside agent-controlled workspace mounts.
-- Broker startup fails closed if the chosen `PROMPTLOCK_ENV_PATH_ROOT` (or fallback working directory) cannot be initialized as an env-path source root.
+- In `security_profile=dev`, an unset `PROMPTLOCK_ENV_PATH_ROOT` falls back to the broker working directory for local testing only.
+- In non-dev profiles, PromptLock disables `env_path` requests unless `PROMPTLOCK_ENV_PATH_ROOT` is set explicitly.
+- Broker startup fails closed if the configured `PROMPTLOCK_ENV_PATH_ROOT` cannot be initialized as an env-path source root.
 - `env_path` disables active-lease reuse for matching requests because the approved file path becomes part of the trust boundary.
 
 ## Enforcement rules

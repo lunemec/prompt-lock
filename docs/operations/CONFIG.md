@@ -202,8 +202,9 @@ Example hardened allowlist snippet:
 
 ## `env_path` approval boundary
 - `PROMPTLOCK_ENV_PATH_ROOT` defines the only root from which approved `.env` files may be resolved.
-- If `PROMPTLOCK_ENV_PATH_ROOT` is unset, the broker falls back to its current working directory. Treat that as a compatibility default, not a hardened one.
-- Broker startup fails closed if the chosen env-path root cannot be initialized.
+- In `security_profile=dev`, an unset `PROMPTLOCK_ENV_PATH_ROOT` falls back to the broker working directory for local testing.
+- In non-dev profiles, `env_path` requests fail closed until `PROMPTLOCK_ENV_PATH_ROOT` is set explicitly.
+- Broker startup fails closed if the configured env-path root cannot be initialized.
 - `env_path` values are canonicalized through symlink resolution and rejected if they escape the configured root.
 - Request payloads do not define `env_path_canonical`; the broker computes it from `env_path`. Any legacy client-supplied `env_path_canonical` value is ignored for compatibility.
 - Approved requests store both `env_path` and `env_path_canonical` so operators can review the agent-supplied path and the broker-confirmed path together.

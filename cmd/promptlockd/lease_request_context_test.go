@@ -119,3 +119,19 @@ func TestHandlePendingRequestsIncludesEnvPathContext(t *testing.T) {
 		t.Fatalf("expected canonical env path in pending item, got %#v", got)
 	}
 }
+
+func TestHandleRequestRejectsEnvPathWhenRootIsDisabled(t *testing.T) {
+	now := time.Now().UTC()
+	s := newRequestContextServer(now)
+	s.svc.EnvPathSecrets = envPathDisabledStore{reason: "env_path requires PROMPTLOCK_ENV_PATH_ROOT in non-dev profiles"}
+	req := httptest.NewRequest(http.MethodPost, "/v1/leases/request", bytes.NewBufferString(`{"agent_id":"a1","task_id":"t1","reason":"r","ttl_minutes":5,"secrets":["github_token"],"command_fingerprint":"cmd-1","workdir_fingerprint":"wd-1","env_path":"./.env"}`))
+	w := httptest.NewRecorder()
+	s.handleRequest(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when env_path root is disabled, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "PROMPTLOCK_ENV_PATH_ROOT") {
+		t.Fatalf("expected env_path root guidance, got %s", w.Body.String())
+	}
+}

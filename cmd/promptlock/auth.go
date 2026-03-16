@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -252,7 +253,7 @@ func runAuthDockerRun(args []string) {
 		var dockerArgs stringSliceFlag
 		fs.Var(&mounts, "mount", "additional docker --mount spec (repeatable)")
 		fs.Var(&envs, "env", "additional container env KEY=VALUE (repeatable)")
-		fs.Var(&dockerArgs, "docker-arg", "additional raw docker run argument (repeatable)")
+		fs.Var(&dockerArgs, "docker-arg", "additional allowlisted docker run flag or flag value (repeatable)")
 		printFlagHelp(os.Stdout, authDockerRunHelpText(), fs)
 		return
 	}
@@ -271,7 +272,7 @@ func runAuthDockerRun(args []string) {
 	var dockerArgs stringSliceFlag
 	fs.Var(&mounts, "mount", "additional docker --mount spec (repeatable)")
 	fs.Var(&envs, "env", "additional container env KEY=VALUE (repeatable)")
-	fs.Var(&dockerArgs, "docker-arg", "additional raw docker run argument (repeatable)")
+	fs.Var(&dockerArgs, "docker-arg", "additional allowlisted docker run flag or flag value (repeatable)")
 	fs.Parse(args)
 	if strings.TrimSpace(*opToken) == "" || strings.TrimSpace(*agent) == "" || strings.TrimSpace(*container) == "" || strings.TrimSpace(*image) == "" {
 		fatal(fmt.Errorf("--operator-token, --agent, --container and --image are required"))
@@ -362,6 +363,9 @@ func buildDockerRunArgs(cfg dockerRunConfig) ([]string, error) {
 	if strings.TrimSpace(cfg.BrokerUnixSocket) == "" && strings.TrimSpace(cfg.BrokerURL) == "" {
 		return nil, fmt.Errorf("either broker URL or broker unix socket is required")
 	}
+	if err := validateDockerRunSecurity(cfg); err != nil {
+		return nil, err
+	}
 
 	args := []string{"run", "--rm"}
 	if cfg.AttachTTY {
@@ -437,6 +441,174 @@ func buildDockerRunEnv(base []string, cfg dockerRunConfig) []string {
 	}
 	env = append(env, "PROMPTLOCK_BROKER_URL="+cfg.BrokerURL)
 	return env
+}
+
+var protectedDockerEnvVars = map[string]struct{}{
+	"PROMPTLOCK_AGENT_UNIX_SOCKET": {},
+	"PROMPTLOCK_BROKER_URL":        {},
+	"PROMPTLOCK_SESSION_TOKEN":     {},
+}
+
+var allowlistedDockerArgHelp = "allowed docker-arg flags: --pull, --init, --label, --label-file, --hostname, --add-host, --dns, --dns-option, --dns-search, --shm-size, --stop-timeout, --tmpfs, --ulimit"
+
+func validateDockerRunSecurity(cfg dockerRunConfig) error {
+	if err := validateAdditionalDockerEnvs(cfg.AdditionalEnv); err != nil {
+		return err
+	}
+	if err := validateAdditionalDockerArgs(cfg.AdditionalDockerArgs); err != nil {
+		return err
+	}
+	containerSocket := strings.TrimSpace(cfg.ContainerBrokerSocket)
+	if containerSocket == "" {
+		containerSocket = "/run/promptlock/promptlock-agent.sock"
+	}
+	return validateAdditionalDockerMounts(cfg.AdditionalMounts, containerSocket)
+}
+
+func validateAdditionalDockerEnvs(items []string) error {
+	for _, item := range items {
+		name := dockerEnvName(item)
+		if name == "" {
+			return fmt.Errorf("docker --env entries must use KEY=VALUE or KEY syntax, for example --env CODEX_HOME=/workspace/.codex")
+		}
+		if _, blocked := protectedDockerEnvVars[name]; blocked {
+			return fmt.Errorf("docker --env may not override reserved PromptLock variable %s; choose a different variable name and let PromptLock manage session transport env vars", name)
+		}
+	}
+	return nil
+}
+
+type dockerArgRule struct {
+	expectsValue bool
+}
+
+var forbiddenDockerArgs = map[string]string{
+	"-e":           "docker-arg may not set environment variables; use --env KEY=VALUE and avoid reserved PromptLock transport variables",
+	"--env":        "docker-arg may not set environment variables; use --env KEY=VALUE and avoid reserved PromptLock transport variables",
+	"--env-file":   "docker-arg may not use --env-file because it can override PromptLock session transport variables; pass explicit --env entries instead",
+	"--mount":      "docker-arg may not add mounts directly; use --mount so PromptLock can validate the protected container broker socket path",
+	"-v":           "docker-arg may not add volumes directly; use --mount so PromptLock can validate the protected container broker socket path",
+	"--volume":     "docker-arg may not add volumes directly; use --mount so PromptLock can validate the protected container broker socket path",
+	"--entrypoint": "docker-arg may not override entrypoint; use the wrapper's --entrypoint flag instead",
+	"--workdir":    "docker-arg may not override workdir; use the wrapper's --workdir flag instead",
+	"-w":           "docker-arg may not override workdir; use the wrapper's --workdir flag instead",
+	"--user":       "docker-arg may not override user; PromptLock manages the container user for auth/session safety",
+	"-u":           "docker-arg may not override user; PromptLock manages the container user for auth/session safety",
+}
+
+var allowlistedDockerArgs = map[string]dockerArgRule{
+	"--add-host":     {expectsValue: true},
+	"--dns":          {expectsValue: true},
+	"--dns-option":   {expectsValue: true},
+	"--dns-search":   {expectsValue: true},
+	"-h":             {expectsValue: true},
+	"--hostname":     {expectsValue: true},
+	"--init":         {},
+	"-l":             {expectsValue: true},
+	"--label":        {expectsValue: true},
+	"--label-file":   {expectsValue: true},
+	"--pull":         {expectsValue: true},
+	"--shm-size":     {expectsValue: true},
+	"--stop-timeout": {expectsValue: true},
+	"--tmpfs":        {expectsValue: true},
+	"--ulimit":       {expectsValue: true},
+}
+
+func validateAdditionalDockerArgs(items []string) error {
+	var expectingValue *dockerArgRule
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		if expectingValue != nil {
+			if strings.HasPrefix(trimmed, "-") {
+				return fmt.Errorf("docker-arg missing value before %q; %s", trimmed, allowlistedDockerArgHelp)
+			}
+			expectingValue = nil
+			continue
+		}
+		flagName, hasInlineValue := parseDockerArgToken(trimmed)
+		if flagName == "" {
+			return fmt.Errorf("docker-arg %q is not allowed; %s", trimmed, allowlistedDockerArgHelp)
+		}
+		if msg, blocked := forbiddenDockerArgs[flagName]; blocked {
+			return errors.New(msg)
+		}
+		rule, allowed := allowlistedDockerArgs[flagName]
+		if !allowed {
+			return fmt.Errorf("docker-arg %q is not allowed; use first-class PromptLock flags like --env, --mount, --workdir, or --entrypoint when available; %s", flagName, allowlistedDockerArgHelp)
+		}
+		if rule.expectsValue && !hasInlineValue {
+			expectingValue = &rule
+		}
+	}
+	if expectingValue != nil {
+		return fmt.Errorf("docker-arg missing value for previous flag; %s", allowlistedDockerArgHelp)
+	}
+	return nil
+}
+
+func parseDockerArgToken(item string) (string, bool) {
+	trimmed := strings.TrimSpace(item)
+	if trimmed == "" || !strings.HasPrefix(trimmed, "-") {
+		return "", false
+	}
+	if strings.HasPrefix(trimmed, "--") {
+		if name, _, found := strings.Cut(trimmed, "="); found {
+			return name, true
+		}
+		return trimmed, false
+	}
+	if strings.HasPrefix(trimmed, "-") && len(trimmed) > 2 {
+		if trimmed[2] == '=' {
+			return trimmed[:2], true
+		}
+	}
+	return trimmed, false
+}
+
+func validateAdditionalDockerMounts(items []string, containerBrokerSocket string) error {
+	protectedTarget := filepath.Clean(strings.TrimSpace(containerBrokerSocket))
+	if protectedTarget == "" {
+		return nil
+	}
+	for _, item := range items {
+		destination := parseDockerMountDestination(item)
+		if destination == "" {
+			continue
+		}
+		if filepath.Clean(destination) == protectedTarget {
+			return fmt.Errorf("additional mount may not target the container broker socket %s", protectedTarget)
+		}
+	}
+	return nil
+}
+
+func dockerEnvName(item string) string {
+	trimmed := strings.TrimSpace(item)
+	if trimmed == "" {
+		return ""
+	}
+	name, _, found := strings.Cut(trimmed, "=")
+	if !found {
+		name = trimmed
+	}
+	return strings.TrimSpace(name)
+}
+
+func parseDockerMountDestination(spec string) string {
+	for _, part := range strings.Split(spec, ",") {
+		key, value, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "dst", "destination", "target":
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func currentUserDockerIdentity() string {
