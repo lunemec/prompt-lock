@@ -2,9 +2,6 @@ package app
 
 import (
 	"fmt"
-	"net"
-	"net/url"
-	"regexp"
 	"strings"
 
 	"github.com/lunemec/promptlock/internal/config"
@@ -24,34 +21,6 @@ type ControlPlanePolicy interface {
 type ExecuteRequest struct {
 	Intent  string
 	Command []string
-}
-
-var directNetworkClients = map[string]struct{}{
-	"curl":  {},
-	"wget":  {},
-	"fetch": {},
-}
-
-var outputRedactors = []struct {
-	pattern     *regexp.Regexp
-	replacement string
-}{
-	{
-		pattern:     regexp.MustCompile(`(?im)(authorization\s*:\s*bearer\s+)([^\s"'` + "`" + `]+)`),
-		replacement: `${1}[REDACTED_BEARER_TOKEN]`,
-	},
-	{
-		pattern:     regexp.MustCompile(`(?m)\b((?:[A-Z0-9_]*(?:TOKEN|SECRET|API_KEY|PASSWORD))\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s]+)`),
-		replacement: `${1}[REDACTED_ENV_VALUE]`,
-	},
-	{
-		pattern:     regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9_]+\b`),
-		replacement: `[REDACTED_GITHUB_TOKEN]`,
-	},
-	{
-		pattern:     regexp.MustCompile(`\bsk-[A-Za-z0-9._-]+\b`),
-		replacement: `[REDACTED_API_TOKEN]`,
-	},
 }
 
 type DefaultControlPlanePolicy struct {
@@ -130,12 +99,15 @@ func (p DefaultControlPlanePolicy) ValidateNetworkEgress(cmd []string, intent st
 			return fmt.Errorf("network egress denied by substring %q", d)
 		}
 	}
-	domains := extractDomains(cmd)
+	domains, unsafeArg := extractDomains(cmd)
 	if len(domains) == 0 {
 		if requiresInspectableNetworkDestination(cmd) {
 			return fmt.Errorf("network egress requires an inspectable destination in argv")
 		}
 		return nil
+	}
+	if unsafeArg != "" {
+		return fmt.Errorf("network egress argv inspection cannot safely enforce opaque or destination-override argument %q", unsafeArg)
 	}
 	allow := p.Network.AllowDomains
 	trimIntent := strings.TrimSpace(intent)
@@ -233,14 +205,6 @@ func (p DefaultControlPlanePolicy) ClampTimeout(requested int) int {
 	return timeout
 }
 
-func redactOutput(in string) string {
-	s := in
-	for _, redactor := range outputRedactors {
-		s = redactor.pattern.ReplaceAllString(s, redactor.replacement)
-	}
-	return s
-}
-
 func requiresInspectableNetworkDestination(cmd []string) bool {
 	if len(cmd) == 0 {
 		return false
@@ -277,119 +241,4 @@ func validateFlags(args []string, allow []string) error {
 		return fmt.Errorf("positional argument %q not allowed", a)
 	}
 	return nil
-}
-
-func extractDomains(cmd []string) []string {
-	seen := map[string]bool{}
-	out := []string{}
-	add := func(host string) {
-		h := strings.ToLower(strings.TrimSpace(host))
-		h = strings.Trim(h, "[]")
-		if h == "" {
-			return
-		}
-		if i := strings.Index(h, ":"); i > 0 {
-			h = h[:i]
-		}
-		if !seen[h] {
-			seen[h] = true
-			out = append(out, h)
-		}
-	}
-	for i, part := range cmd {
-		p := strings.TrimSpace(part)
-		if p == "" {
-			continue
-		}
-		if strings.Contains(p, "://") {
-			u, err := url.Parse(p)
-			if err == nil && u.Hostname() != "" {
-				add(u.Hostname())
-			}
-			continue
-		}
-		lower := strings.ToLower(p)
-		if lower == "--url" || lower == "-u" || lower == "--host" || lower == "-h" {
-			if i+1 < len(cmd) {
-				next := strings.TrimSpace(cmd[i+1])
-				if strings.Contains(next, "://") {
-					u, err := url.Parse(next)
-					if err == nil && u.Hostname() != "" {
-						add(u.Hostname())
-					}
-				} else if isDomainLike(next) {
-					add(next)
-				}
-			}
-			continue
-		}
-		if strings.HasPrefix(lower, "--host=") {
-			add(strings.TrimPrefix(p, "--host="))
-			continue
-		}
-		if host, ok := splitHostPathCandidate(p); ok {
-			add(host)
-			continue
-		}
-		if isDomainLike(p) {
-			add(p)
-		}
-	}
-	return out
-}
-
-func domainAllowed(domain string, allow []string) bool {
-	d := strings.ToLower(strings.TrimSpace(domain))
-	if isBlockedIPTarget(d) {
-		return false
-	}
-	for _, a := range allow {
-		a = strings.ToLower(strings.TrimSpace(a))
-		if a == "" {
-			continue
-		}
-		if d == a || strings.HasSuffix(d, "."+a) {
-			return true
-		}
-	}
-	return false
-}
-
-func isDomainLike(s string) bool {
-	s = strings.Trim(strings.ToLower(strings.TrimSpace(s)), "[]")
-	if s == "" {
-		return false
-	}
-	if strings.Contains(s, "/") || strings.ContainsAny(s, " \t\n\r") {
-		return false
-	}
-	if ip := net.ParseIP(s); ip != nil {
-		return true
-	}
-	return strings.Contains(s, ".")
-}
-
-func splitHostPathCandidate(s string) (string, bool) {
-	trimmed := strings.Trim(strings.TrimSpace(s), "[]")
-	if trimmed == "" || strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, ".") || strings.HasPrefix(trimmed, "-") {
-		return "", false
-	}
-	slash := strings.Index(trimmed, "/")
-	if slash <= 0 {
-		return "", false
-	}
-	host := trimmed[:slash]
-	if isDomainLike(host) {
-		return host, true
-	}
-	return "", false
-}
-
-func isBlockedIPTarget(host string) bool {
-	h := strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
-	ip := net.ParseIP(h)
-	if ip == nil {
-		return false
-	}
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
 }

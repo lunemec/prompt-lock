@@ -81,7 +81,7 @@ func TestScanSkipsReleaseArtifactDirs(t *testing.T) {
 	}
 }
 
-func TestScanSkipsGoCacheDirs(t *testing.T) {
+func TestScanSkipsRepoLocalGoCacheDirs(t *testing.T) {
 	root := t.TempDir()
 
 	goCachePath := filepath.Join(root, ".gocache", "binary")
@@ -106,6 +106,103 @@ func TestScanSkipsGoCacheDirs(t *testing.T) {
 	}
 	if len(violations) != 0 {
 		t.Fatalf("expected no violations from go cache dirs, got %#v", violations)
+	}
+}
+
+func TestScanDoesNotSkipNestedGoCacheDirs(t *testing.T) {
+	root := t.TempDir()
+
+	nestedGoCachePath := filepath.Join(root, "sub", ".gocache", "leak.txt")
+	if err := os.MkdirAll(filepath.Dir(nestedGoCachePath), 0o755); err != nil {
+		t.Fatalf("mkdir nested .gocache: %v", err)
+	}
+	if err := os.WriteFile(nestedGoCachePath, []byte("token ghp_nested"), 0o644); err != nil {
+		t.Fatalf("write nested .gocache file: %v", err)
+	}
+
+	nestedGoModCachePath := filepath.Join(root, "sub", ".gomodcache", "pkg", "mod", "leak.txt")
+	if err := os.MkdirAll(filepath.Dir(nestedGoModCachePath), 0o755); err != nil {
+		t.Fatalf("mkdir nested .gomodcache: %v", err)
+	}
+	if err := os.WriteFile(nestedGoModCachePath, []byte("binary bytes ... AKIA ..."), 0o644); err != nil {
+		t.Fatalf("write nested .gomodcache file: %v", err)
+	}
+
+	violations, err := scan(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(violations) != 2 {
+		t.Fatalf("expected nested go cache dirs to stay scanned, got %#v", violations)
+	}
+	if !strings.Contains(violations[0].path, "sub/.gocache/leak.txt") && !strings.Contains(violations[1].path, "sub/.gocache/leak.txt") {
+		t.Fatalf("expected nested .gocache violation, got %#v", violations)
+	}
+	if !strings.Contains(violations[0].path, "sub/.gomodcache/pkg/mod/leak.txt") && !strings.Contains(violations[1].path, "sub/.gomodcache/pkg/mod/leak.txt") {
+		t.Fatalf("expected nested .gomodcache violation, got %#v", violations)
+	}
+}
+
+func TestScanSkipsRepoLocalGoBuildCacheDir(t *testing.T) {
+	root := t.TempDir()
+	goBuildPath := filepath.Join(root, ".cache", "go-build", "ab", "cache.bin")
+	if err := os.MkdirAll(filepath.Dir(goBuildPath), 0o755); err != nil {
+		t.Fatalf("mkdir .cache/go-build: %v", err)
+	}
+	if err := os.WriteFile(goBuildPath, []byte("binary bytes ... ghp_ ..."), 0o644); err != nil {
+		t.Fatalf("write .cache/go-build file: %v", err)
+	}
+
+	violations, err := scan(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("expected no violations from repo-local go build cache dir, got %#v", violations)
+	}
+}
+
+func TestScanDoesNotSkipUnrelatedDotCacheDirs(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, ".cache", "custom", "leak.txt")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir .cache/custom: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("token ghp_abc"), 0o644); err != nil {
+		t.Fatalf("write .cache/custom file: %v", err)
+	}
+
+	violations, err := scan(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("expected unrelated .cache dir to stay scanned, got %#v", violations)
+	}
+	if !strings.Contains(violations[0].path, ".cache/custom/leak.txt") {
+		t.Fatalf("unexpected path: %#v", violations)
+	}
+}
+
+func TestScanDoesNotSkipNestedScannerSourceDir(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "sub", "cmd", "promptlock-validate-security", "leak.txt")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir nested scanner source dir: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("token ghp_abc"), 0o644); err != nil {
+		t.Fatalf("write nested scanner source file: %v", err)
+	}
+
+	violations, err := scan(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("expected nested scanner source dir to stay scanned, got %#v", violations)
+	}
+	if !strings.Contains(violations[0].path, "sub/cmd/promptlock-validate-security/leak.txt") {
+		t.Fatalf("unexpected path: %#v", violations)
 	}
 }
 

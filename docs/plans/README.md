@@ -1,26 +1,26 @@
 # Planning Docs
 
-This directory is the repository's execution-state surface. Agents must keep it structured and current.
+This directory is the repository's execution-state surface.
 
 ## Canonical files
-- `ACTIVE-PLAN.md` — current handoff, focus, recent completions, and validation expectations
-- `BACKLOG.md` — canonical open task list with priorities and references
+- `ACTIVE-PLAN.md` holds the current handoff: present focus, active review items, and validation expectations.
+- `BACKLOG.md` holds the canonical list of open work.
 
 ## Subdirectories
-- `initiatives/` — active multi-step workstreams with detailed scope and acceptance criteria
-- `checklists/` — release, migration, and readiness checklists
-- `notes/` — supporting notes, investigation records, and non-canonical working material
-- `status/` — machine-readable files used by tooling and CI gates
-- `archive/YYYY/` — completed or superseded plan docs retained for history
+- `initiatives/` holds active multi-step work.
+- `checklists/` holds release, migration, and readiness gates.
+- `notes/` holds supporting reference material only.
+- `status/` holds machine-readable state consumed by tooling.
+- `archive/YYYY/` holds completed or superseded plan/history docs.
 
 ## Required workflow
-1. Update `ACTIVE-PLAN.md` when the current focus, recently completed work, or validation expectations change.
-2. Update `BACKLOG.md` whenever open work is added, reprioritized, blocked, or completed.
-3. Put detail in the relevant initiative or checklist, not in `ACTIVE-PLAN.md`.
-4. Archive completed or superseded plan docs instead of leaving them in the active root.
+1. Update `ACTIVE-PLAN.md` when focus, active risks, or delivery gates change.
+2. Update `BACKLOG.md` whenever open work is added, reprioritized, blocked, or closed.
+3. Put detailed live scope in an initiative or checklist, not in `ACTIVE-PLAN.md`.
+4. Archive completed or superseded planning docs instead of leaving them active.
 
-## Naming and status rules
-- Use stable names for active docs.
-- Use date-stamped names only for archive snapshots and historical records.
-- Keep canonical status in `BACKLOG.md`; do not duplicate active status tracking across multiple files.
-- Notes may describe implementation progress or coverage, but they must not be treated as the source of truth for open-task status.
+## Rules
+- `ACTIVE-PLAN.md` is a handoff file, not a changelog.
+- Keep open work in one canonical place.
+- Notes may explain context, but they are never the source of truth for status.
+- Use stable filenames for active docs and date-stamped names only in archives.

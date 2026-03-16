@@ -15,7 +15,7 @@ The repository's operator docs and examples are tool-name-centric (`go`, `git`, 
 
 ## Decision
 1. `execution_policy.exact_match_executables` is the canonical config key for broker-exec executable allowlisting.
-2. `execution_policy.allowlist_prefixes` remains a backward-compatible migration alias. If both keys are present, `exact_match_executables` wins.
+2. `execution_policy.allowlist_prefixes` was kept temporarily as a migration alias during the initial rollout; that compatibility path was removed on 2026-03-16, leaving `exact_match_executables` as the only supported key.
 3. Broker-host execution uses a broker-managed `execution_policy.command_search_paths` list to resolve bare executable names.
 4. Path-like `command[0]` values are allowed only when the supplied path itself is inside one of the configured `command_search_paths`.
 5. Broker-host child processes receive the same managed `command_search_paths` value as their `PATH` baseline.

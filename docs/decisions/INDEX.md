@@ -33,6 +33,7 @@ ADR metadata was normalized to the current status and supersession conventions o
 | 0026 | accepted | 2026-03-14 | Exact executable identity and minimal child-process environment | - |
 | 0027 | accepted | 2026-03-14 | Broker-managed executable resolution | - |
 | 0028 | accepted | 2026-03-14 | Local-only transport and removal of TCP TLS/mTLS paths | 0025 |
+| 0029 | accepted | 2026-03-16 | Workspace-derived setup and container-first quickstart | - |
 
 Clarification notes:
 - `0014` was clarified on 2026-03-14: host-Docker mediation guarantees a pre-dispatch audit gate, while post-dispatch result recording is best-effort with an explicit durability warning if it fails after side effects.

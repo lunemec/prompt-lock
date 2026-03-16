@@ -36,11 +36,16 @@ PROMPTLOCK_OPERATOR_TOKEN=... \
   go run ./cmd/promptlock watch deny --reason "scope too broad" <request_id>
 ```
 
-These examples assume the supported local hardened default: `promptlock watch` auto-selects `/tmp/promptlock-operator.sock`. Add `--broker` only when you intentionally want TCP transport.
+For the smoothest local hardened quickstart, run `go run ./cmd/promptlock setup` (or `make setup-local-docker`) from the repo first, then source the generated `instance.env` before the commands below. That keeps config/state outside the repo workspace while exporting the role-specific socket paths and operator/session bootstrap env needed by the container-first flow.
+
+These examples otherwise assume the supported local hardened default: `promptlock watch` auto-selects `/tmp/promptlock-operator.sock`. Add `--broker` only when you intentionally want TCP transport.
 
 ## Container launch shortcut
 
 For containerized agents, the CLI can mint a fresh session and launch `docker run` in one step:
+
+- Run `promptlock auth docker-run` on the host, not inside the container.
+- The wrapper uses the operator socket for bootstrap, the agent socket for pair/mint, and mounts only the agent socket into the container.
 
 ```bash
 go run ./cmd/promptlock auth docker-run \
@@ -83,11 +88,11 @@ PROMPTLOCK_DEV_MODE=1 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 - In hardened policy, `--broker-exec` requires `--intent` for intent-aware egress enforcement.
 - Broker-exec binds execute-time egress validation to the approved request intent; supplying a different execute payload intent does not widen scope.
 - In hardened policy, server-side execution rejects raw shell wrappers (`bash`/`sh`/`zsh`) and expects intent-bound direct commands.
-- Direct network clients validated through argv inspection (`curl`, `wget`, `fetch`) are denied when no inspectable destination is present.
+- Direct network clients validated through argv inspection (`curl`, `wget`, `fetch`) are denied when no inspectable destination is present or when argv includes opaque, unclassified, or destination-override inputs the broker cannot truthfully inspect and enforce.
 - Broker-side execution policy can enforce exact executable allowlisting, broker-managed executable resolution, denylist checks, output limits, and timeouts.
 - Both broker-side and local CLI exec paths build the child-process environment from a minimal baseline (`PATH`, `HOME`, temp-dir vars, and platform-required Windows keys) plus leased secrets only. Ambient shell env vars are not forwarded by default.
 - Broker-host execution uses `execution_policy.command_search_paths` as its managed `PATH` and only resolves bare executable names from those directories.
-- `execution_policy.exact_match_executables` is the canonical config key. `execution_policy.allowlist_prefixes` remains a legacy alias during migration.
+- `execution_policy.exact_match_executables` is the only supported config key for broker-exec executable allowlisting.
 - `redacted` output mode applies token-aware best-effort masking for common bearer and env-style secret shapes. It is not a strong barrier against secret exfiltration through command output.
 - When auth is enabled, wrapper uses `--session-token` (or `PROMPTLOCK_SESSION_TOKEN`) for agent endpoints.
 - `promptlock auth docker-run` can mint a short-lived session and inject it into a new `docker run` invocation with secure defaults (`--read-only`, `--cap-drop ALL`, `--security-opt no-new-privileges`, tmpfs `/tmp`, current user identity).
@@ -96,8 +101,11 @@ PROMPTLOCK_DEV_MODE=1 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
   - operator flows use `/tmp/promptlock-operator.sock`
   - agent flows use `/tmp/promptlock-agent.sock`
 - `promptlock auth docker-run` mounts only the agent socket into the container, injects `PROMPTLOCK_AGENT_UNIX_SOCKET`, and passes `PROMPTLOCK_SESSION_TOKEN` through the child environment rather than embedding bearer material in `docker run` argv.
-- Wrapper still supports explicit TCP broker URL (`--broker`) and compatibility unix socket transport (`--broker-unix-socket`) when needed.
+- Wrapper still supports explicit TCP broker URL (`--broker`) and compatibility unix socket transport (`--broker-unix-socket`) when needed, but Unix-socket selection is only valid when the chosen path is an actual Unix-socket node.
+- Legacy `PROMPTLOCK_BROKER_UNIX_SOCKET` remains available for single-socket compatibility, but it must reference an actual Unix-socket node; missing paths or non-socket filesystem nodes fail closed instead of falling through to another transport.
 - If the expected local role socket is missing, wrapper commands fail closed instead of silently downgrading to localhost TCP. Use `--broker` only when you intentionally want TCP transport.
+- `promptlock watch allow` and `promptlock watch deny` accept either `--broker` or `--broker-unix-socket`; otherwise they auto-select the operator socket in the supported dual-socket flow when that path is an actual Unix socket.
+- `promptlock auth docker-run --container-broker-socket` sets the in-container mount path whenever the selected agent transport uses an actual Unix socket, including the default dual-socket and legacy compatibility socket paths.
 - Broker-facing CLI requests use a bounded `10s` client deadline on both Unix-socket and TCP transports. Stalled peers fail with `broker request timed out after 10s`.
 - Default mode waits for external human approval (`--wait-approve`, `--poll-interval`).
 - `promptlock watch` is a host-side queue watcher with a minimal terminal UI for approving/denying pending requests.

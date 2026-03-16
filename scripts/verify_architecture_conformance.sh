@@ -24,6 +24,7 @@ check_forbidden "internal/core" "cmd/promptlockd"
 # App layer should not depend on inbound transport package.
 check_forbidden "internal/app" "cmd/promptlockd"
 check_forbidden "internal/app" "os.Environ("
+check_forbidden "cmd/promptlockd/control_plane_wiring.go" "os.Environ("
 
 check_handler_forbidden() {
   local forbidden="$1"

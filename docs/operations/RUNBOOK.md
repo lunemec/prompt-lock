@@ -92,8 +92,8 @@ make storage-fsync-release-gate MOUNT_DIRS=/var/lib/promptlock,/var/log/promptlo
 
 ## First 30 minutes checklist (hardened deployment)
 1. Validate config parse + profile:
-   - `go run ./cmd/promptlock-readiness-check --file docs/plans/status/PRODUCTION-READINESS-STATUS.json --require-p0`
-   - `--require-p0` is a legacy flag name kept for compatibility; it fails on any release-gating task in the status file: explicit P0 items plus any task marked `blocking=true`.
+   - `go run ./cmd/promptlock-readiness-check --file docs/plans/status/PRODUCTION-READINESS-STATUS.json --require-release-gating`
+   - `--require-release-gating` fails on explicit release-gating rows only: tasks with `priority:"P0"` or `blocking:true`. A `P0-*` id alone does not count, and blank-identity release-gating rows are rejected.
 2. Run baseline CI gate:
    - `make validate-final`
 3. Run hardened smoke suite:

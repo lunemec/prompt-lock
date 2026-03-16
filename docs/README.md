@@ -2,6 +2,21 @@
 
 This directory is organized by document type. Agents are expected to preserve this structure rather than adding new flat files ad hoc.
 
+## Use This Map By Goal
+- Evaluate PromptLock:
+  - `README.md` for the first successful run
+  - `docs/operations/REAL-E2E-HOST-CONTAINER.md` for the full host/operator/container lab
+  - `docs/operations/WRAPPER-EXEC.md` for CLI behavior and approval flow details
+- Operate PromptLock:
+  - `docs/operations/CONFIG.md` for config semantics
+  - `docs/operations/DOCKER.md` for deployment guidance
+  - `docs/operations/RUNBOOK.md` for operational procedures
+- Change PromptLock:
+  - `AGENTS.md` for repo rules and final output requirements
+  - `CONTRIBUTING.md` for contributor workflow
+  - `docs/architecture/ARCHITECTURE.md` and `docs/standards/ENGINEERING-STANDARDS.md` for implementation constraints
+  - `docs/plans/ACTIVE-PLAN.md` and `docs/plans/BACKLOG.md` for current execution state
+
 ## Read order
 1. `README.md`
 2. `docs/README.md`

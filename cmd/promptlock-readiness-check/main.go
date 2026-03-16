@@ -10,6 +10,7 @@ import (
 )
 
 type task struct {
+	Title    string `json:"title"`
 	ID       string `json:"id"`
 	Priority string `json:"priority"`
 	Status   string `json:"status"`
@@ -28,7 +29,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("promptlock-readiness-check", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	file := flags.String("file", "docs/plans/status/PRODUCTION-READINESS-STATUS.json", "path to readiness status json")
-	requireP0 := flags.Bool("require-p0", false, "legacy name: fail when any release-gating task (explicit P0 or blocking=true) is not done")
+	requireReleaseGating := flags.Bool("require-release-gating", false, "fail when any explicit release-gating task (priority=P0 or blocking=true) is not done")
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
@@ -47,7 +48,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	if !*requireP0 {
+	if !*requireReleaseGating {
 		fmt.Fprintln(stdout, "readiness status loaded")
 		return 0
 	}
@@ -62,7 +63,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			continue
 		}
 		if !isDoneStatus(t.Status) {
-			open = append(open, t.ID+":"+t.Status)
+			open = append(open, releaseGatingTaskIdentity(t)+":"+strings.TrimSpace(t.Status))
 		}
 	}
 
@@ -81,18 +82,32 @@ func validateReleaseGatingStatus(st statusFile) error {
 	if len(st.Tasks) == 0 {
 		return fmt.Errorf("at least one release-gating task is required")
 	}
+	foundReleaseGating := false
 	for _, t := range st.Tasks {
-		if isReleaseGatingTask(t) {
-			return nil
+		if !isReleaseGatingTask(t) {
+			continue
 		}
+		foundReleaseGating = true
+		if releaseGatingTaskIdentity(t) == "" {
+			return fmt.Errorf("release-gating task identity is required")
+		}
+	}
+	if foundReleaseGating {
+		return nil
 	}
 	return fmt.Errorf("at least one release-gating task is required")
 }
 
 func isReleaseGatingTask(t task) bool {
 	priority := strings.TrimSpace(t.Priority)
-	id := strings.TrimSpace(t.ID)
-	return strings.EqualFold(priority, "P0") || strings.HasPrefix(strings.ToUpper(id), "P0-") || t.Blocking
+	return strings.EqualFold(priority, "P0") || t.Blocking
+}
+
+func releaseGatingTaskIdentity(t task) string {
+	if id := strings.TrimSpace(t.ID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(t.Title)
 }
 
 func isDoneStatus(status string) bool {

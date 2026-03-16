@@ -6,27 +6,20 @@ Run:
 make arch-conformance
 ```
 
-This guard ensures inward-only dependencies for key layers.
+This is the fast boundary-check reference for reviewers and agents.
+It complements `docs/architecture/ARCHITECTURE.md`; it is not a second architecture spec.
 
 ## What it checks
-- `internal/core` must not import adapter or transport packages.
+- `internal/core` must not import transport or adapter packages.
 - `internal/app` must not import `cmd/promptlockd`.
-- `internal/app` must not call `os.Environ()` directly; ambient process state has to be injected from a composition-root or adapter boundary.
-- `cmd/promptlockd/*handler*.go` must not construct control-plane policy/use-case runners inline; handlers stay transport-only while wiring happens in the control-plane boundary.
-- The CLI transport selector must fail closed when local role sockets are missing instead of silently downgrading to implicit localhost TCP.
+- `internal/app` must not call `os.Environ()` directly; ambient process state must be injected from composition or adapter boundaries.
+- `cmd/promptlockd/control_plane_wiring.go` must not restore process-global env when boundary injection is missing.
+- `cmd/promptlockd/*handler*.go` must stay transport-only and must not construct control-plane runners inline.
+- CLI Unix-socket selection must fail closed when the selected path is missing or is not a real Unix socket.
 - Agent and operator route registration must stay separated.
-- Mutating approval endpoints must reject malformed JSON instead of mutating state.
-
-## Failing example (intentional anti-pattern)
-
-```go
-// BAD: core importing outbound adapter
-import _ "github.com/lunemec/promptlock/internal/adapters/audit"
-```
-
-This should fail conformance because core/domain logic must remain adapter-agnostic.
+- Mutating approval endpoints must reject malformed JSON.
 
 ## How to fix violations
-- Move adapter-specific behavior behind a port interface.
-- Keep policy/use-case logic in `internal/app` or `internal/core`.
-- Keep transport details in inbound adapter packages (`cmd/*`).
+- Move adapter-specific behavior behind a port.
+- Keep policy and use-case logic in `internal/app` or `internal/core`.
+- Keep transport details in inbound adapter packages under `cmd/`.

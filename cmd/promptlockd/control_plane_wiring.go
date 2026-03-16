@@ -1,10 +1,6 @@
 package main
 
-import (
-	"os"
-
-	"github.com/lunemec/promptlock/internal/app"
-)
+import "github.com/lunemec/promptlock/internal/app"
 
 func configureControlPlaneUseCases(s *server) {
 	if s == nil {
@@ -46,5 +42,5 @@ func boundaryAmbientEnv(explicit []string) []string {
 	if explicit != nil {
 		return append([]string(nil), explicit...)
 	}
-	return os.Environ()
+	return nil
 }

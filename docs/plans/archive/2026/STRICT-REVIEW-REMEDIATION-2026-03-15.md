@@ -1,5 +1,21 @@
 # Strict Review Remediation
 
+Status: Archived on 2026-03-16.
+
+This initiative tracked the 2026-03-15 strict review remediation pass.
+All items in the original document were closed before archival.
+
+Historical implementation detail is retained here for auditability.
+The active planning surface now lives in:
+- `docs/plans/ACTIVE-PLAN.md`
+- `docs/plans/BACKLOG.md`
+
+## Archived source
+
+The original initiative body is preserved below without status changes.
+
+# Strict Review Remediation
+
 Status: Active (2026-03-15; all known 2026-03-15 strict re-review items closed, pending archive/update sweep).
 
 Purpose: track the open implementation work created by the 2026-03-15 strict re-review so remediation stays backlog-driven, acceptance-based, and aligned with the repository security story.

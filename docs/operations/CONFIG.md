@@ -98,6 +98,7 @@ If hardened local config omits all socket fields and keeps the listener local-on
 - Validator remains fail closed during rotation: unknown `signature.key_id`, malformed keyring entries, missing keyring env vars, disabled overlap windows (`PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_OVERLAP_MAX_AGE` unset/zero), or expired overlap age all fail validation.
 - For release/readiness, use one-shot gate `make storage-fsync-release-gate MOUNT_DIRS=/path/a,/path/b FSYNC_REPORT=reports/storage-fsync-report.json` (fails closed when signature validation fails).
 - For hardened local deployments, prefer `agent_unix_socket` + `operator_unix_socket` and do not expose the operator socket to containers.
+- For a repo-local quickstart without storing supported state inside the repo, run `go run ./cmd/promptlock setup` (or `make setup-local-docker`). It generates a per-workspace host-side instance under `XDG_STATE_HOME` or `~/.local/state/promptlock/workspaces/...`, along with a sourceable `instance.env` that exports `PROMPTLOCK_CONFIG`, role-socket env vars, operator token, auth-store key, and a demo secret value for the first container-originated flow.
 - CLI now auto-selects local sockets by role when no broker transport flags/env are given:
   - `promptlock watch` and `promptlock auth bootstrap` target the operator socket.
   - `promptlock exec`, `promptlock auth pair`, and `promptlock auth mint` target the agent socket.
@@ -111,6 +112,7 @@ If hardened local config omits all socket fields and keeps the listener local-on
   - `--broker-unix-socket`
   - `PROMPTLOCK_BROKER_UNIX_SOCKET`
   - `unix_socket`
+- `PROMPTLOCK_BROKER_UNIX_SOCKET` is a legacy single-socket override. It must point to an existing Unix-socket node; missing paths or non-socket filesystem nodes fail closed instead of silently falling through to role/default sockets or TCP.
 - If auth is enabled and TCP is non-local without a unix socket, broker fails to start unless `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is set.
 - Using `PROMPTLOCK_ALLOW_INSECURE_TCP=1` emits a startup warning and audit event (`startup_insecure_tcp_override`).
 - If auth is disabled and TCP is non-local without a unix socket, broker fails to start unless `PROMPTLOCK_ALLOW_INSECURE_NOAUTH_TCP=1` is set.
@@ -138,7 +140,6 @@ Startup guardrails:
 
 ## Execution policy notes
 - `execution_policy.exact_match_executables` is the canonical broker-exec executable allowlist key. Matching is exact executable identity after basename normalization, not prefix matching. `go` allows `go` and `/usr/local/bin/go`; it does not allow `goevil`.
-- `execution_policy.allowlist_prefixes` remains a legacy migration alias. If both keys are present, `exact_match_executables` wins and `allowlist_prefixes` is ignored.
 - In `security_profile: hardened`, broker-exec additionally requires `intent`, rejects raw shell wrappers (`bash`/`sh`/`zsh`), and tightens allowlist defaults to non-shell tool entrypoints (`npm`, `node`, `go`, `python`, `pytest`, `make`, `git`).
 - In `security_profile: hardened`, explicit `execution_policy.exact_match_executables` additions are merged with the hardened defaults, but raw shell wrappers remain disallowed even if configured.
 - `execution_policy.command_search_paths` defines the broker-managed executable lookup path for host-side execution. Bare command names are resolved only from these directories.
@@ -182,7 +183,7 @@ Example hardened allowlist snippet:
 - `network_egress_policy.allow_domains` defines fallback global domains.
 - `network_egress_policy.intent_allow_domains` defines per-intent destination domains.
 - `network_egress_policy.deny_substrings` blocks dangerous target patterns (metadata endpoints, local pivots, etc.).
-- Direct network clients that rely on broker argv inspection (`curl`, `wget`, `fetch`) are denied when no inspectable destination is present in argv.
+- Direct network clients that rely on broker argv inspection (`curl`, `wget`, `fetch`) are denied when no inspectable destination is present in argv or when argv includes opaque, unclassified, or destination-override inputs the broker cannot truthfully inspect and enforce.
 - Denials are audit-logged as `network_egress_blocked`.
 
 ## Secret source settings

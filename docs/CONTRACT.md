@@ -121,7 +121,7 @@ Response:
 Notes:
 - Hardened profile requires `intent` and rejects raw shell-wrapper entrypoints such as `bash`, `sh`, and `zsh`.
 - Execute-time `intent` must exactly match the approved request/lease intent. PromptLock does not widen egress policy from a different caller-supplied execute payload.
-- Broker egress checks are defense-in-depth command validation, not runtime packet mediation. Direct network clients such as `curl`, `wget`, and `fetch` are denied when no inspectable destination is present in argv.
+- Broker egress checks are defense-in-depth command validation, not runtime packet mediation. Direct network clients such as `curl`, `wget`, and `fetch` are denied when no inspectable destination is present in argv, or when argv includes opaque, unclassified, or destination-override inputs that the broker cannot truthfully inspect and enforce.
 - Child processes receive only an explicit minimal baseline environment plus leased secrets; the ambient broker or CLI environment is not forwarded by default.
 - `output_security_mode=redacted` performs token-aware best-effort masking for common bearer and env-style secret shapes. It is not a strong output-containment or secret-exfiltration boundary. Use `none` when output should be suppressed.
 - When a request carries `env_path`, execution resolves leased secrets from that approved `.env` file instead of the broker process environment. The broker stores both the original path and a canonicalized path, and execute-time secret access fails closed if the canonical path no longer matches.

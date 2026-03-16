@@ -28,6 +28,15 @@ make security-redteam
 - Update docs when behavior or operator workflow changes.
 - Update `CHANGELOG.md` (`[Unreleased]`) for user-visible changes.
 
+## Docs and CLI UX changes
+
+If you change onboarding docs, CLI help text, or setup/watch/auth/exec command wording:
+
+- update the README and the command/help text in the same change when they describe the same flow,
+- verify the exact commands you publish still match the current binary behavior,
+- add or update command-level tests in `cmd/promptlock` for the new wording when practical,
+- call out host-vs-container execution boundaries explicitly when the command path crosses that boundary.
+
 ## Security-sensitive changes
 
 For auth, execution policy, secret handling, transport, or audit changes:

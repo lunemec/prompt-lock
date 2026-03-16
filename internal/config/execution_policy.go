@@ -4,7 +4,6 @@ import "runtime"
 
 type ExecutionPolicy struct {
 	ExactMatchExecutables []string `json:"exact_match_executables"`
-	AllowlistPrefixes     []string `json:"allowlist_prefixes,omitempty"`
 	CommandSearchPaths    []string `json:"command_search_paths"`
 	DenylistSubstrings    []string `json:"denylist_substrings"`
 	OutputSecurityMode    string   `json:"output_security_mode"`

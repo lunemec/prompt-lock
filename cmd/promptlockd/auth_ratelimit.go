@@ -17,11 +17,11 @@ type rlBucket struct {
 }
 
 type authRateLimiter struct {
-	mu       sync.Mutex
-	window   time.Duration
-	max      int
-	buckets  map[string]rlBucket
-	enabled  bool
+	mu      sync.Mutex
+	window  time.Duration
+	max     int
+	buckets map[string]rlBucket
+	enabled bool
 }
 
 func newAuthRateLimiter(cfg config.AuthConfig) *authRateLimiter {

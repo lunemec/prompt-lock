@@ -103,6 +103,8 @@ docker build -t promptlock-agent-lab .
 
 Run on the host:
 
+This is still a host-side command. It bootstraps on the operator socket, pairs and mints on the agent socket, then launches the container with only the agent socket mounted.
+
 ```bash
 go run ./cmd/promptlock auth docker-run \
   --operator-token op_real_test_token \

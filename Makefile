@@ -1,4 +1,4 @@
-.PHONY: help lint toolchain-guard vet vulncheck race test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate release-readiness-gate-core release-readiness-gate leak-guard storage-fsync-preflight storage-fsync-report storage-fsync-validate storage-fsync-release-gate ci-redteam-full arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose release-package
+.PHONY: help lint toolchain-guard vet vulncheck race test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate release-readiness-gate-core release-readiness-gate leak-guard storage-fsync-preflight storage-fsync-report storage-fsync-validate storage-fsync-release-gate ci-redteam-full arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose setup-local-docker release-package
 
 FSYNC_REPORT ?= reports/storage-fsync-report.json
 FSYNC_HMAC_KEY_ENV ?= PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY
@@ -9,7 +9,7 @@ SOPS_ENV_FILE ?=
 SHIPPED_SHELL_WORKFLOWS := $(sort $(wildcard scripts/*.sh))
 
 help:
-	@echo "Targets: lint toolchain-guard vet vulncheck race test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate release-readiness-gate-core release-readiness-gate leak-guard storage-fsync-preflight storage-fsync-report storage-fsync-validate storage-fsync-release-gate ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose release-package"
+	@echo "Targets: lint toolchain-guard vet vulncheck race test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate release-readiness-gate-core release-readiness-gate leak-guard storage-fsync-preflight storage-fsync-report storage-fsync-validate storage-fsync-release-gate ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose setup-local-docker release-package"
 
 lint:
 	bash -n $(SHIPPED_SHELL_WORKFLOWS)
@@ -57,7 +57,7 @@ mcp-conformance-report:
 	bash scripts/mcp_conformance_report.sh
 
 production-readiness-gate:
-	go run ./cmd/promptlock-readiness-check --file docs/plans/status/PRODUCTION-READINESS-STATUS.json --require-p0
+	go run ./cmd/promptlock-readiness-check --file docs/plans/status/PRODUCTION-READINESS-STATUS.json --require-release-gating
 
 release-readiness-gate-core:
 	$(MAKE) validate-final
@@ -110,8 +110,8 @@ ci-redteam-full: validate-final security-redteam-live security-redteam-live-hard
 
 arch-conformance:
 	bash scripts/verify_architecture_conformance.sh
-	go test ./cmd/promptlock -run 'TestResolveBrokerSelectionFailsClosedWhenRoleSocketMissingAndNoExplicitBroker|TestResolveBrokerSelectionExplicitBrokerURLWinsOverLocalSocketDefaults'
-	go test ./cmd/promptlockd -run 'TestRegisterAgentRoutesToExposesOnlyAgentEndpoints|TestRegisterOperatorRoutesToExposesOnlyOperatorEndpoints|TestApproveRejectsMalformedJSON|TestDenyRejectsMalformedJSON|TestCancelRejectsMalformedJSON|TestConfigureControlPlaneUseCasesInjectsAmbientEnvFromBoundary'
+	go test ./cmd/promptlock -run 'TestResolveBrokerSelectionFailsClosedWhenExplicitUnixSocketIsNotSocket|TestResolveBrokerSelectionFailsClosedWhenCompatUnixSocketMissing|TestResolveBrokerSelectionFailsClosedWhenCompatUnixSocketIsNotSocket|TestResolveBrokerSelectionFailsClosedWhenRoleSocketMissingAndNoExplicitBroker|TestResolveBrokerSelectionExplicitBrokerURLWinsOverLocalSocketDefaults'
+	go test ./cmd/promptlockd -run 'TestRegisterAgentRoutesToExposesOnlyAgentEndpoints|TestRegisterOperatorRoutesToExposesOnlyOperatorEndpoints|TestApproveRejectsMalformedJSON|TestDenyRejectsMalformedJSON|TestCancelRejectsMalformedJSON|TestConfigureControlPlaneUseCasesInjectsAmbientEnvFromBoundary|TestConfigureControlPlaneUseCasesDoesNotFallBackToProcessEnvWhenBoundaryInjectionMissing'
 	go test ./internal/app -run 'TestExecuteWithLeaseUseCaseDoesNotInheritAmbientEnvWithoutInjection|TestHostDockerExecuteUseCaseDoesNotInheritAmbientEnvWithoutInjection'
 
 docs:
@@ -149,6 +149,9 @@ e2e-compose:
 	chmod +x scripts/docker_compose.sh
 	scripts/docker_compose.sh -f docker-compose.e2e.yml up --build --abort-on-container-exit --exit-code-from e2e-runner
 	scripts/docker_compose.sh -f docker-compose.e2e.yml down -v
+
+setup-local-docker:
+	go run ./cmd/promptlock setup
 
 release-package:
 	@test -n "$(VERSION)" || (echo "Usage: make release-package VERSION=vX.Y.Z" && exit 1)

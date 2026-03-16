@@ -31,7 +31,6 @@ type Config struct {
 	Intents             IntentMap           `json:"intents"`
 
 	executionPolicyExactExecutablesConfigured bool
-	executionPolicyLegacyAllowlistConfigured  bool
 	executionPolicyOutputModeConfigured       bool
 }
 
@@ -122,9 +121,6 @@ func (c *Config) markExplicitExecutionPolicyOverrides(raw []byte) {
 	if _, ok := exec["exact_match_executables"]; ok {
 		c.executionPolicyExactExecutablesConfigured = true
 	}
-	if _, ok := exec["allowlist_prefixes"]; ok {
-		c.executionPolicyLegacyAllowlistConfigured = true
-	}
 	if _, ok := exec["output_security_mode"]; ok {
 		c.executionPolicyOutputModeConfigured = true
 	}
@@ -141,15 +137,7 @@ func rejectRemovedTransportConfig(raw []byte) error {
 	return nil
 }
 
-func (c *Config) resolveExecutionPolicyCompatibility() {
-	switch {
-	case c.executionPolicyExactExecutablesConfigured:
-		// New key wins when both are present.
-	case c.executionPolicyLegacyAllowlistConfigured:
-		c.ExecutionPolicy.ExactMatchExecutables = append([]string{}, c.ExecutionPolicy.AllowlistPrefixes...)
-	}
-	c.ExecutionPolicy.AllowlistPrefixes = nil
-}
+func (c *Config) resolveExecutionPolicyCompatibility() {}
 
 func (c *Config) normalize() {
 	c.ExecutionPolicy.ExactMatchExecutables = normalizeStringList(c.ExecutionPolicy.ExactMatchExecutables)
@@ -249,7 +237,7 @@ func (c *Config) applyProfile() {
 }
 
 func (c Config) executionPolicyExecutablesConfigured() bool {
-	return c.executionPolicyExactExecutablesConfigured || c.executionPolicyLegacyAllowlistConfigured
+	return c.executionPolicyExactExecutablesConfigured
 }
 
 func (c Config) hasAnyUnixSocketConfigured() bool {

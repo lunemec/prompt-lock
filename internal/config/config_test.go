@@ -164,32 +164,11 @@ func TestLoadExecutionPolicyExactMatchExecutables(t *testing.T) {
 	}
 }
 
-func TestLoadExecutionPolicyLegacyAllowlistPrefixesCompatibility(t *testing.T) {
+func TestLoadExecutionPolicyIgnoresRemovedAllowlistPrefixesKey(t *testing.T) {
 	d := t.TempDir()
-	p := filepath.Join(d, "cfg-legacy-executables.json")
+	p := filepath.Join(d, "cfg-removed-allowlist-prefixes.json")
 	data := `{
 		"execution_policy":{
-			"allowlist_prefixes":["echo","go"]
-		}
-	}`
-	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := Load(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, "echo") || !containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, "go") {
-		t.Fatalf("expected legacy execution-policy key to backfill exact executables, got %#v", cfg.ExecutionPolicy.ExactMatchExecutables)
-	}
-}
-
-func TestLoadExecutionPolicyExactMatchExecutablesTakePrecedenceOverLegacyKey(t *testing.T) {
-	d := t.TempDir()
-	p := filepath.Join(d, "cfg-exact-executables-precedence.json")
-	data := `{
-		"execution_policy":{
-			"exact_match_executables":["go"],
 			"allowlist_prefixes":["echo"]
 		}
 	}`
@@ -200,11 +179,13 @@ func TestLoadExecutionPolicyExactMatchExecutablesTakePrecedenceOverLegacyKey(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, "go") {
-		t.Fatalf("expected new key to populate exact executables, got %#v", cfg.ExecutionPolicy.ExactMatchExecutables)
-	}
 	if containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, "echo") {
-		t.Fatalf("expected legacy key to be ignored when exact_match_executables is present, got %#v", cfg.ExecutionPolicy.ExactMatchExecutables)
+		t.Fatalf("expected removed allowlist_prefixes key to be ignored, got %#v", cfg.ExecutionPolicy.ExactMatchExecutables)
+	}
+	for _, required := range []string{"bash", "go", "git"} {
+		if !containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, required) {
+			t.Fatalf("expected defaults to remain when removed key is ignored; missing %q in %#v", required, cfg.ExecutionPolicy.ExactMatchExecutables)
+		}
 	}
 }
 

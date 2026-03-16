@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 var forbiddenPatterns = []string{
@@ -20,8 +19,6 @@ var skippedDirs = map[string]struct{}{
 	".git":             {},
 	"dist":             {},
 	".goreleaser-dist": {},
-	".gocache":         {},
-	".gomodcache":      {},
 }
 
 type violation struct {
@@ -54,15 +51,18 @@ func scan(root string) ([]violation, error) {
 		}
 		clean := filepath.Clean(path)
 		if d.IsDir() {
+			if isSkippedRepoLocalDir(root, clean, ".gocache") ||
+				isSkippedRepoLocalDir(root, clean, ".gomodcache") ||
+				isSkippedRepoLocalDir(root, clean, ".cache/go-build") ||
+				isSkippedRepoLocalDir(root, clean, "cmd/promptlock-validate-security") {
+				return filepath.SkipDir
+			}
 			if _, skip := skippedDirs[d.Name()]; skip {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		if filepath.Ext(clean) == ".pyc" {
-			return nil
-		}
-		if strings.Contains(filepath.ToSlash(clean), "cmd/promptlock-validate-security/") {
 			return nil
 		}
 		b, err := os.ReadFile(clean)
@@ -77,4 +77,12 @@ func scan(root string) ([]violation, error) {
 		return nil
 	})
 	return out, err
+}
+
+func isSkippedRepoLocalDir(root, path, want string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return filepath.ToSlash(filepath.Clean(rel)) == want
 }

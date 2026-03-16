@@ -550,15 +550,8 @@ func TestRegisterBrokerFlagsRejectsRemovedTLSFlag(t *testing.T) {
 }
 
 func TestResolveBrokerSelectionPrefersRoleSpecificSocketDefaults(t *testing.T) {
-	socketsDir := t.TempDir()
-	operatorSocket := filepath.Join(socketsDir, "promptlock-operator.sock")
-	agentSocket := filepath.Join(socketsDir, "promptlock-agent.sock")
-	if err := os.WriteFile(operatorSocket, []byte(""), 0o600); err != nil {
-		t.Fatalf("write operator socket placeholder: %v", err)
-	}
-	if err := os.WriteFile(agentSocket, []byte(""), 0o600); err != nil {
-		t.Fatalf("write agent socket placeholder: %v", err)
-	}
+	operatorSocket := startUnixSocketHTTPServer(t, http.NotFoundHandler())
+	agentSocket := startUnixSocketHTTPServer(t, http.NotFoundHandler())
 
 	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", operatorSocket)
 	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", agentSocket)
@@ -634,17 +627,63 @@ func TestResolveBrokerSelectionUsesExplicitBrokerURLWhenDefaultSocketMissing(t *
 }
 
 func TestResolveBrokerSelectionExplicitCompatUnixSocketWins(t *testing.T) {
+	compatSocket := startUnixSocketHTTPServer(t, http.NotFoundHandler())
+
 	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", "")
 	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", "")
-	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "/tmp/compat.sock")
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", compatSocket)
 	t.Setenv("PROMPTLOCK_BROKER_URL", "https://broker.example.internal")
 
 	selection, err := resolveBrokerSelection(brokerRoleOperator, brokerSelectionInput{})
 	if err != nil {
 		t.Fatalf("resolve operator broker selection: %v", err)
 	}
-	if selection.UnixSocket != "/tmp/compat.sock" {
-		t.Fatalf("compat unix socket = %q, want /tmp/compat.sock", selection.UnixSocket)
+	if selection.UnixSocket != compatSocket {
+		t.Fatalf("compat unix socket = %q, want %q", selection.UnixSocket, compatSocket)
+	}
+}
+
+func TestResolveBrokerSelectionFailsClosedWhenExplicitUnixSocketIsNotSocket(t *testing.T) {
+	notSocket := filepath.Join(t.TempDir(), "not-a-socket")
+	if err := os.WriteFile(notSocket, []byte("plain file"), 0o600); err != nil {
+		t.Fatalf("write non-socket file: %v", err)
+	}
+	t.Setenv("PROMPTLOCK_BROKER_URL", "https://broker.example.internal")
+
+	if _, err := resolveBrokerSelection(brokerRoleAgent, brokerSelectionInput{UnixSocket: notSocket}); err == nil {
+		t.Fatalf("expected non-socket explicit unix socket path to fail closed")
+	} else if !strings.Contains(err.Error(), "not a unix socket") {
+		t.Fatalf("unexpected error for non-socket explicit unix socket: %v", err)
+	}
+}
+
+func TestResolveBrokerSelectionFailsClosedWhenCompatUnixSocketMissing(t *testing.T) {
+	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", filepath.Join(t.TempDir(), "missing-compat.sock"))
+	t.Setenv("PROMPTLOCK_BROKER_URL", "https://broker.example.internal")
+
+	if _, err := resolveBrokerSelection(brokerRoleOperator, brokerSelectionInput{}); err == nil {
+		t.Fatalf("expected missing compat unix socket to fail closed")
+	} else if !strings.Contains(err.Error(), "compat broker unix socket not found") {
+		t.Fatalf("unexpected error for missing compat unix socket: %v", err)
+	}
+}
+
+func TestResolveBrokerSelectionFailsClosedWhenCompatUnixSocketIsNotSocket(t *testing.T) {
+	notSocket := filepath.Join(t.TempDir(), "compat-not-a-socket")
+	if err := os.WriteFile(notSocket, []byte("plain file"), 0o600); err != nil {
+		t.Fatalf("write non-socket compat file: %v", err)
+	}
+	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", notSocket)
+	t.Setenv("PROMPTLOCK_BROKER_URL", "https://broker.example.internal")
+
+	if _, err := resolveBrokerSelection(brokerRoleOperator, brokerSelectionInput{}); err == nil {
+		t.Fatalf("expected non-socket compat unix socket path to fail closed")
+	} else if !strings.Contains(err.Error(), "not a unix socket") {
+		t.Fatalf("unexpected error for non-socket compat unix socket: %v", err)
 	}
 }
 
@@ -660,11 +699,7 @@ func TestResolveBrokerSelectionFailsClosedWhenRoleSocketMissingAndNoExplicitBrok
 }
 
 func TestResolveBrokerSelectionExplicitBrokerURLWinsOverLocalSocketDefaults(t *testing.T) {
-	socketsDir := t.TempDir()
-	operatorSocket := filepath.Join(socketsDir, "promptlock-operator.sock")
-	if err := os.WriteFile(operatorSocket, []byte(""), 0o600); err != nil {
-		t.Fatalf("write operator socket placeholder: %v", err)
-	}
+	operatorSocket := startUnixSocketHTTPServer(t, http.NotFoundHandler())
 
 	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", operatorSocket)
 	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", "")
@@ -718,14 +753,8 @@ func TestListPendingIgnoresMalformedAmbientBrokerURLWhenRoleSocketSelected(t *te
 }
 
 func TestAuthLoginUsesOperatorSocketForBootstrapAndAgentSocketForPairMint(t *testing.T) {
-	operatorSocket := filepath.Join(t.TempDir(), "operator.sock")
-	agentSocket := filepath.Join(t.TempDir(), "agent.sock")
-	if err := os.WriteFile(operatorSocket, []byte(""), 0o600); err != nil {
-		t.Fatalf("write operator socket placeholder: %v", err)
-	}
-	if err := os.WriteFile(agentSocket, []byte(""), 0o600); err != nil {
-		t.Fatalf("write agent socket placeholder: %v", err)
-	}
+	operatorSocket := startUnixSocketHTTPServer(t, http.NotFoundHandler())
+	agentSocket := startUnixSocketHTTPServer(t, http.NotFoundHandler())
 	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", operatorSocket)
 	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", agentSocket)
 	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "")
@@ -830,14 +859,8 @@ func TestAuthLoginIgnoresMalformedAmbientBrokerURLWhenRoleSocketsSelected(t *tes
 }
 
 func TestRunAuthLoginOmitsGrantIDFromStdout(t *testing.T) {
-	operatorSocket := filepath.Join(t.TempDir(), "operator.sock")
-	agentSocket := filepath.Join(t.TempDir(), "agent.sock")
-	if err := os.WriteFile(operatorSocket, []byte(""), 0o600); err != nil {
-		t.Fatalf("write operator socket placeholder: %v", err)
-	}
-	if err := os.WriteFile(agentSocket, []byte(""), 0o600); err != nil {
-		t.Fatalf("write agent socket placeholder: %v", err)
-	}
+	operatorSocket := startUnixSocketHTTPServer(t, http.NotFoundHandler())
+	agentSocket := startUnixSocketHTTPServer(t, http.NotFoundHandler())
 	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", operatorSocket)
 	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", agentSocket)
 	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "")
@@ -871,6 +894,126 @@ func TestRunAuthLoginOmitsGrantIDFromStdout(t *testing.T) {
 	}
 	if strings.Contains(out, "session_token") {
 		t.Fatalf("expected auth login stdout to omit session_token by default, got %q", out)
+	}
+}
+
+func TestPromptlockHelpTextPointsFirstTimeUsersToSetup(t *testing.T) {
+	got := promptlockHelpText()
+	for _, want := range []string{
+		"PromptLock CLI",
+		"Recommended first command: promptlock setup",
+		"`promptlock` is the client CLI. `promptlockd` is the host broker daemon.",
+		"Evaluator flow:",
+		"setup       Generate a hardened local quickstart",
+		"auth        Bootstrap, pair, mint, or launch a containerized agent session",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("top-level help missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestAuthHelpTextDocumentsNestedQuickstartPath(t *testing.T) {
+	got := authHelpText()
+	for _, want := range []string{
+		"PromptLock auth commands",
+		"Recommended container quickstart: promptlock auth docker-run",
+		"Use `docker-run` from the host",
+		"login       Run bootstrap + pair + mint and print safe session metadata",
+		"docker-run  Mint a session and launch docker run with the agent socket/session env wired in",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("auth help missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWatchHelpTextDocumentsOperatorActions(t *testing.T) {
+	got := watchHelpText()
+	for _, want := range []string{
+		"PromptLock watch",
+		"watch list",
+		"watch allow --ttl 5 <request_id>",
+		"Defaults to the operator unix socket",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("watch help missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestExecHelpTextClarifiesApprovalAndBrokerExec(t *testing.T) {
+	got := execHelpText()
+	for _, want := range []string{
+		"PromptLock exec",
+		"By default, this command waits for human approval.",
+		"`--broker-exec` runs the approved command on the broker host, not inside the agent container.",
+		"In the hardened path, use `--intent` with `--broker-exec`.",
+		"In hardened broker-exec mode, prefer direct commands",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("exec help missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestSetupHelpTextDescribesGeneratedArtifactsAndReuse(t *testing.T) {
+	got := setupHelpText()
+	for _, want := range []string{
+		"PromptLock setup",
+		"Recommended first command for a new workspace.",
+		"Creates a per-workspace quickstart instance outside the repo",
+		"Running setup again reuses the existing complete instance",
+		"The generated quickstart defaults to `output_security_mode=raw`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("setup help missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestAuthDockerRunHelpTextExplainsHostSideFlow(t *testing.T) {
+	got := authDockerRunHelpText()
+	for _, want := range []string{
+		"PromptLock auth docker-run",
+		"Run this on the host to mint a short-lived agent session and launch `docker run` in one step.",
+		"The operator socket stays on the host.",
+		"Example:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("auth docker-run help missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestHasHelpFlagIgnoresArgsAfterCommandSeparator(t *testing.T) {
+	if !hasHelpFlag([]string{"--help"}) {
+		t.Fatalf("expected top-level help flag to be detected")
+	}
+	if hasHelpFlag([]string{"--intent", "run_tests", "--", "--help"}) {
+		t.Fatalf("expected help detection to ignore command args after --")
+	}
+}
+
+func TestWatchAllowUsageDocumentsUnixSocketTransport(t *testing.T) {
+	if got := watchAllowUsage(); !strings.Contains(got, "--broker-unix-socket PATH") {
+		t.Fatalf("watch allow usage = %q, want unix-socket transport guidance", got)
+	}
+}
+
+func TestWatchDenyUsageDocumentsUnixSocketTransport(t *testing.T) {
+	if got := watchDenyUsage(); !strings.Contains(got, "--broker-unix-socket PATH") {
+		t.Fatalf("watch deny usage = %q, want unix-socket transport guidance", got)
+	}
+}
+
+func TestAuthDockerRunContainerBrokerSocketHelpMatchesActualUnixSocketSelection(t *testing.T) {
+	got := authDockerRunContainerBrokerSocketHelp()
+	if !strings.Contains(got, "when agent transport uses a unix socket") {
+		t.Fatalf("container broker socket help = %q, want agent unix-socket transport wording", got)
+	}
+	if strings.Contains(got, "when using --broker-unix-socket") {
+		t.Fatalf("container broker socket help = %q, still overstates explicit flag requirement", got)
 	}
 }
 

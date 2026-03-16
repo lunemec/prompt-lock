@@ -1,48 +1,77 @@
 # AGENTS.md
 
-Purpose: short map + hard rules for this repository.
+Purpose: repository map and hard rules for agents working in PromptLock.
 
-## Fast start
-1. Read `README.md`.
-2. Read `docs/README.md`.
-3. Read `docs/architecture/ARCHITECTURE.md`.
-4. Read `docs/standards/ENGINEERING-STANDARDS.md`.
-5. If implementing features or resuming work, read `docs/plans/ACTIVE-PLAN.md` and `docs/plans/BACKLOG.md`.
+## Required read order
+1. `README.md`
+2. `docs/README.md`
+3. `docs/architecture/ARCHITECTURE.md`
+4. `docs/standards/ENGINEERING-STANDARDS.md`
+5. `docs/plans/ACTIVE-PLAN.md`
+6. `docs/plans/BACKLOG.md`
+7. The specific ADR, initiative, checklist, or ops doc for the task at hand
 
-## Critical engineering rules
-- **Hexagonal architecture is mandatory** (ports/adapters, domain core isolated from infra).
-- **Maximum practical test coverage is mandatory** for security-critical flows.
-- Development style must follow **Red-Green-Blue TDD**:
-  - **Red**: write failing test first
-  - **Green**: minimal code to pass
-  - **Blue**: security-focused refactor/general cleanup while keeping tests green
-- Any potential security issue must be explicitly raised in output and plan updates.
-- Expose developer/user workflows via **Makefile commands**.
-- Prefer the repository’s primary language/toolchain (**Go**) for new tooling and automation; avoid adding secondary runtimes unless absolutely necessary and explicitly approved.
-- Config and schema names must match enforced behavior. If a legacy field name is kept for compatibility, document the mismatch where operators will see it and keep the rename/removal work open in `docs/plans/BACKLOG.md`.
-- Do not overstate security posture in code or docs. Basename-only executable matching is not path provenance, and a deployment path should not be treated as supported unless CI or release gates exercise that path (or a stronger equivalent).
-- Significant decisions and requirement changes must be captured in ADRs under `docs/decisions/` and indexed in `docs/decisions/INDEX.md`.
-- Keep changelog in Keep-a-Changelog format; new changes go to `[Unreleased]` until release.
-- `make validate-final` is the mandatory final validation gate before commit.
+## Non-negotiable engineering rules
+- Hexagonal architecture is mandatory: domain/core stays isolated from transport and adapters.
+- Security-sensitive work follows Red-Green-Blue TDD:
+  - Red: add a failing test first
+  - Green: add the minimum implementation to pass
+  - Blue: refactor and harden while keeping tests green
+- Maximum practical test coverage is mandatory for security-critical paths.
+- Any security concern, abuse path, or trust-boundary ambiguity must be called out explicitly in plan updates and task completion.
+- Expose developer and operator workflows through `Makefile` targets.
+- Keep new tooling and automation in Go unless a secondary runtime is explicitly approved.
+- Config names, schema names, and docs must match enforced runtime behavior. If a legacy name is kept for compatibility, document the mismatch where operators will see it and track cleanup in `docs/plans/BACKLOG.md`.
+- Do not overstate security posture. Basename-only executable matching is not provenance, and unsupported deployment paths must not be described as supported.
+- Significant requirement or architecture changes require an ADR in `docs/decisions/` and a matching `docs/decisions/INDEX.md` update.
+- Keep `CHANGELOG.md` in Keep-a-Changelog format and record new repo changes under `[Unreleased]`.
+- `make validate-final` is the required final gate before commit.
 
-## Documentation structure requirements
-- `docs/README.md` is the documentation map and must stay aligned with the actual tree.
-- `docs/plans/ACTIVE-PLAN.md` is the single canonical run-to-run handoff file for agents.
-- `docs/plans/BACKLOG.md` is the single canonical list of open tasks and pending work.
-- `docs/plans/initiatives/` is for active multi-step work. `docs/plans/checklists/` is for release/migration gates. `docs/plans/notes/` is for supporting notes. `docs/plans/status/` is for machine-readable state files. `docs/plans/archive/YYYY/` is for completed or superseded plan docs.
-- New active planning docs must use stable names. Date-stamped filenames are reserved for archived snapshots and historical records.
-- Do not track the same open task in multiple active files with conflicting statuses. Keep canonical status in `BACKLOG.md`; initiative docs may carry extra detail and acceptance criteria.
-- When a plan or checklist is completed or superseded, move it to `docs/plans/archive/YYYY/` and update `ACTIVE-PLAN.md` and `BACKLOG.md`.
-- When adding or modifying an ADR, update `docs/decisions/INDEX.md` in the same change.
+## Code hygiene rules
+- Extract by responsibility, not by line count alone.
+- Keep command packages focused on CLI/bootstrap concerns; do not let `cmd/*` files become mixed transport, policy, and workflow hubs.
+- Keep large policy data tables or parsing helpers separate from orchestration logic when that improves readability without changing behavior.
+- Avoid “active docs as changelog” drift: `ACTIVE-PLAN.md` is a handoff file, not the full historical record.
+- Prefer reducing duplication and ownership ambiguity over cosmetic churn.
 
-## Completion output required
+## Documentation rules
+- `docs/README.md` is the documentation map and must match the actual tree.
+- `docs/plans/ACTIVE-PLAN.md` is the canonical handoff file.
+- `docs/plans/BACKLOG.md` is the canonical list of open work.
+- `docs/plans/initiatives/` is for active multi-step efforts.
+- `docs/plans/checklists/` is for release and migration gates.
+- `docs/plans/notes/` is for supporting reference material, not canonical status.
+- `docs/plans/status/` is for machine-readable state files.
+- `docs/plans/archive/YYYY/` is for completed or superseded plan/history docs.
+- Keep open work in one canonical place. Do not duplicate live status across active files.
+- When a plan or initiative is completed, archive it and update the active planning surface in the same change.
+
+## Onboarding and UX review rubric
+- Treat README, setup output, and CLI `--help` text as one user journey. If one changes, inspect the others for drift.
+- Optimize first for first-command discoverability, copy-pasteability, and host-versus-container execution clarity.
+- Keep demo-only shortcuts clearly marked. Do not let dev/demo flows read like the supported hardened path.
+- Spell out where commands run and which socket/token they expect when that is not obvious from the command itself.
+- For agent-facing UX/doc changes, prefer short mental-model text near the command over routing the reader through multiple deep docs before first success.
+
+## Validation expectations for docs or CLI UX changes
+- Run the narrowest relevant command tests first (for example `go test ./cmd/promptlock` for CLI/help/setup changes).
+- Manually verify every README command you edit still matches the current CLI surface.
+- Run `make docs` when documentation structure or entrypoints change.
+- Run `make validate-final` before finishing the task unless the user explicitly scopes work to planning/review only or the environment prevents it.
+
+## Review expectations
+- Default to a strict code review mindset: correctness, security, behavior drift, architectural boundary violations, clutter, and test gaps.
+- For cleanliness/refactor work, preserve behavior unless an existing test or documented mismatch already proves the current behavior is wrong.
+- If the worktree is dirty, do not revert unrelated changes. Read them carefully and work around them.
+
+## Completion output
 - Summary of changes
-- Tests run + results
-- Security findings / concerns
+- Tests run and results
+- Security findings and concerns
 - Files changed
 - Follow-up actions
 
-## Knowledge map
+## Quick map
 - Docs map: `docs/README.md`
 - Architecture: `docs/architecture/`
 - Plans: `docs/plans/`

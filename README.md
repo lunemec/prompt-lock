@@ -3,7 +3,7 @@
 ## Goal
 Build **PromptLock**: a human-approved secret access broker for coding agents.
 
-Instead of mounting raw long-lived secrets into agent containers, agents request a **time-bound lease** for one or more named secrets (e.g., `github_token`, `npm_token`) for **N minutes**. A human approves/denies the request. If approved, the agent can fetch only those secrets for the lease duration.
+Instead of mounting raw long-lived secrets into agent containers, agents request a **time-bound lease** for one or more named secrets (for example `github_token` or `npm_token`) for **N minutes**. A human approves or denies the request. If approved, the agent can fetch only those secrets for the lease duration.
 
 This reduces prompt-injection blast radius while keeping autonomous workflows practical.
 
@@ -13,6 +13,15 @@ Project name: **PromptLock**
 Tagline: **Human-approved secret access for autonomous agents.**
 
 Status: **pre-1.0 OSS release candidate**. The supported OSS deployment target is local-only hardened operation with role-separated Unix sockets. PromptLock is intended for public OSS use, but it is not yet making a 1.0 stability commitment.
+
+## Who this is for
+- You run local or containerized coding agents and do not want to inject long-lived secrets into their runtime by default.
+- You want a host-side approval step and an audit trail before secrets or privileged host actions are used.
+- You are evaluating whether a hardened local-only secret broker fits your workflow.
+
+## Who this is not for yet
+- Teams looking for a polished one-command cloud service or a stable 1.0 API contract.
+- Users who want a supported remote TCP/TLS deployment story. The supported OSS path is local-only Unix sockets.
 
 ## Core contract
 - Agent requests: `secrets[] + ttl_minutes + reason + task_id + agent_id`
@@ -25,89 +34,101 @@ See `docs/CONTRACT.md`.
 
 ## Start Here
 
-If you want the fastest proof that PromptLock works, start with:
+If you want the fastest proof that PromptLock works as an evaluator, start with:
 
 ```bash
-make e2e-compose
+go run ./cmd/promptlock setup
 ```
 
-That builds the broker and runner images and exercises a real `promptlock exec --broker-exec` path in Docker.
+That generates a hardened local quickstart instance for this repo and prints the exact next commands for three terminals.
+If you are evaluating from a repo checkout and prefer Make targets, `make setup-local-docker` is the equivalent convenience alias.
 
 ## Prerequisites
 - Host has Go, Docker, and `jq`.
 - The recommended quickstart below is the hardened local flow.
   It uses role-separated Unix sockets by default and does not expose the operator API to the container.
 
+## Quick Mental Model
+- `promptlockd`: the broker running on the host.
+- Operator socket: host-only approval API used by `promptlock watch`.
+- Agent socket: narrower API mounted into the container for agent requests.
+- `intent`: named policy scope that maps approved secrets and egress rules to a task like `run_tests`.
+- `--broker-exec`: the approved command runs on the broker host, not inside the container.
+
+If you only remember one thing: the recommended flow is "host broker + host watch UI + containerized agent CLI waiting for approval".
+
 ## Recommended Quickstart: Hardened Local Docker Flow
 
 This is the simplest copy-paste path for a first-time user/operator.
 It runs the broker on the host, keeps operator access on a host-only socket, mounts only the agent socket into the container, waits for human approval, and then executes the approved command on the broker host via `--broker-exec`.
 
-### 1. Create a minimal lab config
+What this proves in one run:
+- the container can request access without seeing the operator socket,
+- the operator can approve from the host,
+- the approved command executes through the broker-host policy boundary,
+- the audit log records the decision trail.
+
+### 1. Generate a host-side quickstart instance for this repo
 
 ```bash
-cat >/tmp/promptlock-readme.json <<'JSON'
-{
-  "security_profile": "hardened",
-  "audit_path": "/tmp/promptlock-audit.jsonl",
-  "state_store_file": "/tmp/promptlock-state-store.json",
-  "auth": {
-    "enable_auth": true,
-    "operator_token": "op_real_test_token",
-    "allow_plaintext_secret_return": false,
-    "store_file": "/tmp/promptlock-auth-store.json"
-  },
-  "secret_source": {
-    "type": "env",
-    "env_prefix": "PROMPTLOCK_SECRET_",
-    "in_memory_hardened": "fail"
-  },
-  "execution_policy": {
-    "output_security_mode": "raw"
-  },
-  "intents": {
-    "run_tests": ["github_token"]
-  }
-}
-JSON
+go run ./cmd/promptlock setup
 ```
 
-This demo overrides the hardened default `output_security_mode` to `raw` only so the example can print `go version`.
-Use the hardened default `none` when you do not need command output.
-`redacted` mode is only best-effort log scrubbing; it is not a strong secret-exfiltration control.
+That runs `go run ./cmd/promptlock setup` and creates a per-workspace quickstart instance under your host state directory, outside the repo tree.
+If you prefer Make targets from a repo checkout, `make setup-local-docker` runs the same command.
+By default it writes:
+- `config.json`
+- `instance.env`
+- audit/state/auth files
+- per-workspace agent/operator Unix sockets
 
-### 2. Terminal A: start the broker
+The command prints the exact next commands for your current repo.
+The generated `instance.env` includes:
+- `PROMPTLOCK_CONFIG`
+- `PROMPTLOCK_OPERATOR_TOKEN`
+- `PROMPTLOCK_AUTH_STORE_KEY`
+- role-specific Unix-socket env vars
+- a local demo `PROMPTLOCK_SECRET_GITHUB_TOKEN` value so the first container-originated approval flow works immediately
+
+This quickstart intentionally sets `execution_policy.output_security_mode=raw` so the first broker-exec demo can print `go version`.
+After you verify the flow, switch back to the hardened default `none` for stronger containment.
+
+### 2. Terminal A: source the generated env file and start the broker
+
+Runs on the host. This starts the broker daemon that owns approval, audit, and broker-exec policy.
 
 ```bash
-export PROMPTLOCK_SECRET_GITHUB_TOKEN='demo_github_token_value'
-export PROMPTLOCK_AUTH_STORE_KEY='replace_with_long_random_value'
-PROMPTLOCK_CONFIG=/tmp/promptlock-readme.json go run ./cmd/promptlockd
+. '<instance-env-file>'
+go run ./cmd/promptlockd
 ```
 
-In hardened local mode, PromptLock defaults to:
-- agent socket: `/tmp/promptlock-agent.sock`
-- operator socket: `/tmp/promptlock-operator.sock`
+`promptlock setup` prints the real `instance.env` path for your workspace.
+The supported quickstart keeps config, audit, and durable state outside the repo so those files do not live in the agent-controlled workspace.
 
-For the supported hardened flow, `promptlock exec`, `promptlock watch`, and `promptlock auth docker-run` auto-select these Unix sockets.
-Use `--broker` or `PROMPTLOCK_BROKER_URL` only when you intentionally want the dev/demo local TCP listener instead of the hardened socket path.
+### 3. Terminal B: source the same env file and start the human watch UI
 
-### 3. Terminal B: start the human watch UI
+Runs on the host. This is the operator-side approval UI and talks to the host-only operator socket.
 
 ```bash
-PROMPTLOCK_OPERATOR_TOKEN=op_real_test_token go run ./cmd/promptlock watch
+. '<instance-env-file>'
+go run ./cmd/promptlock watch
 ```
 
 ### 4. Terminal C: build the agent image
+
+Runs on the host once. The resulting container only gets the agent socket, not the operator socket.
 
 ```bash
 docker build -t promptlock-agent-lab .
 ```
 
-### 5. Terminal C: launch the container with a minted session
+### 5. Terminal C: source the same env file and launch the agent container with a minted session
+
+Runs on the host. This command bootstraps auth across both host sockets, launches `docker run`, and then the containerized CLI waits for approval.
 
 ```bash
+. '<instance-env-file>'
 go run ./cmd/promptlock auth docker-run \
-  --operator-token op_real_test_token \
   --agent toolbelt-agent \
   --container toolbelt-container-1 \
   --image promptlock-agent-lab \
@@ -132,12 +153,23 @@ Expected output in Terminal C after approval:
 go version ...
 ```
 
+What success looks like:
+- Terminal B shows a pending request with the approved `run_tests` intent.
+- After approval, Terminal C prints `go version ...`.
+- The container never needs the operator socket.
+
+Common first confusion:
+- `promptlockd` runs on the host; `promptlock` is the client CLI.
+- `promptlock auth docker-run` is also a host-side command even though it launches the container.
+- `--broker-exec` runs the approved command on the broker host, not inside the container.
+
 If your base image already includes `promptlock` (for example a derived toolbelt/Codex image), replace `--image promptlock-agent-lab` with that image and keep the same wrapper command.
 
-### 7. Verify the audit log
+### 6. Verify the audit log
 
 ```bash
-go run ./cmd/promptlock audit-verify --file /tmp/promptlock-audit.jsonl
+. '<instance-env-file>'
+go run ./cmd/promptlock audit-verify --file "$PROMPTLOCK_SETUP_INSTANCE_DIR/audit.jsonl"
 ```
 
 Expected: `audit verify ok: ...`
@@ -170,12 +202,16 @@ PROMPTLOCK_DEV_MODE=1 \
 
 Canonical Go and Docker base-image pins live in `.toolchain.env`; update that file first when bumping versions.
 
+## If You're Contributing
+- Human contributors: start with `CONTRIBUTING.md`.
+- Agent contributors: start with `AGENTS.md`.
+- For docs or CLI UX changes, validate both the text and the actual command behavior so README examples, `--help` output, and setup summaries do not drift apart.
+
 ## More Docs
-- Full Docker/operator lab flow: `docs/operations/REAL-E2E-HOST-CONTAINER.md`
-- Config reference: `docs/operations/CONFIG.md`
-- Wrapper and approval CLI behavior: `docs/operations/WRAPPER-EXEC.md`
-- Docker deployment guidance: `docs/operations/DOCKER.md`
-- Security policy: `SECURITY.md`
+- Evaluate PromptLock: `docs/operations/REAL-E2E-HOST-CONTAINER.md`
+- CLI behavior and approval semantics: `docs/operations/WRAPPER-EXEC.md`
+- Operate PromptLock: `docs/operations/CONFIG.md`, `docs/operations/DOCKER.md`, `SECURITY.md`
+- Change PromptLock: `docs/README.md`, `docs/standards/ENGINEERING-STANDARDS.md`, `docs/plans/ACTIVE-PLAN.md`, `docs/plans/BACKLOG.md`
 
 ## Repository contents
 - `AGENTS.md` — project map and non-negotiable engineering/security rules
