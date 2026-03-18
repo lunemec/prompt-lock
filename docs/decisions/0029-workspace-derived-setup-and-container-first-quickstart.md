@@ -4,7 +4,7 @@
 - Date: 2026-03-16
 
 ## Context
-PromptLock's supported OSS story is a local-only hardened deployment where the broker runs on the host, only the agent socket is mounted into the untrusted container, and the first meaningful proof should come from a container-originated `auth docker-run` flow. The repo previously documented that shape, but the actual quickstart still required users to hand-write a config under `/tmp`, manually export multiple env vars, and translate that setup into three separate terminals.
+PromptLock's supported OSS story is a local-only hardened deployment where the broker runs on the host, the untrusted container receives only agent-side PromptLock transport, and the first meaningful proof should come from a container-originated `auth docker-run` flow. On Linux that container leg normally uses the mounted agent socket; on non-Linux desktop Docker runtimes it may use the daemon-owned agent bridge instead. The repo previously documented that shape poorly, but the actual quickstart still required users to hand-write a config under `/tmp`, manually export multiple env vars, and translate that setup into three separate terminals.
 
 That was workable, but it created avoidable friction and invited unsafe shortcuts such as storing supported config or state under the repo workspace simply because that path was convenient.
 

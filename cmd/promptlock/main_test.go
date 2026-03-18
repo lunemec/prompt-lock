@@ -922,7 +922,7 @@ func TestAuthHelpTextDocumentsNestedQuickstartPath(t *testing.T) {
 		"Recommended container quickstart: promptlock auth docker-run",
 		"Use `docker-run` from the host",
 		"login       Run bootstrap + pair + mint and print safe session metadata",
-		"docker-run  Mint a session and launch docker run with the agent socket/session env wired in",
+		"docker-run  Mint a session and launch docker run with agent-side PromptLock transport/session env wired in",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("auth help missing %q:\n%s", want, got)
@@ -967,7 +967,9 @@ func TestDaemonHelpTextDocumentsLifecycleCommands(t *testing.T) {
 		"PromptLock daemon",
 		"promptlock daemon <start|stop|status>",
 		"promptlock daemon start",
+		"promptlock daemon status --json",
 		"manages a local `promptlockd` process",
+		"reports bridge reachability",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("daemon help missing %q:\n%s", want, got)
@@ -981,6 +983,7 @@ func TestSetupHelpTextDescribesGeneratedArtifactsAndReuse(t *testing.T) {
 		"PromptLock setup",
 		"Recommended first command for a new workspace.",
 		"Creates a per-workspace quickstart instance outside the repo",
+		"short runtime socket dir",
 		"Running setup again reuses the existing complete instance",
 		"The generated quickstart defaults to `output_security_mode=raw`",
 	} {

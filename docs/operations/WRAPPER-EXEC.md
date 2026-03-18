@@ -45,7 +45,10 @@ These examples otherwise assume the supported local hardened default: `promptloc
 For containerized agents, the CLI can mint a fresh session and launch `docker run` in one step:
 
 - Run `promptlock auth docker-run` on the host, not inside the container.
-- The wrapper uses the operator socket for bootstrap, the agent socket for pair/mint, and mounts only the agent socket into the container.
+- The wrapper uses the operator socket for bootstrap and the agent socket for pair/mint on the host.
+- It gives the container only agent-side PromptLock transport.
+- On Linux, the wrapper mounts the agent socket into the container.
+- On non-Linux desktop Docker runtimes, the wrapper now prefers the daemon-owned agent bridge advertised by the broker capabilities; if the daemon did not advertise one, it falls back to a short-lived host-local bridge because direct host Unix-socket bind mounts are not reliable there.
 
 ```bash
 go run ./cmd/promptlock auth docker-run \
@@ -100,7 +103,8 @@ PROMPTLOCK_DEV_MODE=1 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 - In local hardened mode, wrapper commands default to role-separated sockets with no broker flags:
   - operator flows use `/tmp/promptlock-operator.sock`
   - agent flows use `/tmp/promptlock-agent.sock`
-- `promptlock auth docker-run` mounts only the agent socket into the container, injects `PROMPTLOCK_AGENT_UNIX_SOCKET`, and passes `PROMPTLOCK_SESSION_TOKEN` through the child environment rather than embedding bearer material in `docker run` argv.
+- `promptlock auth docker-run` injects only agent-side PromptLock transport into the container and passes `PROMPTLOCK_SESSION_TOKEN` through the child environment rather than embedding bearer material in `docker run` argv.
+- Linux containers receive `PROMPTLOCK_AGENT_UNIX_SOCKET` for the mounted agent socket; non-Linux desktop Docker runtimes receive `PROMPTLOCK_BROKER_URL` for the daemon-owned agent-only bridge when available, otherwise for the fallback short-lived bridge.
 - Wrapper still supports explicit TCP broker URL (`--broker`) and compatibility unix socket transport (`--broker-unix-socket`) when needed, but Unix-socket selection is only valid when the chosen path is an actual Unix-socket node.
 - Legacy `PROMPTLOCK_BROKER_UNIX_SOCKET` remains available for single-socket compatibility, but it must reference an actual Unix-socket node; missing paths or non-socket filesystem nodes fail closed instead of falling through to another transport.
 - If the expected local role socket is missing, wrapper commands fail closed instead of silently downgrading to localhost TCP. Use `--broker` only when you intentionally want TCP transport.

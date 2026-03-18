@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BROKER_URL="${BROKER_URL:-http://127.0.0.1:8765}"
-BROKER_UNIX_SOCKET="${BROKER_UNIX_SOCKET:-}"
-SESSION_TOKEN="${SESSION_TOKEN:-}"
+BROKER_URL="${BROKER_URL:-${PROMPTLOCK_BROKER_URL:-http://127.0.0.1:8765}}"
+BROKER_UNIX_SOCKET="${BROKER_UNIX_SOCKET:-${PROMPTLOCK_AGENT_UNIX_SOCKET:-}}"
+SESSION_TOKEN="${SESSION_TOKEN:-${PROMPTLOCK_SESSION_TOKEN:-}}"
 
 usage() {
   cat <<'USAGE'
@@ -12,9 +12,9 @@ Usage:
   secretctl.sh access --lease TOKEN --secret NAME
 
 Env:
-  BROKER_URL (default: http://127.0.0.1:8765 when BROKER_UNIX_SOCKET is unset)
-  BROKER_UNIX_SOCKET (optional; preferred for local hardened dual-socket deployments)
-  SESSION_TOKEN (required when broker auth is enabled)
+  BROKER_URL (or PROMPTLOCK_BROKER_URL; default: http://127.0.0.1:8765 when no socket is set)
+  BROKER_UNIX_SOCKET (or PROMPTLOCK_AGENT_UNIX_SOCKET; preferred for local hardened dual-socket deployments)
+  SESSION_TOKEN (or PROMPTLOCK_SESSION_TOKEN; required when broker auth is enabled)
 USAGE
 }
 

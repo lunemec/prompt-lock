@@ -1,13 +1,13 @@
 # ACTIVE PLAN
 
-Updated: 2026-03-16
+Updated: 2026-03-18
 
 This is the canonical run-to-run handoff file for agents.
 Read it with `docs/plans/BACKLOG.md` before implementation work.
 
 ## Current focus
 - Keep `make validate-final`, `make ci-redteam-full`, and `make real-e2e-smoke` passing.
-- Keep the supported hardened dual-socket path stable in release, readiness, and red-team automation.
+- Keep the supported hardened dual-socket path stable in release, readiness, red-team automation, and the real host-plus-container wrapper flow across desktop Docker runtimes.
 - Keep plan state centralized in `ACTIVE-PLAN.md`, `BACKLOG.md`, and active initiative/checklist docs only.
 
 ## Next focus

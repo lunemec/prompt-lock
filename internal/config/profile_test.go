@@ -12,6 +12,10 @@ func TestNormalizeOutputSecurityMode(t *testing.T) {
 }
 
 func TestApplyHardenedProfile(t *testing.T) {
+	origGOOS := configRuntimeGOOS
+	configRuntimeGOOS = "darwin"
+	t.Cleanup(func() { configRuntimeGOOS = origGOOS })
+
 	cfg := Default()
 	cfg.SecurityProfile = "hardened"
 	cfg.ExecutionPolicy.MaxTimeoutSec = 600
@@ -62,6 +66,9 @@ func TestApplyHardenedProfile(t *testing.T) {
 	if cfg.UnixSocket != "" {
 		t.Fatalf("expected legacy unix socket to remain empty in dual-socket hardened default, got %q", cfg.UnixSocket)
 	}
+	if cfg.AgentBridgeAddress != DefaultAgentBridgeAddress {
+		t.Fatalf("expected hardened profile to set default agent bridge address, got %q", cfg.AgentBridgeAddress)
+	}
 }
 
 func TestApplyHardenedProfileWithNonLocalTCPDoesNotForceUnixSocket(t *testing.T) {
@@ -102,6 +109,21 @@ func TestApplyHardenedProfilePreservesExplicitLegacyUnixSocket(t *testing.T) {
 	}
 	if cfg.AgentUnixSocket != "" || cfg.OperatorUnixSocket != "" {
 		t.Fatalf("expected dual sockets to remain empty in legacy single-socket mode, got agent=%q operator=%q", cfg.AgentUnixSocket, cfg.OperatorUnixSocket)
+	}
+}
+
+func TestApplyHardenedProfileLeavesAgentBridgeDisabledOnLinuxByDefault(t *testing.T) {
+	origGOOS := configRuntimeGOOS
+	configRuntimeGOOS = "linux"
+	t.Cleanup(func() { configRuntimeGOOS = origGOOS })
+
+	cfg := Default()
+	cfg.SecurityProfile = "hardened"
+
+	cfg.applyProfile()
+
+	if cfg.AgentBridgeAddress != "" {
+		t.Fatalf("expected linux hardened default to leave agent bridge disabled, got %q", cfg.AgentBridgeAddress)
 	}
 }
 

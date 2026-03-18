@@ -28,12 +28,12 @@ PromptLock originally exposed one local Unix socket when running in hardened loc
 
 ## Consequences
 - Local hardened usage is simpler: `promptlock watch`, `promptlock exec`, and `promptlock auth docker-run` no longer need repeated broker transport flags.
-- The untrusted container path can mount only the agent socket; operator workflows stay on the host-only operator socket.
+- The untrusted container path receives only agent-side transport; operator workflows stay on the host-only operator socket. On Linux that is the agent socket directly, while non-Linux desktop Docker runtimes may require a daemon-owned loopback bridge for the container leg.
 - Legacy single-socket configurations continue to work, but they are no longer the recommended local hardened shape.
-- PromptLock's supported transport surface is now local-only Unix sockets; non-local transport is out of scope.
+- PromptLock's supported transport surface is now host-local and agent-only for the container leg: Unix sockets remain the hardened default on the host, while non-Linux desktop Docker runtimes may use a daemon-owned loopback bridge for agent traffic. Non-local transport remains out of scope.
 
 ## Security implications
-- Transport separation now narrows the local attack surface: an agent container with only the agent socket cannot even address operator-only endpoints.
+- Transport separation now narrows the local attack surface: an agent container with only agent-side transport cannot even address operator-only endpoints.
 - Operator token auth remains necessary. Socket separation reduces exposure but does not replace the human/operator authorization boundary.
 - The local hardened default is stricter than the previous shared-socket model, but it does not by itself fix higher-layer authorization bugs; request and lease ownership must still be enforced correctly.
 

@@ -108,6 +108,14 @@ func validateSocketConfig(cfg config.Config) error {
 	if agentPath != "" && operatorPath != "" && agentPath == operatorPath {
 		return fmt.Errorf("agent_unix_socket and operator_unix_socket must be different paths")
 	}
+	if bridgeAddr := strings.TrimSpace(cfg.AgentBridgeAddress); bridgeAddr != "" {
+		if agentPath == "" || operatorPath == "" {
+			return fmt.Errorf("agent_bridge_address requires dual-socket transport (agent_unix_socket + operator_unix_socket)")
+		}
+		if !isLocalAddress(bridgeAddr) {
+			return fmt.Errorf("agent_bridge_address must be loopback-only, got %q", cfg.AgentBridgeAddress)
+		}
+	}
 	return nil
 }
 

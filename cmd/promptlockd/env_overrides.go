@@ -29,6 +29,9 @@ func applyEnvOverrides(cfg *config.Config) error {
 	if v := os.Getenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET"); v != "" {
 		cfg.OperatorUnixSocket = v
 	}
+	if v := os.Getenv("PROMPTLOCK_AGENT_BRIDGE_ADDRESS"); v != "" {
+		cfg.AgentBridgeAddress = v
+	}
 	if v := os.Getenv("PROMPTLOCK_STATE_STORE_FILE"); v != "" {
 		cfg.StateStoreFile = v
 	}

@@ -34,6 +34,7 @@ type server struct {
 	hostDockerUseCase    app.HostDockerExecuteUseCase
 	ambientProcessEnv    []string
 	unixSocketConfigured bool
+	agentBridgeAddress   string
 	insecureDevMode      bool
 	authLifecycleMu      sync.Mutex
 	durabilityMu         sync.RWMutex

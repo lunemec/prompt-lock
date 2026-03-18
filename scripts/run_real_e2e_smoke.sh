@@ -36,10 +36,10 @@ find_pending_request_id() {
   return 1
 }
 
-for dep in go jq; do
+for dep in go jq docker; do
   if ! command -v "$dep" >/dev/null 2>&1; then
     jq -n --arg dep "$dep" \
-      '{ok:false,error:("missing required dependency: "+$dep),allow_path_ok:false,deny_path_ok:false,deny_audit_ok:false}' > "$REPORT"
+      '{ok:false,error:("missing required dependency: "+$dep),allow_path_ok:false,deny_path_ok:false,deny_audit_ok:false,container_path_ok:false}' > "$REPORT"
     cat "$REPORT"
     exit 1
   fi
@@ -169,11 +169,52 @@ if [[ -n "${REQ_ID2:-}" ]] && [[ -f "$AUDIT" ]]; then
   fi
 fi
 
+IMAGE="promptlock-agent-lab"
+docker build -t "$IMAGE" . >/dev/null
+SKILL_IMAGE_OK=false
+if docker run --rm --entrypoint /bin/sh "$IMAGE" -lc 'test -x /usr/local/bin/secretctl.sh && test -f /opt/promptlock/skills/secret-request/SKILL.md'; then
+  SKILL_IMAGE_OK=true
+fi
+
+(go run ./cmd/promptlock auth docker-run \
+  --operator-token "$OP_TOKEN" \
+  --agent "$AGENT_ID" \
+  --container "${CONTAINER_ID}-container-e2e" \
+  --image "$IMAGE" \
+  --entrypoint /usr/local/bin/promptlock \
+  -- \
+  exec \
+  --agent "$AGENT_ID" \
+  --task "smoke-container" \
+  --intent run_tests \
+  --reason "smoke container" \
+  --ttl 5 \
+  --wait-approve 20s \
+  --poll-interval 1s \
+  --broker-exec \
+  -- go version >"$TMPDIR/container.out" 2>"$TMPDIR/container.err") &
+CONTAINER_PID=$!
+CONTAINER_DECISION_OK=true
+REQ_ID3="$(find_pending_request_id "smoke-container" 40 || true)"
+if [[ -n "$REQ_ID3" ]]; then
+  if ! go run ./cmd/promptlock watch allow --operator-token "$OP_TOKEN" "$REQ_ID3" >/dev/null; then
+    CONTAINER_DECISION_OK=false
+  fi
+else
+  CONTAINER_DECISION_OK=false
+fi
+CONTAINER_EXIT=0
+wait "$CONTAINER_PID" || CONTAINER_EXIT=$?
+CONTAINER_OK=false
+if [[ "$CONTAINER_EXIT" -eq 0 ]] && [[ "$CONTAINER_DECISION_OK" == "true" ]]; then CONTAINER_OK=true; fi
+
 jq -n \
   --argjson allow "$ALLOW_OK" \
   --argjson deny "$DENY_OK" \
   --argjson deny_audit "$DENY_AUDIT_OK" \
-  '{ok: ($allow and $deny and $deny_audit), allow_path_ok: $allow, deny_path_ok: $deny, deny_audit_ok: $deny_audit}' > "$REPORT"
+  --argjson container "$CONTAINER_OK" \
+  --argjson skill_image "$SKILL_IMAGE_OK" \
+  '{ok: ($allow and $deny and $deny_audit and $container and $skill_image), allow_path_ok: $allow, deny_path_ok: $deny, deny_audit_ok: $deny_audit, container_path_ok: $container, skill_image_ok: $skill_image}' > "$REPORT"
 cat "$REPORT"
 
 if [[ "$(jq -r '.ok' "$REPORT")" != "true" ]]; then

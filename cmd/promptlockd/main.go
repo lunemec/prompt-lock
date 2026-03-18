@@ -216,7 +216,7 @@ func run() error {
 		}
 	}
 	policyEngine := app.NewDefaultControlPlanePolicy(cfg.ExecutionPolicy, cfg.HostOpsPolicy, cfg.NetworkEgressPolicy)
-	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, securityProfile: strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)), authStore: authStore, authStorePersister: authStore, authStoreFile: cfg.Auth.StoreFile, authStoreKey: authStoreKey, stateStoreFile: stateStoreFile, stateStorePersister: statePersister, authLimiter: newAuthRateLimiter(cfg.Auth), policyEngine: policyEngine, ambientProcessEnv: os.Environ(), unixSocketConfigured: cfg.UsesUnixSocketTransport(), insecureDevMode: insecureDevMode, now: func() time.Time { return time.Now().UTC() }}
+	s := &server{svc: svc, intents: cfg.Intents, authEnabled: cfg.Auth.EnableAuth, authCfg: cfg.Auth, execPolicy: cfg.ExecutionPolicy, hostOpsPolicy: cfg.HostOpsPolicy, networkEgressPolicy: cfg.NetworkEgressPolicy, securityProfile: strings.ToLower(strings.TrimSpace(cfg.SecurityProfile)), authStore: authStore, authStorePersister: authStore, authStoreFile: cfg.Auth.StoreFile, authStoreKey: authStoreKey, stateStoreFile: stateStoreFile, stateStorePersister: statePersister, authLimiter: newAuthRateLimiter(cfg.Auth), policyEngine: policyEngine, ambientProcessEnv: os.Environ(), unixSocketConfigured: cfg.UsesUnixSocketTransport(), agentBridgeAddress: strings.TrimSpace(cfg.AgentBridgeAddress), insecureDevMode: insecureDevMode, now: func() time.Time { return time.Now().UTC() }}
 	s.svc.MutationLock = &sync.Mutex{}
 	s.ensureRequestLeaseStateCommitter()
 	s.svc.AuditFailureHandler = func(err error) error {

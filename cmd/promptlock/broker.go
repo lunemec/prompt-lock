@@ -18,8 +18,9 @@ import (
 )
 
 type capabilities struct {
-	AuthEnabled                bool `json:"auth_enabled"`
-	AllowPlaintextSecretReturn bool `json:"allow_plaintext_secret_return"`
+	AuthEnabled                bool   `json:"auth_enabled"`
+	AllowPlaintextSecretReturn bool   `json:"allow_plaintext_secret_return"`
+	AgentBridgeAddress         string `json:"agent_bridge_address"`
 }
 
 type brokerFlags struct {

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -28,20 +29,30 @@ func serveConfiguredListeners(ctx context.Context, cfg config.Config, s *server)
 		s.registerAgentRoutesTo(agentMux)
 		operatorMux := http.NewServeMux()
 		s.registerOperatorRoutesTo(operatorMux)
-		return serveUnixSockets(ctx, []unixSocketTarget{
+		targets, err := newUnixSocketTargets([]unixSocketTarget{
 			{Path: cfg.AgentUnixSocket, Mode: 0o660, Handler: agentMux, Label: "agent unix socket"},
 			{Path: cfg.OperatorUnixSocket, Mode: 0o600, Handler: operatorMux, Label: "operator unix socket"},
 		})
-	default:
-		mux := http.NewServeMux()
-		s.registerLegacyRoutesTo(mux)
-		ln, err := net.Listen("tcp", cfg.Address)
 		if err != nil {
 			return err
 		}
-		srv := &http.Server{Handler: mux}
-		log.Printf("promptlock listening on %s", cfg.Address)
-		return serveHTTPListener(ctx, srv, ln)
+		if strings.TrimSpace(cfg.AgentBridgeAddress) != "" {
+			bridgeTarget, err := newTCPListenerTarget(cfg.AgentBridgeAddress, agentMux, "agent bridge")
+			if err != nil {
+				return err
+			}
+			targets = append(targets, bridgeTarget)
+			s.agentBridgeAddress = bridgeTarget.Listener.Addr().String()
+		}
+		return serveListenerTargets(ctx, targets)
+	default:
+		mux := http.NewServeMux()
+		s.registerLegacyRoutesTo(mux)
+		target, err := newTCPListenerTarget(cfg.Address, mux, "tcp listener")
+		if err != nil {
+			return err
+		}
+		return serveListenerTargets(ctx, []listenerTarget{target})
 	}
 }
 
@@ -52,11 +63,89 @@ type unixSocketTarget struct {
 	Label   string
 }
 
-func serveUnixSocket(ctx context.Context, path string, mode os.FileMode, handler http.Handler, label string) error {
-	return serveUnixSockets(ctx, []unixSocketTarget{{Path: path, Mode: mode, Handler: handler, Label: label}})
+type listenerTarget struct {
+	Listener net.Listener
+	Handler  http.Handler
+	Label    string
+	Cleanup  func()
 }
 
-func serveUnixSockets(ctx context.Context, targets []unixSocketTarget) error {
+func serveUnixSocket(ctx context.Context, path string, mode os.FileMode, handler http.Handler, label string) error {
+	targets, err := newUnixSocketTargets([]unixSocketTarget{{Path: path, Mode: mode, Handler: handler, Label: label}})
+	if err != nil {
+		return err
+	}
+	return serveListenerTargets(ctx, targets)
+}
+
+func newUnixSocketTargets(targets []unixSocketTarget) ([]listenerTarget, error) {
+	out := make([]listenerTarget, 0, len(targets))
+	for _, target := range targets {
+		target := target
+		if err := ensureUnixSocketParentDir(target.Path); err != nil {
+			return nil, err
+		}
+		_ = os.Remove(target.Path)
+		ln, err := net.Listen("unix", target.Path)
+		if err != nil {
+			return nil, err
+		}
+		if err := os.Chmod(target.Path, target.Mode); err != nil {
+			_ = ln.Close()
+			_ = os.Remove(target.Path)
+			return nil, err
+		}
+		log.Printf("promptlock listening on %s %s", target.Label, target.Path)
+		out = append(out, listenerTarget{
+			Listener: ln,
+			Handler:  target.Handler,
+			Label:    target.Path,
+			Cleanup: func() {
+				_ = ln.Close()
+				_ = os.Remove(target.Path)
+			},
+		})
+	}
+	return out, nil
+}
+
+func ensureUnixSocketParentDir(path string) error {
+	parent := filepath.Dir(strings.TrimSpace(path))
+	if parent == "" || parent == "." {
+		return nil
+	}
+	return os.MkdirAll(parent, 0o700)
+}
+
+func newTCPListenerTarget(address string, handler http.Handler, label string) (listenerTarget, error) {
+	ln, err := net.Listen("tcp", address)
+	if err != nil {
+		return listenerTarget{}, err
+	}
+	actual := ln.Addr().String()
+	log.Printf("promptlock listening on %s %s", label, actual)
+	return listenerTarget{
+		Listener: ln,
+		Handler:  handler,
+		Label:    actual,
+		Cleanup: func() {
+			_ = ln.Close()
+		},
+	}, nil
+}
+
+func serveHTTPListener(ctx context.Context, srv *http.Server, ln net.Listener) error {
+	return serveListenerTargets(ctx, []listenerTarget{{
+		Listener: ln,
+		Handler:  srv.Handler,
+		Label:    ln.Addr().String(),
+		Cleanup: func() {
+			_ = ln.Close()
+		},
+	}})
+}
+
+func serveListenerTargets(ctx context.Context, targets []listenerTarget) error {
 	type cleanupFunc func()
 	cleanups := make([]cleanupFunc, 0, len(targets))
 	defer func() {
@@ -68,26 +157,16 @@ func serveUnixSockets(ctx context.Context, targets []unixSocketTarget) error {
 	errCh := make(chan error, len(targets))
 	for _, target := range targets {
 		target := target
-		_ = os.Remove(target.Path)
-		ln, err := net.Listen("unix", target.Path)
-		if err != nil {
-			return err
+		cleanup := target.Cleanup
+		if cleanup == nil {
+			cleanup = func() {}
 		}
-		if err := os.Chmod(target.Path, target.Mode); err != nil {
-			_ = ln.Close()
-			_ = os.Remove(target.Path)
-			return err
-		}
-		cleanups = append(cleanups, func() {
-			_ = ln.Close()
-			_ = os.Remove(target.Path)
-		})
-		log.Printf("promptlock listening on %s %s", target.Label, target.Path)
+		cleanups = append(cleanups, cleanup)
 		srv := &http.Server{Handler: target.Handler}
 		servers = append(servers, srv)
 		go func(srv *http.Server) {
-			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
-				errCh <- fmt.Errorf("listener %s failed: %w", target.Path, err)
+			if err := srv.Serve(target.Listener); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+				errCh <- fmt.Errorf("listener %s failed: %w", target.Label, err)
 			}
 		}(srv)
 	}
@@ -104,31 +183,5 @@ func serveUnixSockets(ctx context.Context, targets []unixSocketTarget) error {
 			}
 		}
 		return shutdownErr
-	}
-}
-
-func serveHTTPListener(ctx context.Context, srv *http.Server, ln net.Listener) error {
-	errCh := make(chan error, 1)
-	go func() {
-		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
-			errCh <- err
-			return
-		}
-		errCh <- nil
-	}()
-
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, context.Canceled) {
-			return err
-		}
-		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
-			return err
-		}
-		return nil
 	}
 }

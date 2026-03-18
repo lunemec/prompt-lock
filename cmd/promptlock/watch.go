@@ -111,10 +111,10 @@ func runWatch(args []string) {
 		fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 		fs.Bool("once", false, "process one pass and exit")
 		fs.Bool("external", false, "connect to an already-running daemon only (disable auto-start)")
-		fs.String("pid-file", getenv("PROMPTLOCK_DAEMON_PID_FILE", defaultDaemonPIDFile), "daemon pid file path (auto-start mode)")
+		fs.String("pid-file", getenv("PROMPTLOCK_DAEMON_PID_FILE", ""), "daemon pid file path (auto-start mode; defaults to config-scoped path when --config/PROMPTLOCK_CONFIG is set)")
 		fs.String("binary", getenv("PROMPTLOCK_DAEMON_BINARY", "promptlockd"), "promptlockd binary path/name for auto-start mode")
 		fs.String("config", getenv("PROMPTLOCK_CONFIG", ""), "optional config path for daemon auto-start")
-		fs.String("log-file", getenv("PROMPTLOCK_DAEMON_LOG_FILE", ""), "optional daemon log file for auto-start mode")
+		fs.String("log-file", getenv("PROMPTLOCK_DAEMON_LOG_FILE", ""), "optional daemon log file for auto-start mode (defaults to config-scoped path when --config/PROMPTLOCK_CONFIG is set)")
 		_ = conn
 		printFlagHelp(os.Stdout, watchHelpText(), fs)
 		return
@@ -127,13 +127,16 @@ func runWatch(args []string) {
 	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	once := fs.Bool("once", false, "process one pass and exit")
 	external := fs.Bool("external", false, "connect to an already-running daemon only (disable auto-start)")
-	pidFile := fs.String("pid-file", getenv("PROMPTLOCK_DAEMON_PID_FILE", defaultDaemonPIDFile), "daemon pid file path (auto-start mode)")
+	pidFile := fs.String("pid-file", getenv("PROMPTLOCK_DAEMON_PID_FILE", ""), "daemon pid file path (auto-start mode; defaults to config-scoped path when --config/PROMPTLOCK_CONFIG is set)")
 	daemonBinary := fs.String("binary", getenv("PROMPTLOCK_DAEMON_BINARY", "promptlockd"), "promptlockd binary path/name for auto-start mode")
 	daemonConfig := fs.String("config", getenv("PROMPTLOCK_CONFIG", ""), "optional config path for daemon auto-start")
-	daemonLogFile := fs.String("log-file", getenv("PROMPTLOCK_DAEMON_LOG_FILE", ""), "optional daemon log file for auto-start mode")
+	daemonLogFile := fs.String("log-file", getenv("PROMPTLOCK_DAEMON_LOG_FILE", ""), "optional daemon log file for auto-start mode (defaults to config-scoped path when --config/PROMPTLOCK_CONFIG is set)")
 	fs.Parse(args)
 	if shouldWatchAutostartDaemon(*external, conn) {
-		if err := daemonStart(daemonFlags{PIDFile: strings.TrimSpace(*pidFile), Binary: strings.TrimSpace(*daemonBinary), Config: strings.TrimSpace(*daemonConfig), LogFile: strings.TrimSpace(*daemonLogFile)}); err != nil {
+		if err := daemonStart(newDaemonFlags(*pidFile, *daemonBinary, *daemonConfig, *daemonLogFile, false)); err != nil {
+			fatal(fmt.Errorf("watch auto-start failed: %w", err))
+		}
+		if err := waitForWatchBrokerReady(conn, *operatorToken, defaultWatchBrokerReadyTimeout); err != nil {
 			fatal(fmt.Errorf("watch auto-start failed: %w", err))
 		}
 	}

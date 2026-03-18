@@ -7,9 +7,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+
+	"github.com/lunemec/promptlock/internal/config"
 )
 
 const (
@@ -21,6 +25,7 @@ const (
 )
 
 var setupGetwd = os.Getwd
+var setupRuntimeGOOS = runtime.GOOS
 var setupRandomBytes = func(n int) ([]byte, error) {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -43,6 +48,7 @@ type workspaceSetupLayout struct {
 	WorkspaceSlug      string
 	WorkspaceID        string
 	InstanceDir        string
+	SocketDir          string
 	ConfigPath         string
 	EnvPath            string
 	AuditPath          string
@@ -50,12 +56,14 @@ type workspaceSetupLayout struct {
 	AuthStorePath      string
 	AgentSocketPath    string
 	OperatorSocketPath string
+	AgentBridgeAddress string
 }
 
 type workspaceSetupResult struct {
 	Created            bool
 	WorkspaceRoot      string
 	InstanceDir        string
+	SocketDir          string
 	ConfigPath         string
 	EnvPath            string
 	AuditPath          string
@@ -63,6 +71,8 @@ type workspaceSetupResult struct {
 	AuthStorePath      string
 	AgentSocketPath    string
 	OperatorSocketPath string
+	AgentBridgeAddress string
+	DockerBridgeURL    string
 	IntentName         string
 	SecretName         string
 	OutputSecurityMode string
@@ -124,6 +134,12 @@ func ensureWorkspaceSetup(cwd string, opts workspaceSetupOptions) (workspaceSetu
 	if configExists || envExists || otherStateExists {
 		switch {
 		case configExists && envExists:
+			if err := ensureWorkspaceSocketDir(layout.SocketDir); err != nil {
+				return workspaceSetupResult{}, err
+			}
+			if _, err := refreshExistingWorkspaceSetupPaths(layout); err != nil {
+				return workspaceSetupResult{}, err
+			}
 			return newWorkspaceSetupResult(layout, opts, false), nil
 		default:
 			return workspaceSetupResult{}, fmt.Errorf("incomplete existing workspace setup under %s; remove it manually before re-running promptlock setup", layout.InstanceDir)
@@ -135,6 +151,9 @@ func ensureWorkspaceSetup(cwd string, opts workspaceSetupOptions) (workspaceSetu
 	}
 	if err := os.Chmod(layout.InstanceDir, 0o700); err != nil {
 		return workspaceSetupResult{}, fmt.Errorf("chmod workspace instance dir %s: %w", layout.InstanceDir, err)
+	}
+	if err := ensureWorkspaceSocketDir(layout.SocketDir); err != nil {
+		return workspaceSetupResult{}, err
 	}
 
 	operatorToken, err := generateSetupToken("op_", 16)
@@ -180,19 +199,22 @@ func buildWorkspaceSetupLayout(cwd, stateDir string) (workspaceSetupLayout, erro
 	shortHash := hex.EncodeToString(sum[:])[:10]
 	workspaceID := slug + "-" + shortHash
 	instanceDir := filepath.Join(stateHome, "promptlock", "workspaces", workspaceID)
+	socketDir := workspaceSocketDir(stateHome, workspaceID)
 
 	return workspaceSetupLayout{
 		WorkspaceRoot:      workspaceRoot,
 		WorkspaceSlug:      slug,
 		WorkspaceID:        workspaceID,
 		InstanceDir:        instanceDir,
+		SocketDir:          socketDir,
 		ConfigPath:         filepath.Join(instanceDir, "config.json"),
 		EnvPath:            filepath.Join(instanceDir, "instance.env"),
 		AuditPath:          filepath.Join(instanceDir, "audit.jsonl"),
 		StateStorePath:     filepath.Join(instanceDir, "state-store.json"),
 		AuthStorePath:      filepath.Join(instanceDir, "auth-store.json"),
-		AgentSocketPath:    filepath.Join(instanceDir, "agent.sock"),
-		OperatorSocketPath: filepath.Join(instanceDir, "operator.sock"),
+		AgentSocketPath:    filepath.Join(socketDir, "agent.sock"),
+		OperatorSocketPath: filepath.Join(socketDir, "operator.sock"),
+		AgentBridgeAddress: config.DefaultAgentBridgeAddressForGOOS(setupRuntimeGOOS),
 	}, nil
 }
 
@@ -234,6 +256,13 @@ func promptlockStateHome(explicit string) (string, error) {
 		return "", fmt.Errorf("resolve home directory for state storage: %w", err)
 	}
 	return filepath.Join(home, ".local", "state"), nil
+}
+
+func workspaceSocketDir(stateHome, workspaceID string) string {
+	if strings.EqualFold(strings.TrimSpace(setupRuntimeGOOS), "windows") {
+		return filepath.Join(stateHome, "promptlock", "sockets", workspaceID)
+	}
+	return filepath.Join(string(os.PathSeparator), "tmp", "promptlock", workspaceID)
 }
 
 func sanitizeWorkspaceSlug(name string) string {
@@ -317,6 +346,9 @@ func buildWorkspaceSetupConfig(layout workspaceSetupLayout, opts workspaceSetupO
 			intentName: []string{secretName},
 		},
 	}
+	if strings.TrimSpace(layout.AgentBridgeAddress) != "" {
+		doc["agent_bridge_address"] = layout.AgentBridgeAddress
+	}
 	b, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal setup config: %w", err)
@@ -335,14 +367,24 @@ func buildWorkspaceSetupEnvFile(layout workspaceSetupLayout, opts workspaceSetup
 		"# Replace the demo secret value before real use.",
 		"export PROMPTLOCK_SETUP_WORKSPACE_ROOT=" + shellQuote(layout.WorkspaceRoot),
 		"export PROMPTLOCK_SETUP_INSTANCE_DIR=" + shellQuote(layout.InstanceDir),
+		"export PROMPTLOCK_SETUP_SOCKET_DIR=" + shellQuote(layout.SocketDir),
 		"export PROMPTLOCK_CONFIG=" + shellQuote(layout.ConfigPath),
 		"export PROMPTLOCK_AGENT_UNIX_SOCKET=" + shellQuote(layout.AgentSocketPath),
 		"export PROMPTLOCK_OPERATOR_UNIX_SOCKET=" + shellQuote(layout.OperatorSocketPath),
 		"export PROMPTLOCK_OPERATOR_TOKEN=" + shellQuote(operatorToken),
 		"export PROMPTLOCK_AUTH_STORE_KEY=" + shellQuote(authKey),
 		"export " + secretEnvName + "=" + shellQuote(demoSecretValue),
-		"",
 	}
+	if strings.TrimSpace(layout.AgentBridgeAddress) != "" {
+		lines = append(lines,
+			"export PROMPTLOCK_AGENT_BRIDGE_ADDRESS="+shellQuote(layout.AgentBridgeAddress),
+			`export PROMPTLOCK_DOCKER_HOST_ALIAS="${PROMPTLOCK_DOCKER_HOST_ALIAS:-host.docker.internal}"`,
+		)
+		if bridgeURL := dockerBridgeURLExpression(layout.AgentBridgeAddress); bridgeURL != "" {
+			lines = append(lines, `export PROMPTLOCK_DOCKER_AGENT_BRIDGE_URL="`+bridgeURL+`"`)
+		}
+	}
+	lines = append(lines, "")
 	return strings.Join(lines, "\n")
 }
 
@@ -352,6 +394,7 @@ func newWorkspaceSetupResult(layout workspaceSetupLayout, opts workspaceSetupOpt
 		Created:            created,
 		WorkspaceRoot:      layout.WorkspaceRoot,
 		InstanceDir:        layout.InstanceDir,
+		SocketDir:          layout.SocketDir,
 		ConfigPath:         layout.ConfigPath,
 		EnvPath:            layout.EnvPath,
 		AuditPath:          layout.AuditPath,
@@ -359,6 +402,8 @@ func newWorkspaceSetupResult(layout workspaceSetupLayout, opts workspaceSetupOpt
 		AuthStorePath:      layout.AuthStorePath,
 		AgentSocketPath:    layout.AgentSocketPath,
 		OperatorSocketPath: layout.OperatorSocketPath,
+		AgentBridgeAddress: layout.AgentBridgeAddress,
+		DockerBridgeURL:    dockerBridgeURL(layout.AgentBridgeAddress),
 		IntentName:         defaultIfEmpty(opts.IntentName, defaultSetupIntentName),
 		SecretName:         defaultIfEmpty(opts.SecretName, defaultSetupSecretName),
 		OutputSecurityMode: defaultIfEmpty(opts.OutputSecurityMode, defaultSetupOutputSecurityMode),
@@ -382,6 +427,7 @@ func renderWorkspaceSetupSummary(result workspaceSetupResult) string {
 		"",
 		"Workspace root: " + result.WorkspaceRoot,
 		"Instance dir:   " + result.InstanceDir,
+		"Socket dir:     " + result.SocketDir,
 		"Config file:    " + result.ConfigPath,
 		"Env file:       " + result.EnvPath,
 		"Audit log:      " + result.AuditPath,
@@ -419,10 +465,199 @@ func renderWorkspaceSetupSummary(result workspaceSetupResult) string {
 		"",
 		"Notes:",
 		"  - The generated config and runtime env live outside the repo so supported state does not sit in the agent-controlled workspace.",
+		"  - Quickstart socket paths live under " + result.SocketDir + " so the local Unix-socket flow stays below desktop path-length limits.",
 		"  - The env file includes a demo " + setupSecretEnvName(result.SecretName) + " value for local quickstart only. Replace it before real use.",
 		"  - The generated quickstart config sets execution output to " + result.OutputSecurityMode + " so the first broker-exec demo prints output. Use output_security_mode=none for stronger containment once the flow is verified.",
 	}
+	if result.DockerBridgeURL != "" {
+		lines = append(lines, "  - On non-Linux desktop Docker runtimes, the daemon also starts an agent-only loopback bridge for containerized MCP clients at "+result.DockerBridgeURL+".")
+	} else if strings.TrimSpace(result.AgentBridgeAddress) != "" {
+		lines = append(lines, "  - On non-Linux desktop Docker runtimes, the daemon also starts an agent-only loopback bridge for containerized MCP clients.")
+		lines = append(lines, "  - After daemon start, use `go run ./cmd/promptlock daemon status --json` to discover the active container bridge URL.")
+	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+func ensureWorkspaceSocketDir(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("workspace socket dir is required")
+	}
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return fmt.Errorf("create workspace socket dir %s: %w", path, err)
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		return fmt.Errorf("chmod workspace socket dir %s: %w", path, err)
+	}
+	return nil
+}
+
+func refreshExistingWorkspaceSetupPaths(layout workspaceSetupLayout) (bool, error) {
+	configChanged, err := refreshWorkspaceSetupConfigPaths(layout)
+	if err != nil {
+		return false, err
+	}
+	envChanged, err := refreshWorkspaceSetupEnvPaths(layout)
+	if err != nil {
+		return false, err
+	}
+	return configChanged || envChanged, nil
+}
+
+func refreshWorkspaceSetupConfigPaths(layout workspaceSetupLayout) (bool, error) {
+	b, err := os.ReadFile(layout.ConfigPath)
+	if err != nil {
+		return false, fmt.Errorf("read existing setup config %s: %w", layout.ConfigPath, err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return false, fmt.Errorf("decode existing setup config %s: %w", layout.ConfigPath, err)
+	}
+
+	changed := false
+	changed = setMapStringValue(doc, "agent_unix_socket", layout.AgentSocketPath) || changed
+	changed = setMapStringValue(doc, "operator_unix_socket", layout.OperatorSocketPath) || changed
+	if strings.TrimSpace(layout.AgentBridgeAddress) != "" {
+		changed = setMapStringValue(doc, "agent_bridge_address", layout.AgentBridgeAddress) || changed
+	} else if _, ok := doc["agent_bridge_address"]; ok {
+		delete(doc, "agent_bridge_address")
+		changed = true
+	}
+	if !changed {
+		return false, nil
+	}
+
+	updated, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return false, fmt.Errorf("marshal refreshed setup config %s: %w", layout.ConfigPath, err)
+	}
+	if err := writePrivateFile(layout.ConfigPath, append(updated, '\n')); err != nil {
+		return false, fmt.Errorf("write refreshed setup config %s: %w", layout.ConfigPath, err)
+	}
+	return true, nil
+}
+
+func refreshWorkspaceSetupEnvPaths(layout workspaceSetupLayout) (bool, error) {
+	b, err := os.ReadFile(layout.EnvPath)
+	if err != nil {
+		return false, fmt.Errorf("read existing setup env file %s: %w", layout.EnvPath, err)
+	}
+	lines := strings.Split(string(b), "\n")
+	exports := desiredWorkspaceSetupPathExports(layout)
+	updatedLines, changed := syncSetupExportLines(lines, exports)
+	if !changed {
+		return false, nil
+	}
+	if err := writePrivateFile(layout.EnvPath, []byte(strings.Join(updatedLines, "\n"))); err != nil {
+		return false, fmt.Errorf("write refreshed setup env file %s: %w", layout.EnvPath, err)
+	}
+	return true, nil
+}
+
+type setupExportLine struct {
+	Name  string
+	Value string
+}
+
+func desiredWorkspaceSetupPathExports(layout workspaceSetupLayout) []setupExportLine {
+	exports := []setupExportLine{
+		{Name: "PROMPTLOCK_SETUP_SOCKET_DIR", Value: shellQuote(layout.SocketDir)},
+		{Name: "PROMPTLOCK_CONFIG", Value: shellQuote(layout.ConfigPath)},
+		{Name: "PROMPTLOCK_AGENT_UNIX_SOCKET", Value: shellQuote(layout.AgentSocketPath)},
+		{Name: "PROMPTLOCK_OPERATOR_UNIX_SOCKET", Value: shellQuote(layout.OperatorSocketPath)},
+	}
+	if strings.TrimSpace(layout.AgentBridgeAddress) != "" {
+		exports = append(exports,
+			setupExportLine{Name: "PROMPTLOCK_AGENT_BRIDGE_ADDRESS", Value: shellQuote(layout.AgentBridgeAddress)},
+			setupExportLine{Name: "PROMPTLOCK_DOCKER_HOST_ALIAS", Value: `"${PROMPTLOCK_DOCKER_HOST_ALIAS:-host.docker.internal}"`},
+		)
+		if bridgeURL := dockerBridgeURLExpression(layout.AgentBridgeAddress); bridgeURL != "" {
+			exports = append(exports, setupExportLine{Name: "PROMPTLOCK_DOCKER_AGENT_BRIDGE_URL", Value: `"` + bridgeURL + `"`})
+		}
+	}
+	return exports
+}
+
+func syncSetupExportLines(lines []string, exports []setupExportLine) ([]string, bool) {
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	changed := false
+	desiredByName := map[string]setupExportLine{}
+	for _, export := range exports {
+		desiredByName[export.Name] = export
+	}
+	managedNames := map[string]struct{}{
+		"PROMPTLOCK_SETUP_SOCKET_DIR":        {},
+		"PROMPTLOCK_CONFIG":                  {},
+		"PROMPTLOCK_AGENT_UNIX_SOCKET":       {},
+		"PROMPTLOCK_OPERATOR_UNIX_SOCKET":    {},
+		"PROMPTLOCK_AGENT_BRIDGE_ADDRESS":    {},
+		"PROMPTLOCK_DOCKER_HOST_ALIAS":       {},
+		"PROMPTLOCK_DOCKER_AGENT_BRIDGE_URL": {},
+	}
+	indexByName := map[string]int{}
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if name, ok := setupExportName(trimmed); ok {
+			if _, managed := managedNames[name]; managed {
+				export, wanted := desiredByName[name]
+				if !wanted {
+					changed = true
+					continue
+				}
+				want := "export " + export.Name + "=" + export.Value
+				indexByName[export.Name] = len(filtered)
+				if line != want {
+					filtered = append(filtered, want)
+					changed = true
+				} else {
+					filtered = append(filtered, line)
+				}
+				continue
+			}
+		}
+		filtered = append(filtered, line)
+	}
+	lines = filtered
+	insertAt := len(lines)
+	if insertAt > 0 && lines[insertAt-1] == "" {
+		insertAt--
+	}
+	for _, export := range exports {
+		if _, ok := indexByName[export.Name]; ok {
+			continue
+		}
+		want := "export " + export.Name + "=" + export.Value
+		lines = append(lines[:insertAt], append([]string{want}, lines[insertAt:]...)...)
+		insertAt++
+		changed = true
+	}
+	return lines, changed
+}
+
+func setupExportName(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "export ") {
+		return "", false
+	}
+	raw := strings.TrimPrefix(trimmed, "export ")
+	name, _, ok := strings.Cut(raw, "=")
+	if !ok {
+		return "", false
+	}
+	return strings.TrimSpace(name), true
+}
+
+func setMapStringValue(doc map[string]any, key, want string) bool {
+	if doc == nil {
+		return false
+	}
+	if got, _ := doc[key].(string); got == want {
+		return false
+	}
+	doc[key] = want
+	return true
 }
 
 func defaultIfEmpty(v, fallback string) string {
@@ -434,6 +669,30 @@ func defaultIfEmpty(v, fallback string) string {
 
 func shellQuote(v string) string {
 	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
+}
+
+func mustPort(address string) string {
+	_, port, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil {
+		return ""
+	}
+	return port
+}
+
+func dockerBridgeURL(address string) string {
+	port := mustPort(address)
+	if port == "" || port == "0" {
+		return ""
+	}
+	return "http://host.docker.internal:" + port
+}
+
+func dockerBridgeURLExpression(address string) string {
+	port := mustPort(address)
+	if port == "" || port == "0" {
+		return ""
+	}
+	return "http://${PROMPTLOCK_DOCKER_HOST_ALIAS}:" + port
 }
 
 func setupSecretEnvName(secretName string) string {

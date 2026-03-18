@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,6 +12,10 @@ import (
 )
 
 func TestBuildWorkspaceSetupLayoutUsesWorkspaceRootAndHostStateDir(t *testing.T) {
+	origGOOS := setupRuntimeGOOS
+	setupRuntimeGOOS = "darwin"
+	t.Cleanup(func() { setupRuntimeGOOS = origGOOS })
+
 	repoRoot := filepath.Join(t.TempDir(), "repo-root")
 	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
 		t.Fatalf("mkdir .git: %v", err)
@@ -41,16 +46,32 @@ func TestBuildWorkspaceSetupLayoutUsesWorkspaceRootAndHostStateDir(t *testing.T)
 		layout.AuditPath,
 		layout.StateStorePath,
 		layout.AuthStorePath,
-		layout.AgentSocketPath,
-		layout.OperatorSocketPath,
 	} {
 		if !strings.HasPrefix(path, layout.InstanceDir+string(os.PathSeparator)) {
 			t.Fatalf("generated path %q must stay under instance dir %q", path, layout.InstanceDir)
 		}
 	}
+	if layout.SocketDir == "" {
+		t.Fatalf("expected non-empty socket dir")
+	}
+	if strings.HasPrefix(layout.SocketDir, layout.InstanceDir+string(os.PathSeparator)) {
+		t.Fatalf("socket dir must stay separate from instance dir, got %q under %q", layout.SocketDir, layout.InstanceDir)
+	}
+	for _, path := range []string{layout.AgentSocketPath, layout.OperatorSocketPath} {
+		if !strings.HasPrefix(path, layout.SocketDir+string(os.PathSeparator)) {
+			t.Fatalf("socket path %q must stay under socket dir %q", path, layout.SocketDir)
+		}
+		if len(path) >= 100 {
+			t.Fatalf("socket path %q is too long for portable unix-socket use", path)
+		}
+	}
 }
 
 func TestEnsureWorkspaceSetupWritesSecureInstanceFiles(t *testing.T) {
+	origGOOS := setupRuntimeGOOS
+	setupRuntimeGOOS = "darwin"
+	t.Cleanup(func() { setupRuntimeGOOS = origGOOS })
+
 	repoRoot := filepath.Join(t.TempDir(), "repo-root")
 	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
 		t.Fatalf("mkdir .git: %v", err)
@@ -91,6 +112,9 @@ func TestEnsureWorkspaceSetupWritesSecureInstanceFiles(t *testing.T) {
 	}
 	if got := cfg["operator_unix_socket"]; got != result.OperatorSocketPath {
 		t.Fatalf("operator_unix_socket = %#v, want %q", got, result.OperatorSocketPath)
+	}
+	if got := cfg["agent_bridge_address"]; got != "127.0.0.1:0" {
+		t.Fatalf("agent_bridge_address = %#v, want 127.0.0.1:0", got)
 	}
 	if got := cfg["audit_path"]; got != result.AuditPath {
 		t.Fatalf("audit_path = %#v, want %q", got, result.AuditPath)
@@ -140,13 +164,17 @@ func TestEnsureWorkspaceSetupWritesSecureInstanceFiles(t *testing.T) {
 	envFile := string(envBytes)
 	for _, want := range []string{
 		"export PROMPTLOCK_CONFIG=",
+		"export PROMPTLOCK_SETUP_SOCKET_DIR=",
 		"export PROMPTLOCK_AGENT_UNIX_SOCKET=",
 		"export PROMPTLOCK_OPERATOR_UNIX_SOCKET=",
+		"export PROMPTLOCK_AGENT_BRIDGE_ADDRESS=",
+		`export PROMPTLOCK_DOCKER_HOST_ALIAS="${PROMPTLOCK_DOCKER_HOST_ALIAS:-host.docker.internal}"`,
 		"export PROMPTLOCK_OPERATOR_TOKEN=",
 		"export PROMPTLOCK_AUTH_STORE_KEY=",
 		"export PROMPTLOCK_SECRET_GITHUB_TOKEN=",
 		"demo_github_token_value",
 		result.ConfigPath,
+		result.SocketDir,
 		result.AgentSocketPath,
 		result.OperatorSocketPath,
 	} {
@@ -154,12 +182,20 @@ func TestEnsureWorkspaceSetupWritesSecureInstanceFiles(t *testing.T) {
 			t.Fatalf("env file missing %q:\n%s", want, envFile)
 		}
 	}
+	if strings.Contains(envFile, "export PROMPTLOCK_DOCKER_AGENT_BRIDGE_URL=") {
+		t.Fatalf("expected dynamic bridge quickstart env to omit baked-in PROMPTLOCK_DOCKER_AGENT_BRIDGE_URL, got:\n%s", envFile)
+	}
 
 	if runtime.GOOS != "windows" {
 		if info, err := os.Stat(result.InstanceDir); err != nil {
 			t.Fatalf("stat instance dir: %v", err)
 		} else if got := info.Mode().Perm(); got != 0o700 {
 			t.Fatalf("instance dir mode = %o, want 700", got)
+		}
+		if info, err := os.Stat(result.SocketDir); err != nil {
+			t.Fatalf("stat socket dir: %v", err)
+		} else if got := info.Mode().Perm(); got != 0o700 {
+			t.Fatalf("socket dir mode = %o, want 700", got)
 		}
 		for _, path := range []string{result.ConfigPath, result.EnvPath} {
 			info, err := os.Stat(path)
@@ -174,6 +210,10 @@ func TestEnsureWorkspaceSetupWritesSecureInstanceFiles(t *testing.T) {
 }
 
 func TestEnsureWorkspaceSetupIsIdempotent(t *testing.T) {
+	origGOOS := setupRuntimeGOOS
+	setupRuntimeGOOS = "darwin"
+	t.Cleanup(func() { setupRuntimeGOOS = origGOOS })
+
 	repoRoot := filepath.Join(t.TempDir(), "repo-root")
 	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
 		t.Fatalf("mkdir .git: %v", err)
@@ -233,6 +273,108 @@ func TestEnsureWorkspaceSetupIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestEnsureWorkspaceSetupRefreshesLegacySocketPathsWithoutRotatingSecrets(t *testing.T) {
+	origGOOS := setupRuntimeGOOS
+	setupRuntimeGOOS = "darwin"
+	t.Cleanup(func() { setupRuntimeGOOS = origGOOS })
+
+	repoRoot := filepath.Join(t.TempDir(), "repo-root")
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+
+	stateDir := filepath.Join(t.TempDir(), "state-home")
+	layout, err := buildWorkspaceSetupLayout(repoRoot, stateDir)
+	if err != nil {
+		t.Fatalf("buildWorkspaceSetupLayout: %v", err)
+	}
+	if err := os.MkdirAll(layout.InstanceDir, 0o700); err != nil {
+		t.Fatalf("mkdir instance dir: %v", err)
+	}
+
+	legacyAgentSocket := filepath.Join(layout.InstanceDir, "agent.sock")
+	legacyOperatorSocket := filepath.Join(layout.InstanceDir, "operator.sock")
+	configBody := []byte(fmt.Sprintf(`{
+  "security_profile": "hardened",
+  "agent_unix_socket": %q,
+  "operator_unix_socket": %q,
+  "agent_bridge_address": "127.0.0.1:8766",
+  "auth": {"operator_token": "op_existing"},
+  "state_store": {"type": "file"}
+}
+`, legacyAgentSocket, legacyOperatorSocket))
+	if err := os.WriteFile(layout.ConfigPath, configBody, 0o600); err != nil {
+		t.Fatalf("write legacy config: %v", err)
+	}
+	legacyEnv := strings.Join([]string{
+		"export PROMPTLOCK_SETUP_WORKSPACE_ROOT=" + shellQuote(repoRoot),
+		"export PROMPTLOCK_SETUP_INSTANCE_DIR=" + shellQuote(layout.InstanceDir),
+		"export PROMPTLOCK_CONFIG=" + shellQuote(layout.ConfigPath),
+		"export PROMPTLOCK_AGENT_UNIX_SOCKET=" + shellQuote(legacyAgentSocket),
+		"export PROMPTLOCK_OPERATOR_UNIX_SOCKET=" + shellQuote(legacyOperatorSocket),
+		"export PROMPTLOCK_OPERATOR_TOKEN='op_existing'",
+		"export PROMPTLOCK_AUTH_STORE_KEY='auth_existing'",
+		"export PROMPTLOCK_SECRET_GITHUB_TOKEN='secret_existing'",
+		"",
+	}, "\n")
+	if err := os.WriteFile(layout.EnvPath, []byte(legacyEnv), 0o600); err != nil {
+		t.Fatalf("write legacy env: %v", err)
+	}
+
+	result, err := ensureWorkspaceSetup(repoRoot, workspaceSetupOptions{
+		StateDir:           stateDir,
+		IntentName:         "run_tests",
+		SecretName:         "github_token",
+		AllowDomain:        "api.github.com",
+		DemoSecretValue:    "demo_github_token_value",
+		OutputSecurityMode: "raw",
+	})
+	if err != nil {
+		t.Fatalf("ensureWorkspaceSetup: %v", err)
+	}
+	if result.Created {
+		t.Fatalf("expected existing setup to be refreshed, not recreated")
+	}
+
+	configBytes, err := os.ReadFile(layout.ConfigPath)
+	if err != nil {
+		t.Fatalf("read refreshed config: %v", err)
+	}
+	if strings.Contains(string(configBytes), legacyAgentSocket) || strings.Contains(string(configBytes), legacyOperatorSocket) {
+		t.Fatalf("expected legacy socket paths to be removed from config: %s", string(configBytes))
+	}
+	if !strings.Contains(string(configBytes), layout.AgentSocketPath) || !strings.Contains(string(configBytes), layout.OperatorSocketPath) {
+		t.Fatalf("expected refreshed config to contain new socket paths: %s", string(configBytes))
+	}
+	if !strings.Contains(string(configBytes), "op_existing") {
+		t.Fatalf("expected existing operator token to be preserved: %s", string(configBytes))
+	}
+
+	envBytes, err := os.ReadFile(layout.EnvPath)
+	if err != nil {
+		t.Fatalf("read refreshed env: %v", err)
+	}
+	envFile := string(envBytes)
+	if strings.Contains(envFile, legacyAgentSocket) || strings.Contains(envFile, legacyOperatorSocket) {
+		t.Fatalf("expected legacy socket paths to be removed from env: %s", envFile)
+	}
+	for _, want := range []string{
+		layout.SocketDir,
+		layout.AgentSocketPath,
+		layout.OperatorSocketPath,
+		"op_existing",
+		"auth_existing",
+		"secret_existing",
+	} {
+		if !strings.Contains(envFile, want) {
+			t.Fatalf("expected refreshed env to contain %q:\n%s", want, envFile)
+		}
+	}
+	if strings.Contains(envFile, "export PROMPTLOCK_DOCKER_AGENT_BRIDGE_URL=") {
+		t.Fatalf("expected refreshed env to remove stale PROMPTLOCK_DOCKER_AGENT_BRIDGE_URL, got:\n%s", envFile)
+	}
+}
+
 func TestEnsureWorkspaceSetupRejectsIncompleteExistingInstance(t *testing.T) {
 	repoRoot := filepath.Join(t.TempDir(), "repo-root")
 	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
@@ -268,6 +410,10 @@ func TestEnsureWorkspaceSetupRejectsIncompleteExistingInstance(t *testing.T) {
 }
 
 func TestRunSetupPrintsContainerFirstCommands(t *testing.T) {
+	origGOOS := setupRuntimeGOOS
+	setupRuntimeGOOS = "darwin"
+	t.Cleanup(func() { setupRuntimeGOOS = origGOOS })
+
 	repoRoot := filepath.Join(t.TempDir(), "repo-root")
 	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
 		t.Fatalf("mkdir .git: %v", err)
@@ -297,6 +443,10 @@ func TestRunSetupPrintsContainerFirstCommands(t *testing.T) {
 		"go run ./cmd/promptlock auth docker-run",
 		"docker build -t promptlock-agent-lab .",
 		"instance.env",
+		"Socket dir:",
+		"Quickstart socket paths live under",
+		"After daemon start, use `go run ./cmd/promptlock daemon status --json` to discover the active container bridge URL.",
+		"agent-only loopback bridge for containerized MCP clients",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("setup output missing %q:\n%s", want, out)

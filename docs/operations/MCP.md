@@ -11,6 +11,53 @@ PromptLock now includes an experimental MCP stdio adapter:
 - uses broker lease + execute endpoints under the hood
 - requires `PROMPTLOCK_SESSION_TOKEN` for agent auth
 - in local hardened mode, defaults to the agent Unix socket and fails closed if no agent socket or explicit broker transport is configured
+- keep the operator socket on the host side only; MCP clients should receive agent-side transport only
+
+## Client setup patterns
+
+Build or install `promptlock-mcp`, mint a fresh agent session token with `promptlock auth login --show-secrets`, then configure the MCP client to launch the stdio adapter with:
+
+- `PROMPTLOCK_SESSION_TOKEN`
+- `PROMPTLOCK_AGENT_ID`
+- `PROMPTLOCK_TASK_ID`
+- one agent-side transport variable:
+  - `PROMPTLOCK_AGENT_UNIX_SOCKET` for host processes and Linux containers
+  - `PROMPTLOCK_BROKER_URL` for desktop-Docker container access to the daemon-owned agent bridge on macOS
+
+The README now includes copy-paste examples for:
+
+- Codex CLI
+- Claude Code
+- Gemini CLI
+- Cursor Agent (`.cursor/mcp.json`)
+
+## macOS desktop Docker workaround
+
+For manual containerized MCP clients on macOS desktop Docker runtimes, do not rely on a direct bind mount of the host PromptLock Unix socket into the container.
+That container leg is not reliable there.
+
+Use this safer pattern instead:
+
+- keep the operator socket on the host only
+- let `promptlockd` start its built-in agent-only loopback bridge
+- source `instance.env` from `promptlock setup`
+- after daemon startup, use `promptlock daemon status --json` to get the live `agent_bridge_container_url`
+- point the containerized MCP adapter at that URL via `PROMPTLOCK_BROKER_URL`
+
+Before launching the containerized MCP client, you can confirm the bridge with:
+
+```bash
+. '<instance-env-file>'
+go run ./cmd/promptlock daemon status
+```
+
+That status output now reports:
+
+- agent API reachability over the selected local transport
+- host-loopback bridge reachability
+- the container-facing URL derived from `host.docker.internal`
+
+This is the same transport boundary the README demonstrates for manual MCP client setup.
 
 ## Notes
 - This is an early adapter scaffold for interoperability testing.

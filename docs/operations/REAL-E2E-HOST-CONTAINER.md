@@ -7,7 +7,7 @@ This document shows the canonical CLI-first lab validation flow for PromptLock w
 
 No curl is required in the primary flow.
 
-This is the hardened local baseline and the supported OSS deployment shape: PromptLock runs on the host with role-separated Unix sockets, the operator uses the host-only operator socket, and the container gets only the agent socket.
+This is the hardened local baseline and the supported OSS deployment shape: PromptLock runs on the host with role-separated Unix sockets, the operator uses the host-only operator socket, and the container gets only agent-side PromptLock transport for its host/runtime combination.
 
 ## Prerequisites
 - Host has PromptLock repo and Go toolchain.
@@ -17,6 +17,7 @@ This is the hardened local baseline and the supported OSS deployment shape: Prom
 
 ## Topology guidance
 - Supported OSS baseline: dual Unix sockets for local-only hardened deployments.
+- Container leg: Linux containers normally use the agent Unix socket; non-Linux desktop Docker containers use the daemon-owned agent bridge URL because direct host Unix-socket bind mounts are not reliable there.
 - This walkthrough: hardened policy controls plus agent/operator socket separation for local lab verification.
 
 ## 1) Host: start daemon for lab validation
@@ -103,7 +104,7 @@ docker build -t promptlock-agent-lab .
 
 Run on the host:
 
-This is still a host-side command. It bootstraps on the operator socket, pairs and mints on the agent socket, then launches the container with only the agent socket mounted.
+This is still a host-side command. It bootstraps on the operator socket, pairs and mints on the agent socket, then launches the container with only agent-safe PromptLock transport wired in.
 
 ```bash
 go run ./cmd/promptlock auth docker-run \
@@ -126,7 +127,8 @@ go run ./cmd/promptlock auth docker-run \
 ```
 
 This wrapper performs `auth login`, injects the fresh session token into the container environment, and then runs `docker run` with the requested image/command.
-In local hardened mode it mounts only the agent socket into the container and leaves the operator socket on the host.
+On Linux hardened local mode it mounts only the agent socket into the container and leaves the operator socket on the host.
+On non-Linux desktop Docker runtimes, where host Unix-socket bind mounts are unreliable for the container leg, it prefers the daemon-owned agent bridge discovered from broker capabilities and exposed to the container through `host.docker.internal`. If that bridge is unavailable, it falls back to a short-lived host-local bridge for the lifetime of the `docker run` command.
 
 ## 5) Approve in the host watch UI
 

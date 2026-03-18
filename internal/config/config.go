@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/lunemec/promptlock/internal/core/domain"
@@ -17,6 +18,7 @@ type Config struct {
 	UnixSocket          string              `json:"unix_socket"`
 	AgentUnixSocket     string              `json:"agent_unix_socket"`
 	OperatorUnixSocket  string              `json:"operator_unix_socket"`
+	AgentBridgeAddress  string              `json:"agent_bridge_address"`
 	AuditPath           string              `json:"audit_path"`
 	StateStoreFile      string              `json:"state_store_file"`
 	StateStore          StateStoreConfig    `json:"state_store"`
@@ -32,12 +34,16 @@ type Config struct {
 
 	executionPolicyExactExecutablesConfigured bool
 	executionPolicyOutputModeConfigured       bool
+	agentBridgeAddressConfigured              bool
 }
 
 const (
 	DefaultAgentUnixSocketPath    = "/tmp/promptlock-agent.sock"
 	DefaultOperatorUnixSocketPath = "/tmp/promptlock-operator.sock"
+	DefaultAgentBridgeAddress     = "127.0.0.1:0"
 )
+
+var configRuntimeGOOS = runtime.GOOS
 
 type PolicyConfig struct {
 	DefaultTTLMinutes int `json:"default_ttl_minutes"`
@@ -59,6 +65,7 @@ func Default() Config {
 		UnixSocket:          "",
 		AgentUnixSocket:     "",
 		OperatorUnixSocket:  "",
+		AgentBridgeAddress:  "",
 		AuditPath:           "/tmp/promptlock-audit.jsonl",
 		Intents:             IntentMap{},
 		Auth:                defaultAuthConfig(),
@@ -124,6 +131,9 @@ func (c *Config) markExplicitExecutionPolicyOverrides(raw []byte) {
 	if _, ok := exec["output_security_mode"]; ok {
 		c.executionPolicyOutputModeConfigured = true
 	}
+	if _, ok := root["agent_bridge_address"]; ok {
+		c.agentBridgeAddressConfigured = true
+	}
 }
 
 func rejectRemovedTransportConfig(raw []byte) error {
@@ -140,6 +150,7 @@ func rejectRemovedTransportConfig(raw []byte) error {
 func (c *Config) resolveExecutionPolicyCompatibility() {}
 
 func (c *Config) normalize() {
+	c.AgentBridgeAddress = strings.TrimSpace(c.AgentBridgeAddress)
 	c.ExecutionPolicy.ExactMatchExecutables = normalizeStringList(c.ExecutionPolicy.ExactMatchExecutables)
 	c.ExecutionPolicy.CommandSearchPaths = normalizePathList(c.ExecutionPolicy.CommandSearchPaths)
 	if len(c.ExecutionPolicy.CommandSearchPaths) == 0 {
@@ -231,6 +242,9 @@ func (c *Config) applyProfile() {
 			c.AgentUnixSocket = DefaultAgentUnixSocketPath
 			c.OperatorUnixSocket = DefaultOperatorUnixSocketPath
 		}
+		if !c.agentBridgeAddressConfigured && c.UsesDualUnixSockets() {
+			c.AgentBridgeAddress = DefaultAgentBridgeAddressForGOOS(configRuntimeGOOS)
+		}
 	default:
 		return
 	}
@@ -254,6 +268,17 @@ func (c Config) UsesLegacyUnixSocket() bool {
 
 func (c Config) UsesDualUnixSockets() bool {
 	return strings.TrimSpace(c.AgentUnixSocket) != "" || strings.TrimSpace(c.OperatorUnixSocket) != ""
+}
+
+func (c Config) UsesAgentBridge() bool {
+	return strings.TrimSpace(c.AgentBridgeAddress) != ""
+}
+
+func DefaultAgentBridgeAddressForGOOS(goos string) string {
+	if strings.EqualFold(strings.TrimSpace(goos), "linux") {
+		return ""
+	}
+	return DefaultAgentBridgeAddress
 }
 
 func isLocalAddressConfig(addr string) bool {

@@ -13,6 +13,7 @@ func TestApplyEnvOverridesStateStoreExternalFields(t *testing.T) {
 	t.Setenv("PROMPTLOCK_UNIX_SOCKET", "/tmp/promptlock.sock")
 	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", "/tmp/promptlock-agent.sock")
 	t.Setenv("PROMPTLOCK_OPERATOR_UNIX_SOCKET", "/tmp/promptlock-operator.sock")
+	t.Setenv("PROMPTLOCK_AGENT_BRIDGE_ADDRESS", "127.0.0.1:8766")
 	t.Setenv("PROMPTLOCK_STATE_STORE_FILE", "/tmp/state-store.json")
 	t.Setenv("PROMPTLOCK_OPERATOR_TOKEN", "op-token")
 	t.Setenv("PROMPTLOCK_STATE_STORE_TYPE", "external")
@@ -38,6 +39,9 @@ func TestApplyEnvOverridesStateStoreExternalFields(t *testing.T) {
 	}
 	if cfg.OperatorUnixSocket != "/tmp/promptlock-operator.sock" {
 		t.Fatalf("unexpected operator unix socket: %q", cfg.OperatorUnixSocket)
+	}
+	if cfg.AgentBridgeAddress != "127.0.0.1:8766" {
+		t.Fatalf("unexpected agent bridge address: %q", cfg.AgentBridgeAddress)
 	}
 	if cfg.StateStoreFile != "/tmp/state-store.json" {
 		t.Fatalf("unexpected state_store_file: %q", cfg.StateStoreFile)

@@ -90,6 +90,25 @@ func TestValidateSocketConfig(t *testing.T) {
 	if err := validateSocketConfig(cfg); err == nil {
 		t.Fatalf("expected identical dual socket paths to fail")
 	}
+
+	cfg = config.Default()
+	cfg.AgentBridgeAddress = "127.0.0.1:8766"
+	cfg.AgentUnixSocket = "/tmp/promptlock-agent.sock"
+	cfg.OperatorUnixSocket = "/tmp/promptlock-operator.sock"
+	if err := validateSocketConfig(cfg); err != nil {
+		t.Fatalf("expected loopback agent bridge to pass, got %v", err)
+	}
+
+	cfg.AgentBridgeAddress = "0.0.0.0:8766"
+	if err := validateSocketConfig(cfg); err == nil {
+		t.Fatalf("expected non-loopback agent bridge to fail")
+	}
+
+	cfg.AgentBridgeAddress = "127.0.0.1:8766"
+	cfg.OperatorUnixSocket = ""
+	if err := validateSocketConfig(cfg); err == nil {
+		t.Fatalf("expected agent bridge without dual-socket transport to fail")
+	}
 }
 
 func TestValidateSecretSourceSafety(t *testing.T) {

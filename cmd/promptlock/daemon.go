@@ -13,40 +13,42 @@ import (
 	"time"
 )
 
-const defaultDaemonPIDFile = "/tmp/promptlockd.pid"
+const (
+	defaultDaemonPIDFile     = "/tmp/promptlockd.pid"
+	defaultDaemonPIDFileName = "promptlockd.pid"
+	defaultDaemonLogFileName = "promptlockd.log"
+)
 
 type daemonFlags struct {
-	PIDFile string
-	Binary  string
-	Config  string
-	LogFile string
+	PIDFile    string
+	Binary     string
+	Config     string
+	LogFile    string
+	JSONOutput bool
 }
 
 func runDaemon(args []string) {
 	if len(args) == 0 || hasHelpFlag(args) || args[0] == "help" {
 		fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
-		fs.String("pid-file", getenv("PROMPTLOCK_DAEMON_PID_FILE", defaultDaemonPIDFile), "pid file path")
+		fs.String("pid-file", getenv("PROMPTLOCK_DAEMON_PID_FILE", ""), "pid file path (defaults to config-scoped path when --config/PROMPTLOCK_CONFIG is set)")
 		fs.String("binary", getenv("PROMPTLOCK_DAEMON_BINARY", "promptlockd"), "promptlockd binary path or name")
 		fs.String("config", getenv("PROMPTLOCK_CONFIG", ""), "optional config path exported as PROMPTLOCK_CONFIG")
-		fs.String("log-file", getenv("PROMPTLOCK_DAEMON_LOG_FILE", ""), "optional daemon log file path")
+		fs.String("log-file", getenv("PROMPTLOCK_DAEMON_LOG_FILE", ""), "optional daemon log file path (defaults to config-scoped path when --config/PROMPTLOCK_CONFIG is set)")
+		fs.Bool("json", false, "print structured status JSON (status subcommand)")
 		printFlagHelp(os.Stdout, daemonHelpText(), fs)
 		return
 	}
 
 	sub := strings.TrimSpace(args[0])
 	fs := flag.NewFlagSet("daemon "+sub, flag.ExitOnError)
-	pidFile := fs.String("pid-file", getenv("PROMPTLOCK_DAEMON_PID_FILE", defaultDaemonPIDFile), "pid file path")
+	pidFile := fs.String("pid-file", getenv("PROMPTLOCK_DAEMON_PID_FILE", ""), "pid file path (defaults to config-scoped path when --config/PROMPTLOCK_CONFIG is set)")
 	binary := fs.String("binary", getenv("PROMPTLOCK_DAEMON_BINARY", "promptlockd"), "promptlockd binary path or name")
 	config := fs.String("config", getenv("PROMPTLOCK_CONFIG", ""), "optional config path exported as PROMPTLOCK_CONFIG")
-	logFile := fs.String("log-file", getenv("PROMPTLOCK_DAEMON_LOG_FILE", ""), "optional daemon log file path")
+	logFile := fs.String("log-file", getenv("PROMPTLOCK_DAEMON_LOG_FILE", ""), "optional daemon log file path (defaults to config-scoped path when --config/PROMPTLOCK_CONFIG is set)")
+	jsonOutput := fs.Bool("json", false, "print structured status JSON (status subcommand)")
 	_ = fs.Parse(args[1:])
 
-	flags := daemonFlags{
-		PIDFile: strings.TrimSpace(*pidFile),
-		Binary:  strings.TrimSpace(*binary),
-		Config:  strings.TrimSpace(*config),
-		LogFile: strings.TrimSpace(*logFile),
-	}
+	flags := newDaemonFlags(*pidFile, *binary, *config, *logFile, *jsonOutput)
 
 	switch sub {
 	case "start":
@@ -83,6 +85,8 @@ func daemonStart(flags daemonFlags) error {
 		return err
 	}
 	cmd.Env = daemonEnv(flags.Config)
+	cmd.Stdin = nil
+	cmd.SysProcAttr = daemonSysProcAttr()
 	if flags.LogFile != "" {
 		if err := ensureParentDir(flags.LogFile); err != nil {
 			return err
@@ -95,8 +99,13 @@ func daemonStart(flags daemonFlags) error {
 		cmd.Stdout = logFH
 		cmd.Stderr = logFH
 	} else {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		nullFH, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if err != nil {
+			return fmt.Errorf("open null daemon output: %w", err)
+		}
+		defer nullFH.Close()
+		cmd.Stdout = nullFH
+		cmd.Stderr = nullFH
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -142,23 +151,6 @@ func daemonStop(flags daemonFlags) error {
 		time.Sleep(150 * time.Millisecond)
 	}
 	return fmt.Errorf("promptlockd (pid=%d) did not stop within timeout", pid)
-}
-
-func daemonStatus(flags daemonFlags) error {
-	pid, err := readPIDFile(flags.PIDFile)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			fmt.Println("promptlockd status: stopped")
-			return nil
-		}
-		return err
-	}
-	if processAlive(pid) {
-		fmt.Printf("promptlockd status: running (pid=%d)\n", pid)
-		return nil
-	}
-	fmt.Printf("promptlockd status: stale pid file (pid=%d not running)\n", pid)
-	return nil
 }
 
 func daemonReadLivePID(pidFile string) (int, bool) {
@@ -207,6 +199,37 @@ func buildDaemonCommand(flags daemonFlags) (*exec.Cmd, string, error) {
 		}
 	}
 	return nil, "", fmt.Errorf("resolve promptlockd binary %q: executable not found", flags.Binary)
+}
+
+func newDaemonFlags(pidFile, binary, configPath, logFile string, jsonOutput bool) daemonFlags {
+	trimmedConfig := strings.TrimSpace(configPath)
+	return daemonFlags{
+		PIDFile:    resolveDaemonPIDFile(pidFile, trimmedConfig),
+		Binary:     strings.TrimSpace(binary),
+		Config:     trimmedConfig,
+		LogFile:    resolveDaemonLogFile(logFile, trimmedConfig),
+		JSONOutput: jsonOutput,
+	}
+}
+
+func resolveDaemonPIDFile(pidFile, configPath string) string {
+	if trimmed := strings.TrimSpace(pidFile); trimmed != "" {
+		return trimmed
+	}
+	if trimmedConfig := strings.TrimSpace(configPath); trimmedConfig != "" {
+		return filepath.Join(filepath.Dir(trimmedConfig), defaultDaemonPIDFileName)
+	}
+	return defaultDaemonPIDFile
+}
+
+func resolveDaemonLogFile(logFile, configPath string) string {
+	if trimmed := strings.TrimSpace(logFile); trimmed != "" {
+		return trimmed
+	}
+	if trimmedConfig := strings.TrimSpace(configPath); trimmedConfig != "" {
+		return filepath.Join(filepath.Dir(trimmedConfig), defaultDaemonLogFileName)
+	}
+	return ""
 }
 
 func daemonEnv(configPath string) []string {

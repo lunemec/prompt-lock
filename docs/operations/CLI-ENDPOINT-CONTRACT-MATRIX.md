@@ -39,4 +39,4 @@ Use this matrix when troubleshooting auth failures or ambiguous endpoint usage.
 - In local hardened mode, CLI commands auto-select sockets by role with no broker flags:
   - operator commands use `/tmp/promptlock-operator.sock`
   - agent commands use `/tmp/promptlock-agent.sock`
-  - `auth login` / `auth docker-run` span both sockets and mount only the agent socket into containers
+  - `auth login` / `auth docker-run` span both sockets and give containers only agent-side transport (`PROMPTLOCK_AGENT_UNIX_SOCKET` on Linux, daemon bridge `PROMPTLOCK_BROKER_URL` on non-Linux desktop Docker)

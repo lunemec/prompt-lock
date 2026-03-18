@@ -11,7 +11,7 @@
 
 ## Security operations
 - Keep audit trail on host storage (not container-writable paths).
-- Keep operator socket host-only and mount only the agent socket into containers.
+- Keep the operator socket host-only and expose only agent-side PromptLock transport to containers.
 - Treat the supported OSS v1 deployment shape as local-only hardened operation with dual Unix sockets.
 - For non-dev profiles, ensure `auth.store_file` + auth-store encryption key env are configured, and configure request/lease durability via either `state_store_file` (`state_store.type=file`) or external state adapter settings (`state_store.type=external`).
 - Treat `state_store.type=external` as a durability/availability integration, not a concurrency-safe multi-node coordinator.

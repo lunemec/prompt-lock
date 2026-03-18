@@ -19,5 +19,7 @@ WORKDIR /app
 COPY --from=build /out/promptlockd /usr/local/bin/promptlockd
 COPY --from=build /out/promptlock /usr/local/bin/promptlock
 COPY --from=build /out/promptlock-mcp /usr/local/bin/promptlock-mcp
+COPY --chmod=0755 scripts/secretctl.sh /usr/local/bin/secretctl.sh
+COPY skills/secret-request/SKILL.md /opt/promptlock/skills/secret-request/SKILL.md
 USER promptlock
 ENTRYPOINT ["/usr/local/bin/promptlockd"]

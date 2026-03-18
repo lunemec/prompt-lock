@@ -286,14 +286,23 @@ func runAuthDockerRun(args []string) {
 	if err != nil {
 		fatal(err)
 	}
+	brokerTransport, err := resolveDockerBrokerTransport(dockerRuntimeGOOS, agentBroker, *containerSocket)
+	if err != nil {
+		fatal(err)
+	}
+	defer func() {
+		if err := brokerTransport.Close(); err != nil {
+			fatal(err)
+		}
+	}()
 
 	runArgs, err := buildDockerRunArgs(dockerRunConfig{
 		Image:                 *image,
 		ContainerName:         *container,
 		SessionToken:          loginResult.SessionToken,
-		BrokerURL:             agentBroker.BaseURL,
-		BrokerUnixSocket:      agentBroker.UnixSocket,
-		ContainerBrokerSocket: *containerSocket,
+		BrokerURL:             brokerTransport.BrokerURL,
+		BrokerUnixSocket:      brokerTransport.BrokerUnixSocket,
+		ContainerBrokerSocket: brokerTransport.ContainerBrokerSocket,
 		User:                  currentUserDockerIdentity(),
 		Entrypoint:            *entrypoint,
 		Workdir:               *workdir,
@@ -310,9 +319,9 @@ func runAuthDockerRun(args []string) {
 	cmd := exec.Command("docker", runArgs...)
 	cmd.Env = buildDockerRunEnv(os.Environ(), dockerRunConfig{
 		SessionToken:          loginResult.SessionToken,
-		BrokerURL:             agentBroker.BaseURL,
-		BrokerUnixSocket:      agentBroker.UnixSocket,
-		ContainerBrokerSocket: *containerSocket,
+		BrokerURL:             brokerTransport.BrokerURL,
+		BrokerUnixSocket:      brokerTransport.BrokerUnixSocket,
+		ContainerBrokerSocket: brokerTransport.ContainerBrokerSocket,
 	})
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -333,7 +342,7 @@ Usage:
   promptlock auth docker-run [flags] -- <container command> [args...]
 
 Run this on the host to mint a short-lived agent session and launch `+"`docker run`"+` in one step.
-The wrapper bootstraps on the operator socket, pairs and mints on the agent socket, then mounts only the agent socket into the container.
+The wrapper bootstraps on the operator socket, pairs and mints on the agent socket, then wires only agent-side PromptLock transport into the container.
 The operator socket stays on the host.
 
 Typical evaluator flow:

@@ -16,8 +16,11 @@ Use this when an agent needs secrets for build/test/e2e tasks.
 
 ## Request template
 
+The published container image ships this helper on `PATH` as `secretctl.sh`.
+If you are working from a repo checkout instead of the image, `scripts/secretctl.sh` is the same helper.
+
 ```bash
-scripts/secretctl.sh request \
+secretctl.sh request \
   --agent <agent_id> \
   --task <task_id> \
   --ttl <minutes> \
@@ -36,7 +39,7 @@ Capture `request_id` from response and inform human:
 After approval, use lease token:
 
 ```bash
-scripts/secretctl.sh access --lease <lease_token> --secret <secret_name>
+secretctl.sh access --lease <lease_token> --secret <secret_name>
 ```
 
 ## Recommended TTL by task type

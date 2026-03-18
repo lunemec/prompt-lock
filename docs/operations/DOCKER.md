@@ -37,15 +37,16 @@ Yes, dockerizing this tool makes sense.
 - explicit secret/session backend strategy (do not rely only on in-memory defaults)
 
 ## Secure transport recipes
-- Preferred local shape: expose PromptLock via dual unix sockets and mount only the agent socket into the untrusted container.
+- Preferred local shape: expose PromptLock via dual unix sockets on the host and give the untrusted container agent-side PromptLock transport only.
 - Host operator commands (`promptlock watch`, `auth bootstrap`) should use the operator socket only from the host.
-- Container agent commands should use only the agent socket.
+- Container agent commands should use only agent-side transport: the agent Unix socket on Linux, or the daemon-owned loopback bridge URL on non-Linux desktop Docker runtimes.
+- On non-Linux desktop Docker runtimes, local hardened dual-socket mode now starts a daemon-owned loopback agent bridge by default (`agent_bridge_address`, using a dynamic loopback port) because host Unix-socket bind mounts are not reliable there. The bridge forwards only agent-socket traffic and keeps the operator socket host-only; use `promptlock daemon status --json` to discover the live container URL.
 - Non-local TCP is not part of the supported OSS v1 release target.
 - `PROMPTLOCK_ALLOW_INSECURE_TCP=1` is an explicit emergency override; use only for controlled testing and rotate credentials afterward.
 
 ## Canonical host-plus-container walkthrough
 - Use `docs/operations/REAL-E2E-HOST-CONTAINER.md` for the CLI-first host daemon + container agent + interactive approval lab walkthrough.
-- For local developer/operator ergonomics, `promptlock auth docker-run` can mint a short-lived session, mount only the agent socket, and launch the agent container in one command instead of requiring a separate auth-login step.
+- For local developer/operator ergonomics, `promptlock auth docker-run` can mint a short-lived session and launch the agent container in one command instead of requiring a separate auth-login step. On Linux it mounts the agent socket; on non-Linux desktop Docker runtimes it injects the daemon-owned bridge URL or a short-lived fallback relay.
 
 ## Future
 - Provide docker-compose example:

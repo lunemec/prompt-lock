@@ -49,7 +49,7 @@ Evaluator flow:
                             Start the broker on the host
   3. promptlock watch       Approve or deny requests from the host/operator side
   4. promptlock auth docker-run
-                            Launch a containerized agent with only the agent socket mounted
+                            Launch a containerized agent with only agent-side PromptLock transport
 
 Commands:
   setup       Generate a hardened local quickstart for this workspace
@@ -75,14 +75,14 @@ Recommended container quickstart: promptlock auth docker-run
 Use `+"`docker-run`"+` from the host when you want the CLI to:
   1. bootstrap on the operator socket,
   2. pair and mint on the agent socket,
-  3. launch `+"`docker run`"+` with only the agent socket and session env wired into the container.
+  3. launch `+"`docker run`"+` with only agent-side PromptLock transport and session env wired into the container.
 
 Subcommands:
   bootstrap   Create a short-lived bootstrap token from the operator side
   pair        Exchange a bootstrap token for a grant on the agent side
   mint        Mint an agent session token from a grant id
   login       Run bootstrap + pair + mint and print safe session metadata
-  docker-run  Mint a session and launch docker run with the agent socket/session env wired in
+  docker-run  Mint a session and launch docker run with agent-side PromptLock transport/session env wired in
 
 Use "promptlock auth <subcommand> --help" for subcommand flags.
 `) + "\n"
@@ -130,10 +130,15 @@ Usage:
 Examples:
   promptlock daemon start
   promptlock daemon status
+  promptlock daemon status --json
   promptlock daemon stop
 
 Notes:
   - This command manages a local `+"`promptlockd`"+` process using a PID file.
+  - When `+"`PROMPTLOCK_CONFIG`"+` or `+"`--config`"+` points at a setup instance, the default PID and log files live next to that config so separate workspaces do not collide.
+  - In local hardened dual-socket mode on non-Linux hosts, the daemon also starts an agent-only loopback bridge for desktop-Docker containers.
+  - `+"`promptlock daemon status`"+` also probes the local agent API and reports bridge reachability when available.
+  - If you do not set `+"`--log-file`"+`, detached daemon stdout/stderr is discarded unless a config-scoped default log file applies.
   - Use `+"`--binary`"+` when `+"`promptlockd`"+` is not discoverable in PATH.
 `) + "\n"
 }
@@ -152,6 +157,8 @@ Creates a per-workspace quickstart instance outside the repo with:
   - instance.env
   - audit/state/auth files
   - role-separated agent/operator unix sockets
+  - on Unix hosts, a short runtime socket dir to avoid local path-length failures
+  - on non-Linux hosts, a daemon-managed agent bridge URL for desktop-Docker containers
 
 Running setup again reuses the existing complete instance instead of rotating secrets or rewriting files.
 The generated quickstart defaults to `+"`output_security_mode=raw`"+` so the first broker-exec demo can print output.

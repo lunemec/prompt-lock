@@ -8,7 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 - `promptlock` now includes daemon lifecycle commands (`promptlock daemon start|stop|status`), and `promptlock watch` now auto-starts a local daemon by default (with `--external` for connect-only behavior) so internal operator workflows use one primary CLI entrypoint.
+- Daemon lifecycle defaults now follow the selected setup instance: when `PROMPTLOCK_CONFIG`/`--config` points at a workspace instance, `promptlock daemon start|stop|status` use config-scoped PID/log files so concurrent local workspaces do not collide and detached startup keeps logs with that instance.
 - README, docs map, contributor guidance, `promptlock setup` output, and `promptlock` CLI help now share an adoption-first onboarding story that points evaluators to `make setup-local-docker`, clarifies host-versus-container execution, and keeps maintainer/release workflows out of the first-run path.
+- README and MCP operations docs now include client-facing MCP setup guidance for major agent CLIs, plus the documented agent-only macOS desktop-Docker bridge workaround for manual containerized MCP clients.
+- In local hardened dual-socket mode on non-Linux hosts, `promptlockd` now starts an agent-only loopback bridge on a dynamic loopback port by default, advertises it through broker capabilities, and lets `auth docker-run` reuse that daemon-owned bridge before falling back to a short-lived relay.
+- `promptlock daemon status` now probes the selected local agent transport, reports daemon-owned MCP bridge reachability, and supports `--json` so users can confirm the desktop-Docker bridge without manual `curl` calls.
+- `promptlock setup` now places quickstart Unix sockets in a short runtime socket dir, refreshes legacy setup env/config socket paths on reuse, and avoids macOS Unix-socket path-length failures from deep state roots.
 - Agent-facing repository guidance is now shorter and stricter: `AGENTS.md`, planning docs, and architecture-conformance notes now emphasize one canonical status surface, archive closed review history, and keep `ACTIVE-PLAN.md` as a handoff file instead of an accumulating changelog.
 - `cmd/promptlock` is now split into focused files for broker transport, exec flow, watch flow, auth flow, audit verification, setup, and shared helpers instead of concentrating nearly all CLI behavior in one file.
 - `internal/app` control-plane policy code is now split by concern so direct-client flag data, network-egress parsing, output redaction, and policy orchestration are no longer mixed into one dense file.
@@ -31,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Planning and ADR docs now record the broker-managed executable-resolution decision and close the follow-up backlog items for schema cleanup, executable provenance hardening, and graceful compose teardown.
 
 ### Fixed
+- `promptlock watch` now waits for the operator broker transport to become reachable after auto-starting a local daemon, avoiding first-run `socket not found` / `connection refused` races in the new watch-first UX.
+- `promptlock auth docker-run` now falls back to an ephemeral agent-only host bridge on non-Linux desktop Docker runtimes, so the supported host-daemon + container-agent flow works even when host Unix-socket bind mounts are unreliable there.
+- Host/container operations docs and CLI help now describe the supported container leg as agent-side transport only, not socket-mount-only, so the published Linux socket path and non-Linux daemon-bridge path match runtime behavior.
+- `make real-e2e-smoke` now exercises the real containerized `auth docker-run` path and validates that the built image ships the agent helper/skill assets needed inside the container.
+- `secretctl.sh` now honors `PROMPTLOCK_BROKER_URL`, `PROMPTLOCK_AGENT_UNIX_SOCKET`, and `PROMPTLOCK_SESSION_TOKEN` so the shipped agent helper works with the current container runtime env without extra variable translation.
 - Non-dev `env_path` handling no longer falls back to the broker working directory when `PROMPTLOCK_ENV_PATH_ROOT` is unset; hardened profiles now disable `env_path` requests until operators configure an explicit root, while dev mode keeps the cwd fallback only for local testing.
 - `promptlock auth docker-run` now rejects user-supplied env, env-file, mount, volume, user, workdir, and entrypoint overrides that could shadow PromptLock session/socket wiring or replace reserved transport variables, including split `--flag value` docker-arg forms; the raw `--docker-arg` escape hatch is now limited to a small allowlist of non-boundary-shaping flags.
 - Direct-network-client argv inspection remains defense-in-depth only: it now trusts only destination-bearing argv positions/flags and fails closed when `curl`/`wget` include opaque, unclassified, or destination-override inputs such as `--config`, `--proxy`, `--proxy1.0`, `--preproxy`, `--connect-to`, `--resolve`, SOCKS proxy flags, `--input-file`, or `--execute`.
@@ -80,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `promptlock auth docker-run` helper command to mint a short-lived session and launch `docker run` with PromptLock broker/session env already injected, reducing the copy-paste needed for containerized agent startup.
+- Published runtime images now include `secretctl.sh` on `PATH` plus `/opt/promptlock/skills/secret-request/SKILL.md` so containerized agents can discover PromptLock usage guidance without a repo checkout.
 - Role-separated local socket transport:
   - broker config fields `agent_unix_socket` and `operator_unix_socket`
   - CLI role-aware env defaults `PROMPTLOCK_AGENT_UNIX_SOCKET` and `PROMPTLOCK_OPERATOR_UNIX_SOCKET`
