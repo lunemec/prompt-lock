@@ -45,13 +45,15 @@ Recommended first command: promptlock setup
 
 Evaluator flow:
   1. promptlock setup       Generate a host-side quickstart for this workspace
-  2. promptlockd            Start the broker on the host
+  2. promptlock daemon start
+                            Start the broker on the host
   3. promptlock watch       Approve or deny requests from the host/operator side
   4. promptlock auth docker-run
                             Launch a containerized agent with only the agent socket mounted
 
 Commands:
   setup       Generate a hardened local quickstart for this workspace
+  daemon      Start/stop/check the local promptlockd broker process
   watch       Review, list, approve, or deny pending requests from the operator side
   exec        Request secrets, wait for approval, and run locally or via broker-exec
   auth        Bootstrap, pair, mint, or launch a containerized agent session
@@ -113,6 +115,24 @@ By default, this command waits for human approval.
 In the hardened path, use `+"`--intent`"+` with `+"`--broker-exec`"+`.
 In hardened broker-exec mode, prefer direct commands such as `+"`go test ./...`"+` rather than shell wrappers.
 `+"`--auto-approve`"+` is for local demo flows only and requires `+"`PROMPTLOCK_DEV_MODE=1`"+`.
+`) + "\n"
+}
+
+func daemonHelpText() string {
+	return strings.TrimSpace(`
+PromptLock daemon
+
+Usage:
+  promptlock daemon <start|stop|status> [flags]
+
+Examples:
+  promptlock daemon start
+  promptlock daemon status
+  promptlock daemon stop
+
+Notes:
+  - This command manages a local `+"`promptlockd`"+` process using a PID file.
+  - Use `+"`--binary`"+` when `+"`promptlockd`"+` is not discoverable in PATH.
 `) + "\n"
 }
 

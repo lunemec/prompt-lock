@@ -20,6 +20,8 @@ func main() {
 		runExec(os.Args[2:])
 	case "watch":
 		runWatch(os.Args[2:])
+	case "daemon":
+		runDaemon(os.Args[2:])
 	case "audit-verify":
 		runAuditVerify(os.Args[2:])
 	case "auth":

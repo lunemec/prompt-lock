@@ -904,6 +904,8 @@ func TestPromptlockHelpTextPointsFirstTimeUsersToSetup(t *testing.T) {
 		"Recommended first command: promptlock setup",
 		"`promptlock` is the client CLI. `promptlockd` is the host broker daemon.",
 		"Evaluator flow:",
+		"promptlock daemon start",
+		"daemon      Start/stop/check the local promptlockd broker process",
 		"setup       Generate a hardened local quickstart",
 		"auth        Bootstrap, pair, mint, or launch a containerized agent session",
 	} {
@@ -953,6 +955,20 @@ func TestExecHelpTextClarifiesApprovalAndBrokerExec(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("exec help missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestDaemonHelpTextDocumentsLifecycleCommands(t *testing.T) {
+	got := daemonHelpText()
+	for _, want := range []string{
+		"PromptLock daemon",
+		"promptlock daemon <start|stop|status>",
+		"promptlock daemon start",
+		"manages a local `promptlockd` process",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("daemon help missing %q:\n%s", want, got)
 		}
 	}
 }
