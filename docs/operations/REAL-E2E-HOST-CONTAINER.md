@@ -79,6 +79,8 @@ export PROMPTLOCK_AUTH_STORE_KEY='replace_with_long_random_value'
 PROMPTLOCK_CONFIG=/tmp/promptlock-real.json go run ./cmd/promptlockd
 ```
 
+> Planned change: ADR `0030` moves daemon lifecycle UX under `promptlock daemon ...`. This runbook keeps the current `promptlockd` command until that implementation is merged.
+
 This startup mode is the preferred hardened local path and the supported OSS release target.
 If you switch to `state_store.type=external`, treat it as a durability/availability adapter rather than a concurrency-safe multi-node coordinator.
 The example `execution_policy` above allowlists the exact executable name `echo` so step 5 can verify broker-exec with a harmless direct command. `echo-helper` or other prefixed names are still rejected. Broker resolution uses the broker-managed `command_search_paths` defaults, so the host only resolves `echo` from trusted system tool directories rather than the broker process `PATH`. The example also overrides hardened output suppression to `raw` only because the approved command prints a fixed non-sensitive string. Keep the hardened default `none` unless visible output is explicitly required.

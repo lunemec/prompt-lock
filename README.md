@@ -32,101 +32,41 @@ Status: **pre-1.0 OSS release candidate**. The supported OSS deployment target i
 
 See `docs/CONTRACT.md`.
 
-## Start Here
+## Minimal Quickstart
 
-If you want the fastest proof that PromptLock works as an evaluator, start with:
+This is the shortest supported path to prove PromptLock works.
 
-```bash
-go run ./cmd/promptlock setup
-```
+Prerequisites:
+- Go
+- Docker
+- `jq`
 
-That generates a hardened local quickstart instance for this repo and prints the exact next commands for three terminals.
-If you are evaluating from a repo checkout and prefer Make targets, `make setup-local-docker` is the equivalent convenience alias.
-
-## Prerequisites
-- Host has Go, Docker, and `jq`.
-- The recommended quickstart below is the hardened local flow.
-  It uses role-separated Unix sockets by default and does not expose the operator API to the container.
-
-## Quick Mental Model
-- `promptlockd`: the broker running on the host.
-- Operator socket: host-only approval API used by `promptlock watch`.
-- Agent socket: narrower API mounted into the container for agent requests.
-- `intent`: named policy scope that maps approved secrets and egress rules to a task like `run_tests`.
-- `--broker-exec`: the approved command runs on the broker host, not inside the container.
-
-If you only remember one thing: the recommended flow is "host broker + host watch UI + containerized agent CLI waiting for approval".
-
-## Recommended Quickstart: Hardened Local Docker Flow
-
-This is the simplest copy-paste path for a first-time user/operator.
-It runs the broker on the host, keeps operator access on a host-only socket, mounts only the agent socket into the container, waits for human approval, and then executes the approved command on the broker host via `--broker-exec`.
-
-What this proves in one run:
-- the container can request access without seeing the operator socket,
-- the operator can approve from the host,
-- the approved command executes through the broker-host policy boundary,
-- the audit log records the decision trail.
-
-### 1. Generate a host-side quickstart instance for this repo
+Run this in the repo root:
 
 ```bash
 go run ./cmd/promptlock setup
 ```
 
-That runs `go run ./cmd/promptlock setup` and creates a per-workspace quickstart instance under your host state directory, outside the repo tree.
-If you prefer Make targets from a repo checkout, `make setup-local-docker` runs the same command.
-By default it writes:
-- `config.json`
-- `instance.env`
-- audit/state/auth files
-- per-workspace agent/operator Unix sockets
+That prints an `instance.env` path and the next commands to run. Then use three terminals.
 
-The command prints the exact next commands for your current repo.
-The generated `instance.env` includes:
-- `PROMPTLOCK_CONFIG`
-- `PROMPTLOCK_OPERATOR_TOKEN`
-- `PROMPTLOCK_AUTH_STORE_KEY`
-- role-specific Unix-socket env vars
-- a local demo `PROMPTLOCK_SECRET_GITHUB_TOKEN` value so the first container-originated approval flow works immediately
-
-This quickstart intentionally sets `execution_policy.output_security_mode=raw` so the first broker-exec demo can print `go version`.
-After you verify the flow, switch back to the hardened default `none` for stronger containment.
-
-### 2. Terminal A: source the generated env file and start the broker
-
-Runs on the host. This starts the broker daemon that owns approval, audit, and broker-exec policy.
+Terminal A, on the host:
 
 ```bash
 . '<instance-env-file>'
 go run ./cmd/promptlockd
 ```
 
-`promptlock setup` prints the real `instance.env` path for your workspace.
-The supported quickstart keeps config, audit, and durable state outside the repo so those files do not live in the agent-controlled workspace.
-
-### 3. Terminal B: source the same env file and start the human watch UI
-
-Runs on the host. This is the operator-side approval UI and talks to the host-only operator socket.
+Terminal B, on the host:
 
 ```bash
 . '<instance-env-file>'
 go run ./cmd/promptlock watch
 ```
 
-### 4. Terminal C: build the agent image
-
-Runs on the host once. The resulting container only gets the agent socket, not the operator socket.
+Terminal C, on the host:
 
 ```bash
 docker build -t promptlock-agent-lab .
-```
-
-### 5. Terminal C: source the same env file and launch the agent container with a minted session
-
-Runs on the host. This command bootstraps auth across both host sockets, launches `docker run`, and then the containerized CLI waits for approval.
-
-```bash
 . '<instance-env-file>'
 go run ./cmd/promptlock auth docker-run \
   --agent toolbelt-agent \
@@ -146,35 +86,26 @@ go run ./cmd/promptlock auth docker-run \
   -- go version
 ```
 
-Approve the request in Terminal B when prompted.
-Expected output in Terminal C after approval:
+Approve the request in Terminal B. If it works, Terminal C prints:
 
 ```text
 go version ...
 ```
 
-What success looks like:
-- Terminal B shows a pending request with the approved `run_tests` intent.
-- After approval, Terminal C prints `go version ...`.
-- The container never needs the operator socket.
-
-Common first confusion:
-- `promptlockd` runs on the host; `promptlock` is the client CLI.
-- `promptlock auth docker-run` is also a host-side command even though it launches the container.
-- `--broker-exec` runs the approved command on the broker host, not inside the container.
-
-If your base image already includes `promptlock` (for example a derived toolbelt/Codex image), replace `--image promptlock-agent-lab` with that image and keep the same wrapper command.
-
-### 6. Verify the audit log
+Then verify the audit log:
 
 ```bash
 . '<instance-env-file>'
 go run ./cmd/promptlock audit-verify --file "$PROMPTLOCK_SETUP_INSTANCE_DIR/audit.jsonl"
 ```
 
-Expected: `audit verify ok: ...`
+Notes:
+- `promptlockd` is the host broker
+- `promptlock watch` is the host approval UI
+- `promptlock auth docker-run` is a host command that launches the container safely
+- `--broker-exec` means the approved command runs on the host broker, not inside the container
 
-If you want the full host+container lab walkthrough and troubleshooting map, use `docs/operations/REAL-E2E-HOST-CONTAINER.md`.
+If you want the full walkthrough and troubleshooting guide, use `docs/operations/REAL-E2E-HOST-CONTAINER.md`.
 
 ## Secondary Quickstart: Local Dev Demo
 
@@ -190,6 +121,16 @@ In a second terminal:
 PROMPTLOCK_DEV_MODE=1 \
   go run ./cmd/promptlock exec --intent run_tests --ttl 5 --auto-approve -- env
 ```
+
+## Planned CLI simplification (internal-first)
+
+Decision `0030` records the next CLI direction:
+- unify user-facing operations under a single `promptlock` command surface,
+- add `promptlock daemon <start|stop|status>` lifecycle subcommands,
+- keep daemon internals as a separate runtime component,
+- add a convenience watch flow that can bootstrap daemon operation when needed.
+
+Current docs and examples still show the existing `promptlockd` flow until implementation lands.
 
 ## Developer And Release Workflows
 - Full validation gate: `make validate-final`
