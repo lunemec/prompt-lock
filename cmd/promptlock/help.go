@@ -98,6 +98,8 @@ Usage:
   promptlock watch allow --ttl 5 <request_id>
   promptlock watch deny --reason "scope too broad" <request_id>
 
+By default, `+"`promptlock watch`"+` auto-starts a local `+"`promptlockd`"+` daemon when needed.
+Use `+"`--external`"+` to connect to an already-running daemon only.
 Defaults to the operator unix socket when a hardened local setup is active.
 Use this from the host/operator side to review pending requests and make approval decisions.
 `) + "\n"

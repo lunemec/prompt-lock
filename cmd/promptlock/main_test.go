@@ -936,6 +936,8 @@ func TestWatchHelpTextDocumentsOperatorActions(t *testing.T) {
 		"PromptLock watch",
 		"watch list",
 		"watch allow --ttl 5 <request_id>",
+		"auto-starts a local `promptlockd` daemon",
+		"--external",
 		"Defaults to the operator unix socket",
 	} {
 		if !strings.Contains(got, want) {

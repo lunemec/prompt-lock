@@ -312,6 +312,34 @@ func newPendingItem(id string) pendingItem {
 	}
 }
 
+func TestShouldWatchAutostartDaemon(t *testing.T) {
+	t.Setenv("PROMPTLOCK_BROKER_URL", "")
+	t.Setenv("PROMPTLOCK_BROKER_UNIX_SOCKET", "")
+	base := brokerFlags{Broker: ptrString(""), BrokerUnix: ptrString("")}
+	if !shouldWatchAutostartDaemon(false, base) {
+		t.Fatalf("expected watch to auto-start daemon by default")
+	}
+	if shouldWatchAutostartDaemon(true, base) {
+		t.Fatalf("expected --external mode to disable daemon auto-start")
+	}
+	withBroker := brokerFlags{Broker: ptrString("http://example"), BrokerUnix: ptrString("")}
+	if shouldWatchAutostartDaemon(false, withBroker) {
+		t.Fatalf("expected explicit --broker to disable daemon auto-start")
+	}
+	withSocket := brokerFlags{Broker: ptrString(""), BrokerUnix: ptrString("/tmp/p.sock")}
+	if shouldWatchAutostartDaemon(false, withSocket) {
+		t.Fatalf("expected explicit --broker-unix-socket to disable daemon auto-start")
+	}
+	t.Setenv("PROMPTLOCK_BROKER_URL", "http://example")
+	if shouldWatchAutostartDaemon(false, base) {
+		t.Fatalf("expected PROMPTLOCK_BROKER_URL to disable daemon auto-start")
+	}
+}
+
+func ptrString(v string) *string {
+	return &v
+}
+
 func ptrPendingItem(item pendingItem) *pendingItem {
 	return &item
 }

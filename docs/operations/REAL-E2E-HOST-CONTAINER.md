@@ -76,10 +76,8 @@ Export host-provided secret and start daemon:
 ```bash
 export PROMPTLOCK_SECRET_GITHUB_TOKEN='demo_github_token_value'
 export PROMPTLOCK_AUTH_STORE_KEY='replace_with_long_random_value'
-PROMPTLOCK_CONFIG=/tmp/promptlock-real.json go run ./cmd/promptlockd
+PROMPTLOCK_CONFIG=/tmp/promptlock-real.json go run ./cmd/promptlock daemon start
 ```
-
-> Planned change: ADR `0030` moves daemon lifecycle UX under `promptlock daemon ...`. This runbook keeps the current `promptlockd` command until that implementation is merged.
 
 This startup mode is the preferred hardened local path and the supported OSS release target.
 If you switch to `state_store.type=external`, treat it as a durability/availability adapter rather than a concurrency-safe multi-node coordinator.

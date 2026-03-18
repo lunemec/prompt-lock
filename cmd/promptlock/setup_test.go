@@ -292,7 +292,7 @@ func TestRunSetupPrintsContainerFirstCommands(t *testing.T) {
 		"Terminal B (operator watch UI):",
 		"Terminal C (agent container launch):",
 		"cd '" + repoRoot + "'",
-		"go run ./cmd/promptlockd",
+		"go run ./cmd/promptlock daemon start",
 		"go run ./cmd/promptlock watch",
 		"go run ./cmd/promptlock auth docker-run",
 		"docker build -t promptlock-agent-lab .",

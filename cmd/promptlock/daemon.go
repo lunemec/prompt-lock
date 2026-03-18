@@ -78,11 +78,10 @@ func daemonStart(flags daemonFlags) error {
 		return fmt.Errorf("remove stale pid file: %w", err)
 	}
 
-	binPath, err := exec.LookPath(flags.Binary)
+	cmd, launchDesc, err := buildDaemonCommand(flags)
 	if err != nil {
-		return fmt.Errorf("resolve promptlockd binary %q: %w", flags.Binary, err)
+		return err
 	}
-	cmd := exec.Command(binPath)
 	cmd.Env = daemonEnv(flags.Config)
 	if flags.LogFile != "" {
 		if err := ensureParentDir(flags.LogFile); err != nil {
@@ -107,7 +106,7 @@ func daemonStart(flags daemonFlags) error {
 		_ = cmd.Process.Kill()
 		return fmt.Errorf("write pid file: %w", err)
 	}
-	fmt.Printf("started promptlockd (pid=%d)\n", cmd.Process.Pid)
+	fmt.Printf("started promptlockd (pid=%d) via %s\n", cmd.Process.Pid, launchDesc)
 	return nil
 }
 
@@ -196,6 +195,18 @@ func processAlive(pid int) bool {
 	}
 	err = proc.Signal(syscall.Signal(0))
 	return err == nil
+}
+
+func buildDaemonCommand(flags daemonFlags) (*exec.Cmd, string, error) {
+	if path, err := exec.LookPath(flags.Binary); err == nil {
+		return exec.Command(path), path, nil
+	}
+	if strings.TrimSpace(flags.Binary) == "promptlockd" && fileExists("go.mod") && fileExists(filepath.Join("cmd", "promptlockd", "main.go")) {
+		if goPath, goErr := exec.LookPath("go"); goErr == nil {
+			return exec.Command(goPath, "run", "./cmd/promptlockd"), "go run ./cmd/promptlockd", nil
+		}
+	}
+	return nil, "", fmt.Errorf("resolve promptlockd binary %q: executable not found", flags.Binary)
 }
 
 func daemonEnv(configPath string) []string {

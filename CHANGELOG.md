@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- `promptlock` now includes daemon lifecycle commands (`promptlock daemon start|stop|status`), and `promptlock watch` now auto-starts a local daemon by default (with `--external` for connect-only behavior) so internal operator workflows use one primary CLI entrypoint.
 - README, docs map, contributor guidance, `promptlock setup` output, and `promptlock` CLI help now share an adoption-first onboarding story that points evaluators to `make setup-local-docker`, clarifies host-versus-container execution, and keeps maintainer/release workflows out of the first-run path.
 - Agent-facing repository guidance is now shorter and stricter: `AGENTS.md`, planning docs, and architecture-conformance notes now emphasize one canonical status surface, archive closed review history, and keep `ACTIVE-PLAN.md` as a handoff file instead of an accumulating changelog.
 - `cmd/promptlock` is now split into focused files for broker transport, exec flow, watch flow, auth flow, audit verification, setup, and shared helpers instead of concentrating nearly all CLI behavior in one file.

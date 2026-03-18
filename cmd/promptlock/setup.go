@@ -391,7 +391,7 @@ func renderWorkspaceSetupSummary(result workspaceSetupResult) string {
 		"Terminal A (broker host):",
 		"  " + changeDirCmd,
 		"  " + sourceCmd,
-		"  go run ./cmd/promptlockd",
+		"  go run ./cmd/promptlock daemon start",
 		"Terminal B (operator watch UI):",
 		"  " + changeDirCmd,
 		"  " + sourceCmd,

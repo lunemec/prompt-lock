@@ -53,7 +53,7 @@ Terminal A, on the host:
 
 ```bash
 . '<instance-env-file>'
-go run ./cmd/promptlockd
+go run ./cmd/promptlock daemon start
 ```
 
 Terminal B, on the host:

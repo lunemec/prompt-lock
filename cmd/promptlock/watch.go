@@ -110,6 +110,11 @@ func runWatch(args []string) {
 		fs.Int("ttl", 5, "approval ttl override")
 		fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 		fs.Bool("once", false, "process one pass and exit")
+		fs.Bool("external", false, "connect to an already-running daemon only (disable auto-start)")
+		fs.String("pid-file", getenv("PROMPTLOCK_DAEMON_PID_FILE", defaultDaemonPIDFile), "daemon pid file path (auto-start mode)")
+		fs.String("binary", getenv("PROMPTLOCK_DAEMON_BINARY", "promptlockd"), "promptlockd binary path/name for auto-start mode")
+		fs.String("config", getenv("PROMPTLOCK_CONFIG", ""), "optional config path for daemon auto-start")
+		fs.String("log-file", getenv("PROMPTLOCK_DAEMON_LOG_FILE", ""), "optional daemon log file for auto-start mode")
 		_ = conn
 		printFlagHelp(os.Stdout, watchHelpText(), fs)
 		return
@@ -121,7 +126,17 @@ func runWatch(args []string) {
 	defaultTTL := fs.Int("ttl", 5, "approval ttl override")
 	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
 	once := fs.Bool("once", false, "process one pass and exit")
+	external := fs.Bool("external", false, "connect to an already-running daemon only (disable auto-start)")
+	pidFile := fs.String("pid-file", getenv("PROMPTLOCK_DAEMON_PID_FILE", defaultDaemonPIDFile), "daemon pid file path (auto-start mode)")
+	daemonBinary := fs.String("binary", getenv("PROMPTLOCK_DAEMON_BINARY", "promptlockd"), "promptlockd binary path/name for auto-start mode")
+	daemonConfig := fs.String("config", getenv("PROMPTLOCK_CONFIG", ""), "optional config path for daemon auto-start")
+	daemonLogFile := fs.String("log-file", getenv("PROMPTLOCK_DAEMON_LOG_FILE", ""), "optional daemon log file for auto-start mode")
 	fs.Parse(args)
+	if shouldWatchAutostartDaemon(*external, conn) {
+		if err := daemonStart(daemonFlags{PIDFile: strings.TrimSpace(*pidFile), Binary: strings.TrimSpace(*daemonBinary), Config: strings.TrimSpace(*daemonConfig), LogFile: strings.TrimSpace(*daemonLogFile)}); err != nil {
+			fatal(fmt.Errorf("watch auto-start failed: %w", err))
+		}
+	}
 	broker, err := conn.resolve(brokerRoleOperator)
 	if err != nil {
 		fatal(err)
@@ -415,6 +430,25 @@ func pendingMembershipSignature(items []pendingItem) string {
 	}
 	sort.Strings(ids)
 	return strings.Join(ids, "\x00")
+}
+
+func shouldWatchAutostartDaemon(external bool, conn brokerFlags) bool {
+	if external {
+		return false
+	}
+	if conn.Broker != nil && strings.TrimSpace(*conn.Broker) != "" {
+		return false
+	}
+	if conn.BrokerUnix != nil && strings.TrimSpace(*conn.BrokerUnix) != "" {
+		return false
+	}
+	if strings.TrimSpace(os.Getenv("PROMPTLOCK_BROKER_URL")) != "" {
+		return false
+	}
+	if strings.TrimSpace(os.Getenv("PROMPTLOCK_BROKER_UNIX_SOCKET")) != "" {
+		return false
+	}
+	return true
 }
 
 func watchBrokerTarget(broker, brokerUnix string) string {
