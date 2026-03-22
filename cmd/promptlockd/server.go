@@ -35,6 +35,7 @@ type server struct {
 	ambientProcessEnv    []string
 	unixSocketConfigured bool
 	agentBridgeAddress   string
+	envPathEnabled       bool
 	insecureDevMode      bool
 	authLifecycleMu      sync.Mutex
 	durabilityMu         sync.RWMutex

@@ -6,6 +6,14 @@ Instead of mounting raw long-lived secrets into agent containers, agents request
 
 This reduces prompt-injection blast radius while keeping autonomous workflows practical.
 
+## Quick Links
+
+- Fastest end-to-end repo demo: [`Minimal Quickstart`](#minimal-quickstart)
+- Full host/operator/container walkthrough: [`docs/operations/REAL-E2E-HOST-CONTAINER.md`](docs/operations/REAL-E2E-HOST-CONTAINER.md)
+- MCP wiring details and constraints: [`docs/operations/MCP.md`](docs/operations/MCP.md)
+- CLI behavior and approval semantics: [`docs/operations/WRAPPER-EXEC.md`](docs/operations/WRAPPER-EXEC.md)
+- Contributor map and repo rules: [`AGENTS.md`](AGENTS.md), [`CONTRIBUTING.md`](CONTRIBUTING.md)
+
 ## Name
 
 Project name: **PromptLock**
@@ -52,6 +60,8 @@ Notes:
 - `promptlockd` is the underlying broker runtime if you want to run the daemon separately.
 - `promptlock-mcp` is the experimental stdio MCP adapter.
 - `promptlock-mcp-launch` is the wrapper-aware launcher for MCP clients that should not persist session token or transport values.
+- If your coding agent runs inside `promptlock auth docker-run`, run `promptlock mcp doctor` inside the container before the first MCP request.
+- For Codex inside that container, register once with `codex mcp add promptlock -- promptlock-mcp-launch` (for other CLIs, use the MCP section below).
 - The quickstart below still expects a checkout of this repo because it runs `promptlock setup` from the workspace root and builds the local lab image from this repo's `agent-lab` Docker target.
 
 ## Minimal Quickstart
@@ -68,16 +78,14 @@ Clone this repo and run these commands from the repo root.
 This demo flow is intentionally self-contained in this repository so anyone can test it as-is.
 Use two host terminals.
 
-1. Prepare the workspace, build the demo image, and create a disposable demo env file:
+1. Initialize PromptLock and build the demo image:
 
 ```bash
 promptlock setup
 docker build --target agent-lab -t promptlock-agent-lab .
-mkdir -p demo-envs
-cat > demo-envs/github.env <<'EOF'
-github_token=FAKE_GITHUB_TOKEN
-EOF
 ```
+
+The repo already includes `demo-envs/github.env` with a disposable demo token value (`FAKE_GITHUB_TOKEN`).
 
 2. Terminal A (host approval flow):
 
@@ -95,10 +103,10 @@ promptlock auth docker-run \
   --entrypoint /bin/bash \
   --workdir /workspace \
   --mount type=bind,src="$PWD",dst=/workspace \
-  --hide-path demo-envs \
+  --hide-path demo-envs/github.env \
   --mount type=bind,src="$HOME/.codex",dst=/home/promptlock/.codex \
   --env TERM="${TERM:-xterm-256color}" \
-  -- \
+  --
 ```
 
 4. Inside the container shell:
@@ -109,22 +117,31 @@ codex mcp add promptlock -- promptlock-mcp-launch
 codex -C /workspace --no-alt-screen
 ```
 
-5. In Codex chat, ask for the demo secret via PromptLock MCP:
+Agent runtime behavior for this repo is defined in `/workspace/AGENTS.md` (mounted in the container). Keep prompts outcome-first and let the agent follow repo rules for tests and secret/env handling.
 
-```text
-Read /workspace/Makefile and tell me what demo-print-github-token does. Then call execute_with_intent with intent run_tests, env_path "demo-envs/github.env", and command ["make","demo-print-github-token"]. Tell me the exact tool result.
+If you want this behavior to persist in your own project, add this block to your project `AGENTS.md`:
+
+```markdown
+## PromptLock MCP runtime rules
+- Use PromptLock MCP for tests and any command that needs secrets or env vars.
+- Use `execute_with_intent` for MCP requests.
+- Default quickstart shape: `intent=run_tests`, `env_path="demo-envs/github.env"`.
+- Prefer direct argv commands (for example `["make","demo-run-env-showcase-tests"]`) instead of shell wrappers.
+- Before the first MCP request in a wrapper-launched container, run `promptlock mcp doctor`; if needed, register with `codex mcp add promptlock -- promptlock-mcp-launch`.
+- If MCP is unavailable or a request is denied, stop and report the blocker rather than reading secret files or raw env directly.
 ```
 
-Or run a small env-driven test showcase through the same intent/env_path:
+5. Then, in Codex chat, use this outcome-first prompt:
 
 ```text
-Use the promptlock MCP server and call execute_with_intent with intent run_tests, env_path "demo-envs/github.env", and command ["make","demo-run-env-showcase-tests"]. Tell me the exact tool result.
+Run the demo env showcase tests and report pass/fail with output.
 ```
 
-Approve the request in Terminal A. Expected result from the tool path:
+Approve the request in Terminal A. Expected result from the tool path includes passing showcase tests:
 
 ```text
-FAKE_GITHUB_TOKEN
+PASS
+ok  	github.com/lunemec/promptlock/demo-envs/showcase	<duration>
 ```
 
 Then verify the audit log:
@@ -139,7 +156,7 @@ Notes:
 - `promptlockd` is the host broker
 - `promptlock watch` is the host approval UI and auto-starts `promptlockd` when needed
 - `promptlock auth docker-run` is a host command that launches the container safely
-- `--hide-path demo-envs` masks the repo demo env folder inside the container while still allowing host-side broker env-path resolution
+- `--hide-path demo-envs/github.env` masks the repo demo env file inside the container while still allowing host-side broker env-path resolution
 - `make demo-print-github-token` prints `GITHUB_TOKEN` on the host broker through approved `execute_with_intent`
 - `make demo-run-env-showcase-tests` runs `go test ./demo-envs/showcase` and verifies leased `GITHUB_TOKEN` plus demo metadata env values set by the target
 
@@ -325,12 +342,6 @@ codex mcp add promptlock \
 codex mcp list --json
 ```
 
-Example prompt:
-
-```text
-Use the promptlock MCP server and call execute_with_intent with intent run_tests and command ["go","version"].
-```
-
 </details>
 
 <details>
@@ -348,12 +359,6 @@ claude mcp add --scope project \
 claude mcp list
 ```
 
-Example prompt:
-
-```text
-Use the promptlock MCP server and run execute_with_intent for ["go","version"] under intent run_tests.
-```
-
 </details>
 
 <details>
@@ -369,12 +374,6 @@ gemini mcp add --scope project \
   "${PROMPTLOCK_MCP_BIN}"
 
 gemini mcp list
-```
-
-Example prompt:
-
-```text
-Use the promptlock MCP server and call execute_with_intent with intent run_tests and command ["go","version"].
 ```
 
 </details>
@@ -408,13 +407,13 @@ cursor-agent mcp list
 cursor-agent mcp list-tools promptlock
 ```
 
-Example prompt:
+</details>
+
+Example prompt after registration (works across all CLIs above):
 
 ```text
-Use the promptlock MCP server to run execute_with_intent for ["go","version"] with intent run_tests.
+Run go version in this workspace and show the output. If any step needs credentials, secrets, or env-based access, follow the repo agent runtime rules.
 ```
-
-</details>
 
 ### Wrapper auto-injected env (reference)
 
@@ -439,10 +438,8 @@ For more adapter detail, protocol notes, and constraints, see `docs/operations/M
 - `docs/README.md` — documentation map and maintenance rules
 - `docs/CONTRACT.md` — API and security contract
 - `docs/NOTE-project-style-adoption.md` — reusable agent/docs style for other projects
-- `docs/architecture/` — architecture source of truth (hexagonal required)
-  - includes secure execution flow and threat-model notes (`SECURE-EXEC-FLOW.md`)
-- `docs/decisions/` — ADRs for architecture and requirement changes
-  - `docs/decisions/INDEX.md` is the ADR entrypoint
+- `docs/architecture/` — architecture source of truth (hexagonal required), including secure execution flow and threat-model notes (`SECURE-EXEC-FLOW.md`)
+- `docs/decisions/` — ADRs for architecture and requirement changes (`docs/decisions/INDEX.md` is the ADR entrypoint)
 - `docs/standards/` — engineering standards (Red-Green-Blue TDD, security reporting)
 - `docs/plans/` — `ACTIVE-PLAN.md` handoff, `BACKLOG.md` open work, plus typed subdirectories for initiatives, checklists, notes, status files, and archives
 - `docs/operations/` — runbooks, Dockerization, config, wrapper execution notes, MCP adapter notes, key rotation/revocation, and release guide
@@ -459,15 +456,22 @@ This repository is primarily **agent-generated code and documentation**, followi
 
 ## Important
 
-This repository targets a **public pre-1.0 OSS release**. Hardened deployment is the supported path for real-world use; dev-profile defaults and demo helpers remain for local testing and migration.
+This repository targets a **public pre-1.0 OSS release**.
 
-Current implementation uses in-memory request/lease/auth/session stores by default unless configured with durable host-backed state files. For OSS-targeted use, configure the hardened local controls, encrypted auth persistence (`auth.store_encryption_key_env`), durable request/lease state via either local file persistence (`state_store_file`, `state_store.type=file`) or an external HTTP state adapter (`state_store.type=external`), and external secret backend adapters.
+Supported production posture:
 
-Startup guardrails now enforce fail-closed production posture: non-dev profiles require durable state files and non-`in_memory` secret source; dev profile startup requires explicit opt-in (`PROMPTLOCK_ALLOW_DEV_PROFILE=1`).
+- Use the hardened local-only deployment path (dual Unix sockets).
+- Configure encrypted auth persistence (`auth.store_encryption_key_env`).
+- Configure durable request/lease state (`state_store_file`, `state_store.type=file`, or `state_store.type=external`).
+- Use a non-`in_memory` secret source plus external secret backend integration (Vault/1Password/etc.).
+- Persist audit trails on the host outside agent-controlled workspace/container paths.
 
-Supported OSS hardening centers on local dual unix sockets, policy enforcement, encrypted at-rest auth persistence, local audit hash-chain integrity verification, and external secret backend integration (Vault/1Password/etc.). Non-local TCP TLS/mTLS transport support has been removed from the supported code path; PromptLock is a local-only Unix-socket deployment.
+Fail-closed guardrails:
 
-**Critical:** audit trail must be persisted on the host (outside agent-controlled workspace/container paths) so request/approval/access history cannot be silently altered by agent workloads.
+- Non-dev profiles require durable state files and non-`in_memory` secret source.
+- Dev profile startup requires explicit opt-in (`PROMPTLOCK_ALLOW_DEV_PROFILE=1`).
+
+Non-local TCP TLS/mTLS transport is not a supported deployment path.
 
 Docker deployment guidance: `docs/operations/DOCKER.md`.
 Security policy: `SECURITY.md`.

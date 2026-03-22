@@ -28,6 +28,8 @@ func main() {
 		runAuth(os.Args[2:])
 	case "setup":
 		runSetup(os.Args[2:])
+	case "mcp":
+		runMCP(os.Args[2:])
 	case "help":
 		fmt.Print(promptlockHelpText())
 	default:

@@ -14,7 +14,7 @@ type ExecutionPolicy struct {
 
 func defaultExecutionPolicy() ExecutionPolicy {
 	return ExecutionPolicy{
-		ExactMatchExecutables: []string{"bash", "sh", "npm", "node", "go", "python", "pytest", "make", "git"},
+		ExactMatchExecutables: []string{"bash", "sh", "npm", "node", "go", "python", "python3", "pytest", "make", "git"},
 		CommandSearchPaths:    defaultCommandSearchPaths(),
 		DenylistSubstrings:    []string{"printenv", "/proc/", "environ", "aws_secret_access_key", "OPENAI_API_KEY"},
 		OutputSecurityMode:    "redacted",

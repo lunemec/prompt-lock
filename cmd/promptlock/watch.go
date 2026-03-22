@@ -108,7 +108,7 @@ func runWatch(args []string) {
 		conn := registerBrokerFlags(fs)
 		fs.Duration("poll-interval", 3*time.Second, "poll interval")
 		fs.Int("ttl", 5, "approval ttl override")
-		fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
+		fs.String("operator-token", defaultOperatorToken(), "operator token")
 		fs.Bool("once", false, "process one pass and exit")
 		fs.Bool("external", false, "connect to an already-running daemon only (disable auto-start)")
 		fs.String("pid-file", getenv("PROMPTLOCK_DAEMON_PID_FILE", ""), "daemon pid file path (auto-start mode; defaults to config-scoped path when --config/PROMPTLOCK_CONFIG is set)")
@@ -124,7 +124,7 @@ func runWatch(args []string) {
 	conn := registerBrokerFlags(fs)
 	poll := fs.Duration("poll-interval", 3*time.Second, "poll interval")
 	defaultTTL := fs.Int("ttl", 5, "approval ttl override")
-	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
+	operatorToken := fs.String("operator-token", defaultOperatorToken(), "operator token")
 	once := fs.Bool("once", false, "process one pass and exit")
 	external := fs.Bool("external", false, "connect to an already-running daemon only (disable auto-start)")
 	pidFile := fs.String("pid-file", getenv("PROMPTLOCK_DAEMON_PID_FILE", ""), "daemon pid file path (auto-start mode; defaults to config-scoped path when --config/PROMPTLOCK_CONFIG is set)")
@@ -142,6 +142,9 @@ func runWatch(args []string) {
 	}
 	broker, err := conn.resolve(brokerRoleOperator)
 	if err != nil {
+		fatal(err)
+	}
+	if err := validateWatchEnvPathExpectation(broker.BaseURL, broker.UnixSocket); err != nil {
 		fatal(err)
 	}
 	client := brokerWatchClient{
@@ -282,10 +285,13 @@ func promptWatchDecision(input *bufio.Reader, out io.Writer) (string, error) {
 func runWatchList(args []string) {
 	fs := flag.NewFlagSet("watch list", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
-	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
+	operatorToken := fs.String("operator-token", defaultOperatorToken(), "operator token")
 	fs.Parse(args)
 	broker, err := conn.resolve(brokerRoleOperator)
 	if err != nil {
+		fatal(err)
+	}
+	if err := validateWatchEnvPathExpectation(broker.BaseURL, broker.UnixSocket); err != nil {
 		fatal(err)
 	}
 	items, err := listPending(broker.BaseURL, broker.UnixSocket, *operatorToken)
@@ -304,7 +310,7 @@ func runWatchList(args []string) {
 func runWatchAllow(args []string) {
 	fs := flag.NewFlagSet("watch allow", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
-	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
+	operatorToken := fs.String("operator-token", defaultOperatorToken(), "operator token")
 	ttl := fs.Int("ttl", 5, "approval ttl override")
 	fs.Parse(args)
 	if fs.NArg() < 1 {
@@ -313,6 +319,9 @@ func runWatchAllow(args []string) {
 	requestID := fs.Arg(0)
 	broker, err := conn.resolve(brokerRoleOperator)
 	if err != nil {
+		fatal(err)
+	}
+	if err := validateWatchEnvPathExpectation(broker.BaseURL, broker.UnixSocket); err != nil {
 		fatal(err)
 	}
 	if _, err := approve(broker.BaseURL, broker.UnixSocket, *operatorToken, requestID, *ttl); err != nil {
@@ -324,7 +333,7 @@ func runWatchAllow(args []string) {
 func runWatchDeny(args []string) {
 	fs := flag.NewFlagSet("watch deny", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
-	operatorToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
+	operatorToken := fs.String("operator-token", defaultOperatorToken(), "operator token")
 	reason := fs.String("reason", "denied by operator", "deny reason")
 	fs.Parse(args)
 	if fs.NArg() < 1 {
@@ -333,6 +342,9 @@ func runWatchDeny(args []string) {
 	requestID := fs.Arg(0)
 	broker, err := conn.resolve(brokerRoleOperator)
 	if err != nil {
+		fatal(err)
+	}
+	if err := validateWatchEnvPathExpectation(broker.BaseURL, broker.UnixSocket); err != nil {
 		fatal(err)
 	}
 	if err := deny(broker.BaseURL, broker.UnixSocket, *operatorToken, requestID, *reason); err != nil {
@@ -452,6 +464,32 @@ func shouldWatchAutostartDaemon(external bool, conn brokerFlags) bool {
 		return false
 	}
 	return true
+}
+
+func validateWatchEnvPathExpectation(broker, brokerUnix string) error {
+	expectedRoot := strings.TrimSpace(os.Getenv("PROMPTLOCK_ENV_PATH_ROOT"))
+	if expectedRoot == "" {
+		return nil
+	}
+	caps, err := brokerCapabilities(broker, brokerUnix)
+	if err != nil {
+		return fmt.Errorf("watch env-path preflight failed: %w", err)
+	}
+	if caps.EnvPathEnabled == nil {
+		return fmt.Errorf(
+			"watch env-path preflight failed: broker %s does not advertise env_path_enabled; cannot verify PROMPTLOCK_ENV_PATH_ROOT=%q compatibility",
+			watchBrokerTarget(broker, brokerUnix),
+			expectedRoot,
+		)
+	}
+	if !*caps.EnvPathEnabled {
+		return fmt.Errorf(
+			"watch env-path preflight failed: broker %s has env_path disabled while PROMPTLOCK_ENV_PATH_ROOT=%q is set; restart the daemon with matching env or unset PROMPTLOCK_ENV_PATH_ROOT",
+			watchBrokerTarget(broker, brokerUnix),
+			expectedRoot,
+		)
+	}
+	return nil
 }
 
 func watchBrokerTarget(broker, brokerUnix string) string {

@@ -226,7 +226,7 @@ func (c *Config) applyProfile() {
 		if c.ExecutionPolicy.MaxOutputBytes > 32768 {
 			c.ExecutionPolicy.MaxOutputBytes = 32768
 		}
-		hardenedAllowlist := []string{"npm", "node", "go", "python", "pytest", "make", "git"}
+		hardenedAllowlist := []string{"npm", "node", "go", "python", "python3", "pytest", "make", "git"}
 		if c.executionPolicyExecutablesConfigured() {
 			c.ExecutionPolicy.ExactMatchExecutables = mergeUniqueStrings(hardenedAllowlist, c.ExecutionPolicy.ExactMatchExecutables)
 		} else {

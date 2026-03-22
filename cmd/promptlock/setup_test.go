@@ -431,26 +431,27 @@ func TestRunSetupPrintsContainerFirstCommands(t *testing.T) {
 	})
 	for _, want := range []string{
 		"PromptLock local docker quickstart is ready",
-		"You are ready for the first approval flow in this workspace.",
-		"Next commands:",
-		"Run the following commands exactly once in three terminals:",
-		"Terminal A (broker host):",
-		"Terminal B (operator watch UI):",
-		"Terminal C (agent container launch):",
+		"Host-side commands auto-detect this workspace setup when run from:",
 		"cd '" + repoRoot + "'",
 		"go run ./cmd/promptlock daemon start",
 		"go run ./cmd/promptlock watch",
 		"go run ./cmd/promptlock auth docker-run",
-		"docker build -t promptlock-agent-lab .",
+		"docker build --target agent-lab -t promptlock-agent-lab .",
 		"instance.env",
-		"Socket dir:",
-		"Quickstart socket paths live under",
-		"After daemon start, use `go run ./cmd/promptlock daemon status --json` to discover the active container bridge URL.",
-		"agent-only loopback bridge for containerized MCP clients",
+		"Config: ",
+		"Env:    ",
+		"Source instance.env only if you want to run the quickstart from another directory",
+		"On non-Linux desktop Docker runtimes, the daemon also starts the agent-only bridge automatically.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("setup output missing %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "You are ready for the first approval flow in this workspace.") {
+		t.Fatalf("setup output still contains old verbose intro:\n%s", out)
+	}
+	if lines := len(strings.Split(strings.TrimSpace(out), "\n")); lines > 26 {
+		t.Fatalf("setup output too long (%d lines):\n%s", lines, out)
 	}
 }
 

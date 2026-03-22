@@ -15,7 +15,7 @@ func TestHandleToolsList(t *testing.T) {
 	// Deep IO harness is planned in integration stage.
 	tools := []map[string]any{{
 		"name":        "execute_with_intent",
-		"description": "Request lease by intent and execute command via broker-exec path.",
+		"description": executeWithIntentToolDescription,
 		"inputSchema": map[string]any{"type": "object"},
 	}}
 	b, err := json.Marshal(map[string]any{"tools": tools})

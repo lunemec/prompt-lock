@@ -4,8 +4,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/lunemec/promptlock/internal/mcplaunchenv"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -135,7 +137,7 @@ func authLogin(broker, brokerUnix, operatorToken, agentID, containerID string) (
 func runAuthBootstrap(args []string) {
 	fs := flag.NewFlagSet("auth bootstrap", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
-	opToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
+	opToken := fs.String("operator-token", defaultOperatorToken(), "operator token")
 	agent := fs.String("agent", "", "agent id")
 	container := fs.String("container", "", "container id")
 	fs.Parse(args)
@@ -195,7 +197,7 @@ func runAuthMint(args []string) {
 func runAuthLogin(args []string) {
 	fs := flag.NewFlagSet("auth login", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
-	opToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
+	opToken := fs.String("operator-token", defaultOperatorToken(), "operator token")
 	agent := fs.String("agent", "", "agent id")
 	container := fs.String("container", "", "container id")
 	showGrantID := fs.Bool("show-grant-id", false, "include pairing grant id in stdout output")
@@ -223,25 +225,37 @@ func runAuthLogin(args []string) {
 type dockerRunConfig struct {
 	Image                 string
 	ContainerName         string
+	WrapperAgentID        string
+	WrapperTaskID         string
 	SessionToken          string
 	BrokerURL             string
 	BrokerUnixSocket      string
 	ContainerBrokerSocket string
+	WrapperMCPEnvFile     string
+	ContainerMCPEnvFile   string
 	User                  string
 	Entrypoint            string
 	Workdir               string
 	AdditionalMounts      []string
+	HiddenPaths           []string
+	HiddenMounts          []dockerHiddenMount
 	AdditionalEnv         []string
 	AdditionalDockerArgs  []string
 	Command               []string
 	AttachTTY             bool
 }
 
+type dockerHiddenMount struct {
+	Source      string
+	Destination string
+	ReadOnly    bool
+}
+
 func runAuthDockerRun(args []string) {
 	if hasHelpFlag(args) {
 		fs := flag.NewFlagSet("auth docker-run", flag.ContinueOnError)
 		registerBrokerFlags(fs)
-		fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
+		fs.String("operator-token", defaultOperatorToken(), "operator token")
 		fs.String("agent", "", "agent id")
 		fs.String("container", "", "container id / docker name")
 		fs.String("image", "", "docker image to run")
@@ -249,9 +263,11 @@ func runAuthDockerRun(args []string) {
 		fs.String("entrypoint", "", "optional docker entrypoint override")
 		fs.String("workdir", "", "optional working directory inside container")
 		var mounts stringSliceFlag
+		var hiddenPaths stringSliceFlag
 		var envs stringSliceFlag
 		var dockerArgs stringSliceFlag
 		fs.Var(&mounts, "mount", "additional docker --mount spec (repeatable)")
+		fs.Var(&hiddenPaths, "hide-path", "container path to shadow with an empty readonly placeholder (repeatable); relative paths resolve from --workdir")
 		fs.Var(&envs, "env", "additional container env KEY=VALUE (repeatable)")
 		fs.Var(&dockerArgs, "docker-arg", "additional allowlisted docker run flag or flag value (repeatable)")
 		printFlagHelp(os.Stdout, authDockerRunHelpText(), fs)
@@ -260,7 +276,7 @@ func runAuthDockerRun(args []string) {
 
 	fs := flag.NewFlagSet("auth docker-run", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
-	opToken := fs.String("operator-token", getenv("PROMPTLOCK_OPERATOR_TOKEN", ""), "operator token")
+	opToken := fs.String("operator-token", defaultOperatorToken(), "operator token")
 	agent := fs.String("agent", "", "agent id")
 	container := fs.String("container", "", "container id / docker name")
 	image := fs.String("image", "", "docker image to run")
@@ -268,9 +284,11 @@ func runAuthDockerRun(args []string) {
 	entrypoint := fs.String("entrypoint", "", "optional docker entrypoint override")
 	workdir := fs.String("workdir", "", "optional working directory inside container")
 	var mounts stringSliceFlag
+	var hiddenPaths stringSliceFlag
 	var envs stringSliceFlag
 	var dockerArgs stringSliceFlag
 	fs.Var(&mounts, "mount", "additional docker --mount spec (repeatable)")
+	fs.Var(&hiddenPaths, "hide-path", "container path to shadow with an empty readonly placeholder (repeatable); relative paths resolve from --workdir")
 	fs.Var(&envs, "env", "additional container env KEY=VALUE (repeatable)")
 	fs.Var(&dockerArgs, "docker-arg", "additional allowlisted docker run flag or flag value (repeatable)")
 	fs.Parse(args)
@@ -296,36 +314,53 @@ func runAuthDockerRun(args []string) {
 		}
 	}()
 
-	runArgs, err := buildDockerRunArgs(dockerRunConfig{
+	runCfg := dockerRunConfig{
 		Image:                 *image,
 		ContainerName:         *container,
+		WrapperAgentID:        *agent,
+		WrapperTaskID:         *container,
 		SessionToken:          loginResult.SessionToken,
 		BrokerURL:             brokerTransport.BrokerURL,
 		BrokerUnixSocket:      brokerTransport.BrokerUnixSocket,
 		ContainerBrokerSocket: brokerTransport.ContainerBrokerSocket,
+		ContainerMCPEnvFile:   mcplaunchenv.DefaultFilePath,
 		User:                  currentUserDockerIdentity(),
 		Entrypoint:            *entrypoint,
 		Workdir:               *workdir,
 		AdditionalMounts:      mounts,
+		HiddenPaths:           hiddenPaths,
 		AdditionalEnv:         envs,
 		AdditionalDockerArgs:  dockerArgs,
 		Command:               fs.Args(),
 		AttachTTY:             isTerminalFile(os.Stdin) && isTerminalFile(os.Stdout),
-	})
+	}
+	wrapperMCPEnvFile, err := writeDockerRunWrapperMCPEnvFile(runCfg)
+	if err != nil {
+		fatal(err)
+	}
+	runCfg.WrapperMCPEnvFile = wrapperMCPEnvFile
+	defer func() {
+		_ = os.Remove(wrapperMCPEnvFile)
+	}()
+	runCfg, hiddenCleanup, err := prepareDockerRunHiddenMounts(runCfg)
+	if err != nil {
+		fatal(err)
+	}
+	defer hiddenCleanup()
+	runArgs, err := buildDockerRunArgs(runCfg)
 	if err != nil {
 		fatal(err)
 	}
 
 	cmd := exec.Command("docker", runArgs...)
-	cmd.Env = buildDockerRunEnv(os.Environ(), dockerRunConfig{
-		SessionToken:          loginResult.SessionToken,
-		BrokerURL:             brokerTransport.BrokerURL,
-		BrokerUnixSocket:      brokerTransport.BrokerUnixSocket,
-		ContainerBrokerSocket: brokerTransport.ContainerBrokerSocket,
-	})
+	cmd.Env = buildDockerRunEnv(os.Environ(), runCfg)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if guidance := dockerRunPostLaunchGuidance(runCfg); guidance != "" {
+		fmt.Fprintln(os.Stderr, guidance)
+		fmt.Fprintln(os.Stderr)
+	}
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			os.Exit(ee.ExitCode())
@@ -344,12 +379,18 @@ Usage:
 Run this on the host to mint a short-lived agent session and launch `+"`docker run`"+` in one step.
 The wrapper bootstraps on the operator socket, pairs and mints on the agent socket, then wires only agent-side PromptLock transport into the container.
 The operator socket stays on the host.
+Wrapper-launched containers also export stable wrapper env (`+"`PROMPTLOCK_WRAPPER_AGENT_ID`"+`, `+"`PROMPTLOCK_WRAPPER_TASK_ID`"+`, `+"`PROMPTLOCK_WRAPPER_SESSION_TOKEN`"+`, and current wrapper transport) and now mount a live wrapper MCP env file for `+"`promptlock-mcp-launch`"+` / `+"`promptlock-mcp`"+`, so in-container MCP clients like Codex can keep a portable one-time registration without persisting per-session session-token or transport values.
+Interactive Codex-style launches that mount a Codex home also print an in-container reminder to run `+"`promptlock mcp doctor`"+` before starting Codex.
 
 Typical evaluator flow:
   1. Run `+"`promptlock setup`"+` once for the workspace
   2. Start `+"`promptlockd`"+` on the host
   3. Start `+"`promptlock watch`"+` on the host
   4. Run this command from the host to launch the containerized agent
+
+Useful flags:
+  - `+"`--mount`"+` passes through workspace or home-directory bind mounts.
+  - `+"`--hide-path`"+` shadows mounted files or directories with empty readonly placeholders inside the container. Use it when you keep demo or real `+"`.env`"+` / SOPS files in the repo but do not want the container to read them directly.
 
 Example:
   promptlock auth docker-run \
@@ -393,6 +434,9 @@ func buildDockerRunArgs(cfg dockerRunConfig) ([]string, error) {
 		"--pids-limit", "256",
 		"--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m",
 	)
+	if strings.TrimSpace(cfg.WrapperMCPEnvFile) != "" && strings.TrimSpace(cfg.ContainerMCPEnvFile) != "" {
+		args = append(args, "--mount", fmt.Sprintf("type=bind,src=%s,dst=%s,readonly", filepath.Clean(cfg.WrapperMCPEnvFile), cfg.ContainerMCPEnvFile))
+	}
 
 	if strings.TrimSpace(cfg.BrokerUnixSocket) != "" {
 		containerSocket := strings.TrimSpace(cfg.ContainerBrokerSocket)
@@ -402,12 +446,19 @@ func buildDockerRunArgs(cfg dockerRunConfig) ([]string, error) {
 		args = append(args,
 			"--mount", fmt.Sprintf("type=bind,src=%s,dst=%s", filepath.Clean(cfg.BrokerUnixSocket), containerSocket),
 			"-e", "PROMPTLOCK_AGENT_UNIX_SOCKET="+containerSocket,
+			"-e", "PROMPTLOCK_WRAPPER_AGENT_UNIX_SOCKET",
 		)
 	} else {
-		args = append(args, "-e", "PROMPTLOCK_BROKER_URL")
+		args = append(args, "-e", "PROMPTLOCK_BROKER_URL", "-e", "PROMPTLOCK_WRAPPER_BROKER_URL")
 	}
 
-	args = append(args, "-e", "PROMPTLOCK_SESSION_TOKEN")
+	args = append(args, "-e", "PROMPTLOCK_SESSION_TOKEN", "-e", "PROMPTLOCK_WRAPPER_SESSION_TOKEN")
+	if strings.TrimSpace(cfg.WrapperAgentID) != "" {
+		args = append(args, "-e", "PROMPTLOCK_WRAPPER_AGENT_ID")
+	}
+	if strings.TrimSpace(cfg.WrapperTaskID) != "" {
+		args = append(args, "-e", "PROMPTLOCK_WRAPPER_TASK_ID")
+	}
 	if strings.TrimSpace(cfg.Entrypoint) != "" {
 		args = append(args, "--entrypoint", cfg.Entrypoint)
 	}
@@ -419,6 +470,18 @@ func buildDockerRunArgs(cfg dockerRunConfig) ([]string, error) {
 			continue
 		}
 		args = append(args, "--mount", mount)
+	}
+	for _, hiddenMount := range cfg.HiddenMounts {
+		source := strings.TrimSpace(hiddenMount.Source)
+		destination := cleanDockerContainerPath(hiddenMount.Destination)
+		if source == "" || destination == "" {
+			continue
+		}
+		spec := fmt.Sprintf("type=bind,src=%s,dst=%s", filepath.Clean(source), destination)
+		if hiddenMount.ReadOnly {
+			spec += ",readonly"
+		}
+		args = append(args, "--mount", spec)
 	}
 	for _, envVar := range cfg.AdditionalEnv {
 		if strings.TrimSpace(envVar) == "" {
@@ -440,22 +503,141 @@ func buildDockerRunArgs(cfg dockerRunConfig) ([]string, error) {
 func buildDockerRunEnv(base []string, cfg dockerRunConfig) []string {
 	env := append([]string{}, base...)
 	env = append(env, "PROMPTLOCK_SESSION_TOKEN="+cfg.SessionToken)
+	env = append(env, "PROMPTLOCK_WRAPPER_SESSION_TOKEN="+cfg.SessionToken)
+	if strings.TrimSpace(cfg.WrapperAgentID) != "" {
+		env = append(env, "PROMPTLOCK_WRAPPER_AGENT_ID="+cfg.WrapperAgentID)
+	}
+	if strings.TrimSpace(cfg.WrapperTaskID) != "" {
+		env = append(env, "PROMPTLOCK_WRAPPER_TASK_ID="+cfg.WrapperTaskID)
+	}
 	if strings.TrimSpace(cfg.BrokerUnixSocket) != "" {
 		containerSocket := strings.TrimSpace(cfg.ContainerBrokerSocket)
 		if containerSocket == "" {
 			containerSocket = "/run/promptlock/promptlock-agent.sock"
 		}
 		env = append(env, "PROMPTLOCK_AGENT_UNIX_SOCKET="+containerSocket)
+		env = append(env, "PROMPTLOCK_WRAPPER_AGENT_UNIX_SOCKET="+containerSocket)
 		return env
 	}
 	env = append(env, "PROMPTLOCK_BROKER_URL="+cfg.BrokerURL)
+	env = append(env, "PROMPTLOCK_WRAPPER_BROKER_URL="+cfg.BrokerURL)
 	return env
 }
 
+func writeDockerRunWrapperMCPEnvFile(cfg dockerRunConfig) (string, error) {
+	values := map[string]string{
+		"PROMPTLOCK_SESSION_TOKEN":         cfg.SessionToken,
+		"PROMPTLOCK_WRAPPER_SESSION_TOKEN": cfg.SessionToken,
+	}
+	order := []string{
+		"PROMPTLOCK_SESSION_TOKEN",
+		"PROMPTLOCK_WRAPPER_SESSION_TOKEN",
+	}
+	if strings.TrimSpace(cfg.WrapperAgentID) != "" {
+		values["PROMPTLOCK_AGENT_ID"] = cfg.WrapperAgentID
+		values["PROMPTLOCK_WRAPPER_AGENT_ID"] = cfg.WrapperAgentID
+		order = append(order, "PROMPTLOCK_AGENT_ID", "PROMPTLOCK_WRAPPER_AGENT_ID")
+	}
+	if strings.TrimSpace(cfg.WrapperTaskID) != "" {
+		values["PROMPTLOCK_TASK_ID"] = cfg.WrapperTaskID
+		values["PROMPTLOCK_WRAPPER_TASK_ID"] = cfg.WrapperTaskID
+		order = append(order, "PROMPTLOCK_TASK_ID", "PROMPTLOCK_WRAPPER_TASK_ID")
+	}
+	if strings.TrimSpace(cfg.BrokerUnixSocket) != "" {
+		containerSocket := strings.TrimSpace(cfg.ContainerBrokerSocket)
+		if containerSocket == "" {
+			containerSocket = "/run/promptlock/promptlock-agent.sock"
+		}
+		values["PROMPTLOCK_AGENT_UNIX_SOCKET"] = containerSocket
+		values["PROMPTLOCK_WRAPPER_AGENT_UNIX_SOCKET"] = containerSocket
+		order = append(order, "PROMPTLOCK_AGENT_UNIX_SOCKET", "PROMPTLOCK_WRAPPER_AGENT_UNIX_SOCKET")
+	} else if strings.TrimSpace(cfg.BrokerURL) != "" {
+		values["PROMPTLOCK_BROKER_URL"] = cfg.BrokerURL
+		values["PROMPTLOCK_WRAPPER_BROKER_URL"] = cfg.BrokerURL
+		order = append(order, "PROMPTLOCK_BROKER_URL", "PROMPTLOCK_WRAPPER_BROKER_URL")
+	}
+	body, err := mcplaunchenv.Format(values, order)
+	if err != nil {
+		return "", err
+	}
+	file, err := os.CreateTemp("", "promptlock-mcp-env-*")
+	if err != nil {
+		return "", fmt.Errorf("create wrapper MCP env file: %w", err)
+	}
+	path := file.Name()
+	if _, err := file.Write(body); err != nil {
+		file.Close()
+		_ = os.Remove(path)
+		return "", fmt.Errorf("write wrapper MCP env file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("close wrapper MCP env file: %w", err)
+	}
+	return path, nil
+}
+
+func dockerRunPostLaunchGuidance(cfg dockerRunConfig) string {
+	if !dockerRunLooksLikeInteractiveCodex(cfg) {
+		return ""
+	}
+	lines := []string{
+		"PromptLock wrapper note for Codex:",
+		"  Inside the container, preflight MCP before starting Codex:",
+		"    promptlock mcp doctor",
+		"  If this Codex home is fresh and missing the shared PromptLock entry, register once:",
+		"    codex mcp add promptlock -- promptlock-mcp-launch",
+		"  Then start Codex:",
+		"    codex -C /workspace --no-alt-screen",
+	}
+	return strings.Join(lines, "\n")
+}
+
+func dockerRunLooksLikeInteractiveCodex(cfg dockerRunConfig) bool {
+	if !cfg.AttachTTY {
+		return false
+	}
+	if strings.Contains(strings.ToLower(cfg.Image), "codex") {
+		return true
+	}
+	if tokenListContains(cfg.Command, "codex") || tokenListContains([]string{cfg.Entrypoint}, "codex") {
+		return true
+	}
+	for _, item := range cfg.AdditionalEnv {
+		trimmed := strings.TrimSpace(item)
+		upper := strings.ToUpper(trimmed)
+		if strings.HasPrefix(upper, "CODEX_") || strings.Contains(strings.ToLower(trimmed), ".codex") {
+			return true
+		}
+	}
+	for _, item := range cfg.AdditionalMounts {
+		if strings.Contains(strings.ToLower(item), ".codex") {
+			return true
+		}
+	}
+	return false
+}
+
+func tokenListContains(items []string, want string) bool {
+	want = strings.ToLower(strings.TrimSpace(want))
+	if want == "" {
+		return false
+	}
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item), want) {
+			return true
+		}
+	}
+	return false
+}
+
 var protectedDockerEnvVars = map[string]struct{}{
-	"PROMPTLOCK_AGENT_UNIX_SOCKET": {},
-	"PROMPTLOCK_BROKER_URL":        {},
-	"PROMPTLOCK_SESSION_TOKEN":     {},
+	"PROMPTLOCK_AGENT_UNIX_SOCKET":         {},
+	"PROMPTLOCK_BROKER_URL":                {},
+	"PROMPTLOCK_SESSION_TOKEN":             {},
+	"PROMPTLOCK_WRAPPER_AGENT_UNIX_SOCKET": {},
+	"PROMPTLOCK_WRAPPER_BROKER_URL":        {},
+	"PROMPTLOCK_WRAPPER_SESSION_TOKEN":     {},
 }
 
 var allowlistedDockerArgHelp = "allowed docker-arg flags: --pull, --init, --label, --label-file, --hostname, --add-host, --dns, --dns-option, --dns-search, --shm-size, --stop-timeout, --tmpfs, --ulimit"
@@ -471,7 +653,10 @@ func validateDockerRunSecurity(cfg dockerRunConfig) error {
 	if containerSocket == "" {
 		containerSocket = "/run/promptlock/promptlock-agent.sock"
 	}
-	return validateAdditionalDockerMounts(cfg.AdditionalMounts, containerSocket)
+	if err := validateAdditionalDockerMounts(cfg.AdditionalMounts, containerSocket, strings.TrimSpace(cfg.ContainerMCPEnvFile)); err != nil {
+		return err
+	}
+	return validateHiddenDockerMounts(cfg.HiddenMounts, containerSocket, strings.TrimSpace(cfg.ContainerMCPEnvFile))
 }
 
 func validateAdditionalDockerEnvs(items []string) error {
@@ -577,9 +762,9 @@ func parseDockerArgToken(item string) (string, bool) {
 	return trimmed, false
 }
 
-func validateAdditionalDockerMounts(items []string, containerBrokerSocket string) error {
-	protectedTarget := filepath.Clean(strings.TrimSpace(containerBrokerSocket))
-	if protectedTarget == "" {
+func validateAdditionalDockerMounts(items []string, containerBrokerSocket string, containerMCPEnvFile string) error {
+	protectedTargets := protectedDockerMountTargets(containerBrokerSocket, containerMCPEnvFile)
+	if len(protectedTargets) == 0 {
 		return nil
 	}
 	for _, item := range items {
@@ -587,8 +772,21 @@ func validateAdditionalDockerMounts(items []string, containerBrokerSocket string
 		if destination == "" {
 			continue
 		}
-		if filepath.Clean(destination) == protectedTarget {
-			return fmt.Errorf("additional mount may not target the container broker socket %s", protectedTarget)
+		if protectedName, ok := dockerProtectedTargetOverlap(cleanDockerContainerPath(destination), protectedTargets); ok {
+			return fmt.Errorf("additional mount may not target the reserved PromptLock path %s", protectedName)
+		}
+	}
+	return nil
+}
+
+func validateHiddenDockerMounts(items []dockerHiddenMount, containerBrokerSocket string, containerMCPEnvFile string) error {
+	protectedTargets := protectedDockerMountTargets(containerBrokerSocket, containerMCPEnvFile)
+	if len(protectedTargets) == 0 {
+		return nil
+	}
+	for _, item := range items {
+		if protectedName, ok := dockerProtectedTargetOverlap(cleanDockerContainerPath(item.Destination), protectedTargets); ok {
+			return fmt.Errorf("hidden mount may not target the reserved PromptLock path %s", protectedName)
 		}
 	}
 	return nil
@@ -607,17 +805,204 @@ func dockerEnvName(item string) string {
 }
 
 func parseDockerMountDestination(spec string) string {
+	return parseDockerMountSpec(spec).Destination
+}
+
+type dockerMountSpec struct {
+	Type        string
+	Source      string
+	Destination string
+}
+
+func parseDockerMountSpec(spec string) dockerMountSpec {
+	var out dockerMountSpec
 	for _, part := range strings.Split(spec, ",") {
 		key, value, ok := strings.Cut(strings.TrimSpace(part), "=")
 		if !ok {
 			continue
 		}
 		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "type":
+			out.Type = strings.TrimSpace(value)
+		case "src", "source":
+			out.Source = strings.TrimSpace(value)
 		case "dst", "destination", "target":
-			return strings.TrimSpace(value)
+			out.Destination = cleanDockerContainerPath(value)
 		}
 	}
-	return ""
+	return out
+}
+
+func cleanDockerContainerPath(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	normalized := strings.ReplaceAll(trimmed, "\\", "/")
+	if !strings.HasPrefix(normalized, "/") {
+		normalized = "/" + normalized
+	}
+	return path.Clean(normalized)
+}
+
+func dockerContainerPathContains(parent, child string) bool {
+	parent = cleanDockerContainerPath(parent)
+	child = cleanDockerContainerPath(child)
+	if parent == "" || child == "" {
+		return false
+	}
+	return parent == child || strings.HasPrefix(child, parent+"/")
+}
+
+func dockerContainerPathsOverlap(left, right string) bool {
+	return dockerContainerPathContains(left, right) || dockerContainerPathContains(right, left)
+}
+
+func protectedDockerMountTargets(containerBrokerSocket string, containerMCPEnvFile string) map[string]string {
+	protectedTargets := map[string]string{}
+	if protectedTarget := cleanDockerContainerPath(containerBrokerSocket); protectedTarget != "" {
+		protectedTargets[protectedTarget] = fmt.Sprintf("container broker socket %s", protectedTarget)
+	}
+	if protectedEnvFile := cleanDockerContainerPath(containerMCPEnvFile); protectedEnvFile != "" {
+		protectedTargets[protectedEnvFile] = fmt.Sprintf("PromptLock wrapper mcp env file %s", protectedEnvFile)
+	}
+	return protectedTargets
+}
+
+func dockerProtectedTargetOverlap(candidate string, protectedTargets map[string]string) (string, bool) {
+	for protectedPath, protectedName := range protectedTargets {
+		if dockerContainerPathsOverlap(candidate, protectedPath) {
+			return protectedName, true
+		}
+	}
+	return "", false
+}
+
+func prepareDockerRunHiddenMounts(cfg dockerRunConfig) (dockerRunConfig, func(), error) {
+	if len(cfg.HiddenPaths) == 0 {
+		return cfg, func() {}, nil
+	}
+	protectedTargets := protectedDockerMountTargets(cfg.ContainerBrokerSocket, cfg.ContainerMCPEnvFile)
+	bindMounts := dockerRunBindMounts(cfg.AdditionalMounts)
+	tempDir, err := os.MkdirTemp("", "promptlock-docker-hide-*")
+	if err != nil {
+		return cfg, nil, fmt.Errorf("create hide-path temp dir: %w", err)
+	}
+	cleanup := func() {
+		_ = os.RemoveAll(tempDir)
+	}
+	seenTargets := map[string]struct{}{}
+	for idx, rawPath := range cfg.HiddenPaths {
+		target, err := resolveDockerHiddenPath(rawPath, cfg.Workdir)
+		if err != nil {
+			cleanup()
+			return cfg, nil, err
+		}
+		if protectedName, blocked := dockerProtectedTargetOverlap(target, protectedTargets); blocked {
+			cleanup()
+			return cfg, nil, fmt.Errorf("hide-path %q targets the reserved PromptLock path %s", strings.TrimSpace(rawPath), protectedName)
+		}
+		if _, exists := seenTargets[target]; exists {
+			continue
+		}
+		maskSource, err := buildDockerHiddenMountSource(tempDir, idx, target, bindMounts)
+		if err != nil {
+			cleanup()
+			return cfg, nil, err
+		}
+		cfg.HiddenMounts = append(cfg.HiddenMounts, dockerHiddenMount{
+			Source:      maskSource,
+			Destination: target,
+			ReadOnly:    true,
+		})
+		seenTargets[target] = struct{}{}
+	}
+	return cfg, cleanup, nil
+}
+
+type dockerBindMount struct {
+	Source      string
+	Destination string
+}
+
+func dockerRunBindMounts(items []string) []dockerBindMount {
+	out := make([]dockerBindMount, 0, len(items))
+	for _, item := range items {
+		spec := parseDockerMountSpec(item)
+		if !strings.EqualFold(strings.TrimSpace(spec.Type), "bind") {
+			continue
+		}
+		source := strings.TrimSpace(spec.Source)
+		destination := cleanDockerContainerPath(spec.Destination)
+		if source == "" || destination == "" {
+			continue
+		}
+		out = append(out, dockerBindMount{Source: filepath.Clean(source), Destination: destination})
+	}
+	return out
+}
+
+func resolveDockerHiddenPath(rawPath string, workdir string) (string, error) {
+	trimmed := strings.TrimSpace(rawPath)
+	if trimmed == "" {
+		return "", fmt.Errorf("hide-path is required")
+	}
+	if strings.Contains(trimmed, "\n") || strings.Contains(trimmed, "\r") {
+		return "", fmt.Errorf("hide-path %q must be a single-line path", trimmed)
+	}
+	if path.IsAbs(strings.ReplaceAll(trimmed, "\\", "/")) {
+		return cleanDockerContainerPath(trimmed), nil
+	}
+	if strings.TrimSpace(workdir) == "" {
+		return "", fmt.Errorf("relative hide-path %q requires --workdir", trimmed)
+	}
+	return cleanDockerContainerPath(path.Join(cleanDockerContainerPath(workdir), strings.ReplaceAll(trimmed, "\\", "/"))), nil
+}
+
+func buildDockerHiddenMountSource(tempDir string, index int, target string, bindMounts []dockerBindMount) (string, error) {
+	hostTarget, isDir, err := dockerHiddenHostTarget(target, bindMounts)
+	if err != nil {
+		return "", err
+	}
+	placeholder := filepath.Join(tempDir, fmt.Sprintf("mask-%03d", index))
+	if isDir {
+		if err := os.MkdirAll(placeholder, 0o755); err != nil {
+			return "", fmt.Errorf("create hidden directory placeholder for %q: %w", target, err)
+		}
+		return placeholder, nil
+	}
+	if err := os.WriteFile(placeholder, nil, 0o600); err != nil {
+		return "", fmt.Errorf("create hidden file placeholder for %q: %w", target, err)
+	}
+	_ = hostTarget
+	return placeholder, nil
+}
+
+func dockerHiddenHostTarget(target string, bindMounts []dockerBindMount) (string, bool, error) {
+	var best *dockerBindMount
+	for i := range bindMounts {
+		candidate := bindMounts[i]
+		if !dockerContainerPathContains(candidate.Destination, target) {
+			continue
+		}
+		if best == nil || len(candidate.Destination) > len(best.Destination) {
+			best = &candidate
+		}
+	}
+	if best == nil {
+		return "", false, fmt.Errorf("hide-path %q is not covered by any bind mount; add a matching --mount type=bind,src=...,dst=... first", target)
+	}
+	hostTarget := best.Source
+	if target != best.Destination {
+		rel := strings.TrimPrefix(target, best.Destination)
+		rel = strings.TrimPrefix(rel, "/")
+		hostTarget = filepath.Join(best.Source, filepath.FromSlash(rel))
+	}
+	info, err := os.Stat(hostTarget)
+	if err != nil {
+		return "", false, fmt.Errorf("hide-path %q maps to host path %q: %w", target, hostTarget, err)
+	}
+	return hostTarget, info.IsDir(), nil
 }
 
 func currentUserDockerIdentity() string {

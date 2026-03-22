@@ -12,6 +12,7 @@ func (s *server) handleMetaCapabilities(w http.ResponseWriter, r *http.Request) 
 		"allow_plaintext_secret_return":    s.authCfg.AllowPlaintextSecretReturn,
 		"insecure_dev_mode":                s.insecureDevMode || (!s.authEnabled && s.authCfg.AllowPlaintextSecretReturn),
 		"transport_unix_socket_configured": s.unixSocketConfigured,
+		"env_path_enabled":                 s.envPathEnabled,
 	}
 	if s.agentBridgeAddress != "" {
 		resp["agent_bridge_address"] = s.agentBridgeAddress

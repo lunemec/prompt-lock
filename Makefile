@@ -1,4 +1,4 @@
-.PHONY: help lint toolchain-guard vet vulncheck race test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate release-readiness-gate-core release-readiness-gate leak-guard storage-fsync-preflight storage-fsync-report storage-fsync-validate storage-fsync-release-gate ci-redteam-full arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose setup-local-docker release-package
+.PHONY: help lint toolchain-guard vet vulncheck race test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate release-readiness-gate-core release-readiness-gate leak-guard storage-fsync-preflight storage-fsync-report storage-fsync-validate storage-fsync-release-gate ci-redteam-full arch-conformance docs validate-changelog hygiene validate-final ci e2e-compose setup-local-docker build-agent-lab demo-print-github-token demo-run-env-showcase-tests release-package
 
 FSYNC_REPORT ?= reports/storage-fsync-report.json
 FSYNC_HMAC_KEY_ENV ?= PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY
@@ -9,7 +9,7 @@ SOPS_ENV_FILE ?=
 SHIPPED_SHELL_WORKFLOWS := $(sort $(wildcard scripts/*.sh))
 
 help:
-	@echo "Targets: lint toolchain-guard vet vulncheck race test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate release-readiness-gate-core release-readiness-gate leak-guard storage-fsync-preflight storage-fsync-report storage-fsync-validate storage-fsync-release-gate ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose setup-local-docker release-package"
+	@echo "Targets: lint toolchain-guard vet vulncheck race test fuzz security security-redteam security-redteam-live security-redteam-live-hardened hardened-smoke real-e2e-smoke mcp-conformance-report production-readiness-gate release-readiness-gate-core release-readiness-gate leak-guard storage-fsync-preflight storage-fsync-report storage-fsync-validate storage-fsync-release-gate ci-redteam-full arch-conformance docs validate-changelog validate-final ci e2e-compose setup-local-docker build-agent-lab demo-print-github-token demo-run-env-showcase-tests release-package"
 
 lint:
 	bash -n $(SHIPPED_SHELL_WORKFLOWS)
@@ -152,6 +152,18 @@ e2e-compose:
 
 setup-local-docker:
 	go run ./cmd/promptlock setup
+
+build-agent-lab:
+	docker build --target agent-lab -t promptlock-agent-lab .
+
+demo-print-github-token:
+	@printf '%s\n' "$$GITHUB_TOKEN"
+
+demo-run-env-showcase-tests:
+	@PROMPTLOCK_DEMO_REQUIRE=1 \
+		PROMPTLOCK_DEMO_MODE=env-showcase \
+		PROMPTLOCK_DEMO_ACTOR=make-target \
+		go test ./demo-envs/showcase -run 'TestPromptLockEnvShowcaseToken|TestPromptLockEnvShowcaseMetadata' -count=1 -v
 
 release-package:
 	@test -n "$(VERSION)" || (echo "Usage: make release-package VERSION=vX.Y.Z" && exit 1)

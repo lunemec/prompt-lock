@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -9,6 +11,8 @@ func TestBuildDockerRunArgsWithUnixSocket(t *testing.T) {
 	args, err := buildDockerRunArgs(dockerRunConfig{
 		Image:                 "codex-promptlock",
 		ContainerName:         "codex-1",
+		WrapperAgentID:        "codex-agent",
+		WrapperTaskID:         "codex-1",
 		SessionToken:          "sess_123",
 		BrokerUnixSocket:      "/Users/test/.promptlock/run/promptlock.sock",
 		ContainerBrokerSocket: "/run/promptlock/promptlock.sock",
@@ -47,7 +51,11 @@ func TestBuildDockerRunArgsWithUnixSocket(t *testing.T) {
 		"--workdir",
 		"/workspace",
 		"PROMPTLOCK_SESSION_TOKEN",
+		"PROMPTLOCK_WRAPPER_SESSION_TOKEN",
+		"PROMPTLOCK_WRAPPER_AGENT_ID",
+		"PROMPTLOCK_WRAPPER_TASK_ID",
 		"PROMPTLOCK_AGENT_UNIX_SOCKET=/run/promptlock/promptlock.sock",
+		"PROMPTLOCK_WRAPPER_AGENT_UNIX_SOCKET",
 		"CODEX_HOME=/workspace/.codex",
 		"type=bind,src=/host/workspace,dst=/workspace",
 		"codex-promptlock",
@@ -66,11 +74,13 @@ func TestBuildDockerRunArgsWithUnixSocket(t *testing.T) {
 
 func TestBuildDockerRunArgsWithBrokerURL(t *testing.T) {
 	args, err := buildDockerRunArgs(dockerRunConfig{
-		Image:         "codex-promptlock",
-		ContainerName: "codex-1",
-		SessionToken:  "sess_123",
-		BrokerURL:     "https://promptlock.example.internal:8765",
-		User:          "1000:1000",
+		Image:          "codex-promptlock",
+		ContainerName:  "codex-1",
+		WrapperAgentID: "codex-agent",
+		WrapperTaskID:  "codex-1",
+		SessionToken:   "sess_123",
+		BrokerURL:      "https://promptlock.example.internal:8765",
+		User:           "1000:1000",
 	})
 	if err != nil {
 		t.Fatalf("buildDockerRunArgs returned error: %v", err)
@@ -79,7 +89,11 @@ func TestBuildDockerRunArgsWithBrokerURL(t *testing.T) {
 	joined := strings.Join(args, "\n")
 	checks := []string{
 		"PROMPTLOCK_SESSION_TOKEN",
+		"PROMPTLOCK_WRAPPER_SESSION_TOKEN",
+		"PROMPTLOCK_WRAPPER_AGENT_ID",
+		"PROMPTLOCK_WRAPPER_TASK_ID",
 		"PROMPTLOCK_BROKER_URL",
+		"PROMPTLOCK_WRAPPER_BROKER_URL",
 	}
 	for _, want := range checks {
 		if !strings.Contains(joined, want) {
@@ -100,6 +114,30 @@ func TestBuildDockerRunArgsWithBrokerURL(t *testing.T) {
 	} {
 		if strings.Contains(joined, removed) {
 			t.Fatalf("expected docker args to omit removed broker TLS setting %q, got %q", removed, joined)
+		}
+	}
+}
+
+func TestBuildDockerRunEnvIncludesWrapperIdentity(t *testing.T) {
+	env := buildDockerRunEnv([]string{"BASE=1"}, dockerRunConfig{
+		WrapperAgentID:        "codex-agent",
+		WrapperTaskID:         "codex-session",
+		SessionToken:          "sess_123",
+		BrokerUnixSocket:      "/Users/test/.promptlock/run/promptlock.sock",
+		ContainerBrokerSocket: "/run/promptlock/promptlock.sock",
+	})
+	joined := strings.Join(env, "\n")
+	for _, want := range []string{
+		"BASE=1",
+		"PROMPTLOCK_SESSION_TOKEN=sess_123",
+		"PROMPTLOCK_WRAPPER_SESSION_TOKEN=sess_123",
+		"PROMPTLOCK_WRAPPER_AGENT_ID=codex-agent",
+		"PROMPTLOCK_WRAPPER_TASK_ID=codex-session",
+		"PROMPTLOCK_AGENT_UNIX_SOCKET=/run/promptlock/promptlock.sock",
+		"PROMPTLOCK_WRAPPER_AGENT_UNIX_SOCKET=/run/promptlock/promptlock.sock",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected docker env to contain %q, got %q", want, joined)
 		}
 	}
 }
@@ -325,5 +363,240 @@ func TestBuildDockerRunArgsRejectsMountOverAgentSocket(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "container broker socket") {
 		t.Fatalf("expected socket shadowing guidance, got %v", err)
+	}
+}
+
+func TestBuildDockerRunArgsIncludesWrapperMCPEnvFileMount(t *testing.T) {
+	args, err := buildDockerRunArgs(dockerRunConfig{
+		Image:               "promptlock-agent-lab",
+		ContainerName:       "codex-1",
+		SessionToken:        "sess_123",
+		BrokerURL:           "http://host.docker.internal:58879",
+		WrapperMCPEnvFile:   "/tmp/promptlock-mcp.env.host",
+		ContainerMCPEnvFile: "/run/promptlock/promptlock-mcp.env",
+	})
+	if err != nil {
+		t.Fatalf("buildDockerRunArgs returned error: %v", err)
+	}
+	joined := strings.Join(args, "\n")
+	want := "type=bind,src=/tmp/promptlock-mcp.env.host,dst=/run/promptlock/promptlock-mcp.env,readonly"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("expected docker args to contain wrapper MCP env file mount %q, got %q", want, joined)
+	}
+}
+
+func TestPrepareDockerRunHiddenMountsMasksWorkspaceFile(t *testing.T) {
+	hostRoot := t.TempDir()
+	hostSecretDir := filepath.Join(hostRoot, "demo-envs")
+	if err := os.MkdirAll(hostSecretDir, 0o755); err != nil {
+		t.Fatalf("mkdir demo env dir: %v", err)
+	}
+	hostSecret := filepath.Join(hostSecretDir, "github.env")
+	if err := os.WriteFile(hostSecret, []byte("github_token=FAKE_GITHUB_TOKEN\n"), 0o600); err != nil {
+		t.Fatalf("write demo env file: %v", err)
+	}
+
+	cfg, cleanup, err := prepareDockerRunHiddenMounts(dockerRunConfig{
+		Workdir:          "/workspace",
+		AdditionalMounts: []string{"type=bind,src=" + hostRoot + ",dst=/workspace"},
+		HiddenPaths:      []string{"demo-envs/github.env"},
+	})
+	if err != nil {
+		t.Fatalf("prepareDockerRunHiddenMounts returned error: %v", err)
+	}
+	defer cleanup()
+
+	if len(cfg.HiddenMounts) != 1 {
+		t.Fatalf("expected 1 hidden mount, got %d", len(cfg.HiddenMounts))
+	}
+	masked := cfg.HiddenMounts[0]
+	if masked.Destination != "/workspace/demo-envs/github.env" {
+		t.Fatalf("destination = %q, want /workspace/demo-envs/github.env", masked.Destination)
+	}
+	if masked.Source == hostSecret {
+		t.Fatalf("expected mask source to differ from host secret path %q", hostSecret)
+	}
+	if !masked.ReadOnly {
+		t.Fatalf("expected hidden mount to be readonly")
+	}
+	info, err := os.Stat(masked.Source)
+	if err != nil {
+		t.Fatalf("stat hidden mount source: %v", err)
+	}
+	if info.IsDir() {
+		t.Fatalf("expected file placeholder, got directory %q", masked.Source)
+	}
+	body, err := os.ReadFile(masked.Source)
+	if err != nil {
+		t.Fatalf("read hidden mount source: %v", err)
+	}
+	if len(body) != 0 {
+		t.Fatalf("expected empty placeholder file, got %q", string(body))
+	}
+}
+
+func TestPrepareDockerRunHiddenMountsMasksWorkspaceDirectory(t *testing.T) {
+	hostRoot := t.TempDir()
+	hostSecretDir := filepath.Join(hostRoot, "secrets")
+	if err := os.MkdirAll(filepath.Join(hostSecretDir, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir secret dir: %v", err)
+	}
+
+	cfg, cleanup, err := prepareDockerRunHiddenMounts(dockerRunConfig{
+		Workdir:          "/workspace",
+		AdditionalMounts: []string{"type=bind,src=" + hostRoot + ",dst=/workspace"},
+		HiddenPaths:      []string{"secrets"},
+	})
+	if err != nil {
+		t.Fatalf("prepareDockerRunHiddenMounts returned error: %v", err)
+	}
+	defer cleanup()
+
+	if len(cfg.HiddenMounts) != 1 {
+		t.Fatalf("expected 1 hidden mount, got %d", len(cfg.HiddenMounts))
+	}
+	info, err := os.Stat(cfg.HiddenMounts[0].Source)
+	if err != nil {
+		t.Fatalf("stat hidden mount source: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected directory placeholder, got file %q", cfg.HiddenMounts[0].Source)
+	}
+}
+
+func TestPrepareDockerRunHiddenMountsRejectsUncoveredPath(t *testing.T) {
+	_, cleanup, err := prepareDockerRunHiddenMounts(dockerRunConfig{
+		Workdir:          "/workspace",
+		AdditionalMounts: []string{"type=bind,src=/host/workspace,dst=/workspace"},
+		HiddenPaths:      []string{"/other/secret.env"},
+	})
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err == nil {
+		t.Fatalf("expected uncovered hidden path to fail")
+	}
+	if !strings.Contains(err.Error(), "not covered by any bind mount") {
+		t.Fatalf("expected bind mount guidance, got %v", err)
+	}
+}
+
+func TestPrepareDockerRunHiddenMountsRejectsProtectedPromptLockPaths(t *testing.T) {
+	_, cleanup, err := prepareDockerRunHiddenMounts(dockerRunConfig{
+		Workdir:             "/workspace",
+		ContainerMCPEnvFile: "/run/promptlock/promptlock-mcp.env",
+		AdditionalMounts:    []string{"type=bind,src=/host/workspace,dst=/workspace"},
+		HiddenPaths:         []string{"/run/promptlock"},
+	})
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err == nil {
+		t.Fatalf("expected protected PromptLock target to fail")
+	}
+	if !strings.Contains(err.Error(), "reserved PromptLock path") {
+		t.Fatalf("expected reserved path guidance, got %v", err)
+	}
+}
+
+func TestBuildDockerRunArgsIncludesHiddenMountsAfterWorkspaceMount(t *testing.T) {
+	args, err := buildDockerRunArgs(dockerRunConfig{
+		Image:         "promptlock-agent-lab",
+		ContainerName: "codex-1",
+		SessionToken:  "sess_123",
+		BrokerURL:     "http://host.docker.internal:58879",
+		AdditionalMounts: []string{
+			"type=bind,src=/host/workspace,dst=/workspace",
+		},
+		HiddenMounts: []dockerHiddenMount{
+			{Source: "/tmp/promptlock-mask-1", Destination: "/workspace/demo-envs/github.env", ReadOnly: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildDockerRunArgs returned error: %v", err)
+	}
+	joined := strings.Join(args, "\n")
+	workspaceMount := "type=bind,src=/host/workspace,dst=/workspace"
+	hiddenMount := "type=bind,src=/tmp/promptlock-mask-1,dst=/workspace/demo-envs/github.env,readonly"
+	if !strings.Contains(joined, workspaceMount) {
+		t.Fatalf("expected docker args to contain workspace mount %q, got %q", workspaceMount, joined)
+	}
+	if !strings.Contains(joined, hiddenMount) {
+		t.Fatalf("expected docker args to contain hidden mount %q, got %q", hiddenMount, joined)
+	}
+	if strings.Index(joined, workspaceMount) > strings.Index(joined, hiddenMount) {
+		t.Fatalf("expected hidden mount to be appended after workspace mount, got %q", joined)
+	}
+}
+
+func TestBuildDockerRunArgsRejectsMountOverWrapperMCPEnvFile(t *testing.T) {
+	_, err := buildDockerRunArgs(dockerRunConfig{
+		Image:               "promptlock-agent-lab",
+		ContainerName:       "codex-1",
+		SessionToken:        "sess_123",
+		BrokerURL:           "http://host.docker.internal:58879",
+		ContainerMCPEnvFile: "/run/promptlock/promptlock-mcp.env",
+		AdditionalMounts:    []string{"type=bind,src=/tmp/other.env,dst=/run/promptlock/promptlock-mcp.env"},
+	})
+	if err == nil {
+		t.Fatalf("expected mount over wrapper MCP env file to fail")
+	}
+	if !strings.Contains(err.Error(), "mcp env file") {
+		t.Fatalf("expected wrapper MCP env file guidance, got %v", err)
+	}
+}
+
+func TestBuildDockerRunArgsRejectsMountOverPromptLockRuntimeDir(t *testing.T) {
+	_, err := buildDockerRunArgs(dockerRunConfig{
+		Image:                 "promptlock-agent-lab",
+		ContainerName:         "codex-1",
+		SessionToken:          "sess_123",
+		BrokerUnixSocket:      "/Users/test/.promptlock/run/promptlock.sock",
+		ContainerBrokerSocket: "/run/promptlock/promptlock-agent.sock",
+		ContainerMCPEnvFile:   "/run/promptlock/promptlock-mcp.env",
+		AdditionalMounts:      []string{"type=bind,src=/tmp/other,dst=/run/promptlock"},
+	})
+	if err == nil {
+		t.Fatalf("expected mount over PromptLock runtime dir to fail")
+	}
+	if !strings.Contains(err.Error(), "reserved PromptLock path") {
+		t.Fatalf("expected reserved PromptLock path guidance, got %v", err)
+	}
+}
+
+func TestDockerRunPostLaunchGuidanceForInteractiveCodex(t *testing.T) {
+	got := dockerRunPostLaunchGuidance(dockerRunConfig{
+		Image:            "promptlock-agent-lab",
+		AttachTTY:        true,
+		AdditionalMounts: []string{"type=bind,src=/Users/test/.codex,dst=/home/promptlock/.codex"},
+	})
+	for _, want := range []string{
+		"PromptLock wrapper note for Codex:",
+		"promptlock mcp doctor",
+		"codex mcp add promptlock -- promptlock-mcp-launch",
+		"codex -C /workspace --no-alt-screen",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected guidance to contain %q, got %q", want, got)
+		}
+	}
+}
+
+func TestDockerRunPostLaunchGuidanceSkippedForNonInteractiveOrNonCodex(t *testing.T) {
+	for _, cfg := range []dockerRunConfig{
+		{
+			Image:     "promptlock-agent-lab",
+			AttachTTY: false,
+			Command:   []string{"codex"},
+		},
+		{
+			Image:     "promptlock-agent-lab",
+			AttachTTY: true,
+			Command:   []string{"go", "version"},
+		},
+	} {
+		if got := dockerRunPostLaunchGuidance(cfg); got != "" {
+			t.Fatalf("expected no guidance for %+v, got %q", cfg, got)
+		}
 	}
 }

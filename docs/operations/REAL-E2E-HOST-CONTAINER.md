@@ -89,15 +89,19 @@ The example `execution_policy` above allowlists the exact executable name `echo`
 In a second host terminal:
 
 ```bash
-PROMPTLOCK_OPERATOR_TOKEN=op_real_test_token go run ./cmd/promptlock watch
+PROMPTLOCK_ENV_PATH_ROOT="$PWD" \
+  PROMPTLOCK_OPERATOR_TOKEN=op_real_test_token \
+  go run ./cmd/promptlock watch
 ```
+
+If you plan to run the approved `.env` / `env_path` MCP demo from the README after this flow, keep `PROMPTLOCK_ENV_PATH_ROOT` pointed at the host root that should contain the approved demo file. For repo-local demo files under the mounted workspace, add matching `--hide-path` flags to `promptlock auth docker-run` so the container cannot read the same file directly.
 
 ## 3) Container: build an agent CLI image
 
 Build the repo image once so the container has the shipped `promptlock` CLI available:
 
 ```bash
-docker build -t promptlock-agent-lab .
+docker build --target agent-lab -t promptlock-agent-lab .
 ```
 
 ## 4) Container: launch via one-command auth wrapper
@@ -129,6 +133,8 @@ go run ./cmd/promptlock auth docker-run \
 This wrapper performs `auth login`, injects the fresh session token into the container environment, and then runs `docker run` with the requested image/command.
 On Linux hardened local mode it mounts only the agent socket into the container and leaves the operator socket on the host.
 On non-Linux desktop Docker runtimes, where host Unix-socket bind mounts are unreliable for the container leg, it prefers the daemon-owned agent bridge discovered from broker capabilities and exposed to the container through `host.docker.internal`. If that bridge is unavailable, it falls back to a short-lived host-local bridge for the lifetime of the `docker run` command.
+
+For the Codex-in-container MCP demo path, see the README section that uses the same host `watch` terminal plus `execute_with_intent.env_path`. The demo file should contain `github_token=...`, not `PROMPTLOCK_SECRET_GITHUB_TOKEN=...`, and repo-local demo files should either live outside mounted paths or be shadowed from the container with `--hide-path`.
 
 ## 5) Approve in the host watch UI
 

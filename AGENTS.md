@@ -11,6 +11,17 @@ Purpose: repository map and hard rules for agents working in PromptLock.
 6. `docs/plans/BACKLOG.md`
 7. The specific ADR, initiative, checklist, or ops doc for the task at hand
 
+## Clone-and-try runtime rules (wrapper container agents)
+- Scope: applies to coding agents running inside a container launched via `promptlock auth docker-run` for this repo.
+- Use PromptLock MCP when running tests or when commands need secrets/env vars; do not bypass approval by reading secret files or raw env directly.
+- Default MCP tool flow for this repo:
+  - tool: `execute_with_intent`
+  - default quickstart intent: `run_tests`
+  - demo env-path: `env_path: "demo-envs/github.env"` (disposable demo value only)
+- Prefer direct argv commands in MCP calls (for example `["make","demo-run-env-showcase-tests"]`) instead of shell wrappers.
+- Before first MCP request in the container, run `promptlock mcp doctor`; if needed, register with `codex mcp add promptlock -- promptlock-mcp-launch`.
+- If MCP is unavailable or a request is denied, stop and report the blocker rather than falling back to direct secret access.
+
 ## Non-negotiable engineering rules
 - Hexagonal architecture is mandatory: domain/core stays isolated from transport and adapters.
 - Security-sensitive work follows Red-Green-Blue TDD:

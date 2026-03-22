@@ -132,7 +132,7 @@ func TestLoadHardenedProfilePreservesExplicitExecutionPolicyOverrides(t *testing
 	if !containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, "echo") {
 		t.Fatalf("expected explicit hardened allowlist override to include echo, got %#v", cfg.ExecutionPolicy.ExactMatchExecutables)
 	}
-	for _, required := range []string{"go", "git"} {
+	for _, required := range []string{"go", "git", "python3"} {
 		if !containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, required) {
 			t.Fatalf("expected hardened allowlist to retain %q, got %#v", required, cfg.ExecutionPolicy.ExactMatchExecutables)
 		}
@@ -182,7 +182,7 @@ func TestLoadExecutionPolicyIgnoresRemovedAllowlistPrefixesKey(t *testing.T) {
 	if containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, "echo") {
 		t.Fatalf("expected removed allowlist_prefixes key to be ignored, got %#v", cfg.ExecutionPolicy.ExactMatchExecutables)
 	}
-	for _, required := range []string{"bash", "go", "git"} {
+	for _, required := range []string{"bash", "go", "git", "python3"} {
 		if !containsStringCI(cfg.ExecutionPolicy.ExactMatchExecutables, required) {
 			t.Fatalf("expected defaults to remain when removed key is ignored; missing %q in %#v", required, cfg.ExecutionPolicy.ExactMatchExecutables)
 		}

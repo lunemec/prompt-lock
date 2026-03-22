@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
@@ -42,9 +43,10 @@ type callParams struct {
 }
 
 type execArgs struct {
-	Intent string
-	Cmd    []string
-	TTL    int
+	Intent  string
+	Cmd     []string
+	TTL     int
+	EnvPath string
 }
 
 type brokerTransport struct {
@@ -57,6 +59,8 @@ type pathStat func(string) error
 
 const maxRPCLineBytes = 1 << 20 // 1 MiB
 const mcpProtocolVersion = "2024-11-05"
+const executeWithIntentToolDescription = "Request a lease by configured intent id and execute command via broker-exec path. intent must be a configured intent id (for example run_tests), not free-form text."
+const unknownIntentHint = "intent must be a configured intent id (for example run_tests); check broker config.intents or your quickstart setup"
 
 var brokerClientTimeout = 10 * time.Second
 
@@ -152,22 +156,24 @@ func (s *mcpServer) handle(req rpcReq) bool {
 		if !notify {
 			s.emit(rpcResp{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": []map[string]any{{
 				"name":        "execute_with_intent",
-				"description": "Request lease by intent and execute command via broker-exec path.",
+				"description": executeWithIntentToolDescription,
 				"inputSchema": map[string]any{
 					"type":                 "object",
 					"additionalProperties": false,
 					"required":             []string{"intent", "command"},
 					"properties": map[string]any{
 						"intent": map[string]any{
-							"type":      "string",
-							"minLength": 1,
-							"maxLength": 64,
-							"pattern":   "^[A-Za-z0-9_-]+$",
+							"type":        "string",
+							"minLength":   1,
+							"maxLength":   64,
+							"pattern":     "^[A-Za-z0-9_-]+$",
+							"description": "Broker intent identifier; must exactly match a configured intent id. Quickstart usually uses run_tests.",
 						},
 						"command": map[string]any{
-							"type":     "array",
-							"minItems": 1,
-							"maxItems": 32,
+							"type":        "array",
+							"minItems":    1,
+							"maxItems":    32,
+							"description": "Command argv to execute (first item is executable, remaining items are args).",
 							"items": map[string]any{
 								"type":      "string",
 								"minLength": 1,
@@ -175,11 +181,26 @@ func (s *mcpServer) handle(req rpcReq) bool {
 							},
 						},
 						"ttl_minutes": map[string]any{
-							"type":    "integer",
-							"minimum": 1,
-							"maximum": 60,
+							"type":        "integer",
+							"minimum":     1,
+							"maximum":     60,
+							"default":     5,
+							"description": "Optional lease TTL in minutes (defaults to 5).",
+						},
+						"env_path": map[string]any{
+							"type":        "string",
+							"minLength":   1,
+							"maxLength":   4096,
+							"pattern":     "^[^\r\n]+$",
+							"description": "Optional single-line .env path for approval context (example: demo-envs/github.env).",
 						},
 					},
+					"examples": []map[string]any{{
+						"intent":      "run_tests",
+						"command":     []string{"make", "demo-print-github-token"},
+						"env_path":    "demo-envs/github.env",
+						"ttl_minutes": 5,
+					}},
 				},
 			}}}})
 		}
@@ -371,7 +392,7 @@ func executeWithIntent(ctx context.Context, args map[string]interface{}) (string
 	if err != nil {
 		return "", err
 	}
-	session := os.Getenv("PROMPTLOCK_SESSION_TOKEN")
+	session := effectiveEnv(os.Getenv, "PROMPTLOCK_SESSION_TOKEN")
 	if session == "" {
 		return "", fmt.Errorf("PROMPTLOCK_SESSION_TOKEN is required")
 	}
@@ -382,6 +403,7 @@ func executeWithIntent(ctx context.Context, args map[string]interface{}) (string
 	intent := validated.Intent
 	cmd := validated.Cmd
 	ttl := validated.TTL
+	envPath := validated.EnvPath
 
 	// resolve intent
 	var resolved struct {
@@ -390,6 +412,9 @@ func executeWithIntent(ctx context.Context, args map[string]interface{}) (string
 	if err := postAuth(ctx, broker, "/v1/intents/resolve", session, map[string]any{"intent": intent}, &resolved); err != nil {
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("request cancelled")
+		}
+		if isUnknownIntentError(err) {
+			return "", fmt.Errorf("%w: %s", err, unknownIntentHint)
 		}
 		return "", err
 	}
@@ -401,7 +426,7 @@ func executeWithIntent(ctx context.Context, args map[string]interface{}) (string
 	var reqOut struct {
 		RequestID string `json:"request_id"`
 	}
-	if err := postAuth(ctx, broker, "/v1/leases/request", session, map[string]any{
+	requestBody := map[string]any{
 		"agent_id":            envDefault("PROMPTLOCK_AGENT_ID", "mcp-agent"),
 		"task_id":             envDefault("PROMPTLOCK_TASK_ID", "mcp-task"),
 		"intent":              intent,
@@ -410,7 +435,11 @@ func executeWithIntent(ctx context.Context, args map[string]interface{}) (string
 		"secrets":             resolved.Secrets,
 		"command_fingerprint": fp,
 		"workdir_fingerprint": wdfp,
-	}, &reqOut); err != nil {
+	}
+	if envPath != "" {
+		requestBody["env_path"] = envPath
+	}
+	if err := postAuth(ctx, broker, "/v1/leases/request", session, requestBody, &reqOut); err != nil {
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("request cancelled")
 		}
@@ -524,7 +553,7 @@ func postAuth(ctx context.Context, broker brokerTransport, path, token string, i
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("request failed: %s", resp.Status)
+		return brokerResponseError(resp)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }
@@ -545,16 +574,59 @@ func getAuth(ctx context.Context, broker brokerTransport, path, token string, ou
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("request failed: %s", resp.Status)
+		return brokerResponseError(resp)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+func brokerResponseError(resp *http.Response) error {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return fmt.Errorf("request failed: %s", resp.Status)
+	}
+	msg := strings.Join(strings.Fields(string(body)), " ")
+	if msg == "" {
+		return fmt.Errorf("request failed: %s", resp.Status)
+	}
+	return fmt.Errorf("request failed: %s: %s", resp.Status, msg)
+}
+
 func envDefault(k, d string) string {
-	if v := os.Getenv(k); v != "" {
+	if v := effectiveEnv(os.Getenv, k); v != "" {
 		return v
 	}
 	return d
+}
+
+func effectiveEnv(getenv envLookup, key string) string {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	switch key {
+	case "PROMPTLOCK_SESSION_TOKEN":
+		if v := strings.TrimSpace(getenv("PROMPTLOCK_WRAPPER_SESSION_TOKEN")); v != "" {
+			return v
+		}
+	case "PROMPTLOCK_AGENT_UNIX_SOCKET":
+		if v := strings.TrimSpace(getenv("PROMPTLOCK_WRAPPER_AGENT_UNIX_SOCKET")); v != "" {
+			return v
+		}
+	case "PROMPTLOCK_BROKER_URL":
+		if v := strings.TrimSpace(getenv("PROMPTLOCK_WRAPPER_BROKER_URL")); v != "" {
+			return v
+		}
+	case "PROMPTLOCK_AGENT_ID":
+		if v := strings.TrimSpace(getenv("PROMPTLOCK_AGENT_ID")); v != "" {
+			return v
+		}
+		return strings.TrimSpace(getenv("PROMPTLOCK_WRAPPER_AGENT_ID"))
+	case "PROMPTLOCK_TASK_ID":
+		if v := strings.TrimSpace(getenv("PROMPTLOCK_TASK_ID")); v != "" {
+			return v
+		}
+		return strings.TrimSpace(getenv("PROMPTLOCK_WRAPPER_TASK_ID"))
+	}
+	return strings.TrimSpace(getenv(key))
 }
 
 func lookupEnvMap(values map[string]string) envLookup {
@@ -584,7 +656,7 @@ func resolveBrokerTransport(getenv envLookup, stat pathStat) (brokerTransport, e
 		}
 		return brokerTransport{UnixSocket: explicitUnix}, nil
 	}
-	agentUnix := strings.TrimSpace(getenv("PROMPTLOCK_AGENT_UNIX_SOCKET"))
+	agentUnix := effectiveEnv(getenv, "PROMPTLOCK_AGENT_UNIX_SOCKET")
 	if agentUnix == "" {
 		agentUnix = config.DefaultAgentUnixSocketPath
 	}
@@ -593,7 +665,7 @@ func resolveBrokerTransport(getenv envLookup, stat pathStat) (brokerTransport, e
 			return brokerTransport{UnixSocket: agentUnix}, nil
 		}
 	}
-	explicitURL := strings.TrimSpace(getenv("PROMPTLOCK_BROKER_URL"))
+	explicitURL := effectiveEnv(getenv, "PROMPTLOCK_BROKER_URL")
 	if explicitURL != "" {
 		return brokerTransport{BaseURL: explicitURL}, nil
 	}
@@ -669,7 +741,7 @@ func parseAndValidateExecArgs(m map[string]interface{}) (execArgs, error) {
 	}
 	for _, r := range intent {
 		if !(r == '_' || r == '-' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
-			return execArgs{}, fmt.Errorf("intent contains invalid characters")
+			return execArgs{}, fmt.Errorf("intent contains invalid characters (allowed: A-Z a-z 0-9 _ -)")
 		}
 	}
 	cmdAny, ok := m["command"].([]interface{})
@@ -699,7 +771,18 @@ func parseAndValidateExecArgs(m map[string]interface{}) (execArgs, error) {
 	if ttl < 1 || ttl > 60 {
 		return execArgs{}, fmt.Errorf("ttl_minutes out of range (1..60)")
 	}
-	return execArgs{Intent: intent, Cmd: cmd, TTL: ttl}, nil
+	envPath := ""
+	if raw, ok := m["env_path"]; ok {
+		v, ok := raw.(string)
+		if !ok {
+			return execArgs{}, fmt.Errorf("env_path must be a string")
+		}
+		envPath = strings.TrimSpace(v)
+		if envPath == "" || len(envPath) > 4096 || strings.ContainsAny(envPath, "\r\n") {
+			return execArgs{}, fmt.Errorf("env_path must be a single-line path (1..4096 chars)")
+		}
+	}
+	return execArgs{Intent: intent, Cmd: cmd, TTL: ttl, EnvPath: envPath}, nil
 }
 
 func cwd() string { wd, _ := os.Getwd(); return wd }
@@ -707,4 +790,11 @@ func sha(parts []string) string {
 	s := strings.Join(parts, "\x00")
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
+}
+
+func isUnknownIntentError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "unknown intent")
 }

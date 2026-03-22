@@ -149,6 +149,25 @@ func TestDaemonStatusTextOutputIncludesBridgeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestDaemonStatusReportTreatsZombiePIDAsStale(t *testing.T) {
+	origProcessState := daemonReadProcessState
+	daemonReadProcessState = func(pid int) (string, error) { return "Z", nil }
+	t.Cleanup(func() { daemonReadProcessState = origProcessState })
+
+	pidFile := filepath.Join(t.TempDir(), "promptlockd.pid")
+	if err := os.WriteFile(pidFile, []byte(strings.TrimSpace(strconv.Itoa(os.Getpid()))+"\n"), 0o600); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+
+	report, err := daemonStatusReportFromFlags(daemonFlags{PIDFile: pidFile})
+	if err != nil {
+		t.Fatalf("daemonStatusReportFromFlags: %v", err)
+	}
+	if report.Status != "stale" {
+		t.Fatalf("status = %q, want stale", report.Status)
+	}
+}
+
 func startLoopbackHTTPServer(t *testing.T, handler http.Handler) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

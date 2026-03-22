@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,11 +19,12 @@ func TestParseAndValidateExecArgs(t *testing.T) {
 		"intent":      "run_tests",
 		"command":     []interface{}{"bash", "-lc", "echo ok"},
 		"ttl_minutes": float64(5),
+		"env_path":    "demo-envs/github.env",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok.Intent != "run_tests" || len(ok.Cmd) != 3 || ok.TTL != 5 {
+	if ok.Intent != "run_tests" || len(ok.Cmd) != 3 || ok.TTL != 5 || ok.EnvPath != "demo-envs/github.env" {
 		t.Fatalf("unexpected parsed args: %#v", ok)
 	}
 
@@ -39,6 +42,15 @@ func TestParseAndValidateExecArgs(t *testing.T) {
 	}
 	if _, err := parseAndValidateExecArgs(map[string]interface{}{"intent": "run", "command": []interface{}{"bash"}, "ttl_minutes": float64(1.5)}); err == nil {
 		t.Fatalf("expected invalid non-integer ttl")
+	}
+	if _, err := parseAndValidateExecArgs(map[string]interface{}{"intent": "run", "command": []interface{}{"bash"}, "env_path": ""}); err == nil {
+		t.Fatalf("expected invalid blank env_path")
+	}
+	if _, err := parseAndValidateExecArgs(map[string]interface{}{"intent": "run", "command": []interface{}{"bash"}, "env_path": "demo.env\nnext"}); err == nil {
+		t.Fatalf("expected invalid multiline env_path")
+	}
+	if _, err := parseAndValidateExecArgs(map[string]interface{}{"intent": "run", "command": []interface{}{"bash"}, "env_path": float64(1)}); err == nil {
+		t.Fatalf("expected invalid non-string env_path")
 	}
 }
 
@@ -212,6 +224,38 @@ func TestResolveBrokerTransportPrefersAgentUnixSocketOverAmbientBrokerURL(t *tes
 	}
 }
 
+func TestResolveBrokerTransportPrefersWrapperAgentUnixSocketOverStaleSavedEnv(t *testing.T) {
+	transport, err := resolveBrokerTransport(lookupEnvMap(map[string]string{
+		"PROMPTLOCK_AGENT_UNIX_SOCKET":         "/tmp/stale-agent.sock",
+		"PROMPTLOCK_BROKER_URL":                "http://stale-broker.example.internal",
+		"PROMPTLOCK_WRAPPER_AGENT_UNIX_SOCKET": "/tmp/promptlock-wrapper.sock",
+	}), func(path string) error {
+		if path == "/tmp/promptlock-wrapper.sock" {
+			return nil
+		}
+		return errors.New("unexpected path")
+	})
+	if err != nil {
+		t.Fatalf("resolveBrokerTransport returned error: %v", err)
+	}
+	if transport.UnixSocket != "/tmp/promptlock-wrapper.sock" {
+		t.Fatalf("unix socket = %q, want wrapper socket", transport.UnixSocket)
+	}
+	if transport.BaseURL != "" {
+		t.Fatalf("expected wrapper unix socket to beat stale saved broker URL, got %q", transport.BaseURL)
+	}
+}
+
+func TestEffectiveEnvPrefersWrapperSessionToken(t *testing.T) {
+	got := effectiveEnv(lookupEnvMap(map[string]string{
+		"PROMPTLOCK_SESSION_TOKEN":         "stale-session",
+		"PROMPTLOCK_WRAPPER_SESSION_TOKEN": "fresh-session",
+	}), "PROMPTLOCK_SESSION_TOKEN")
+	if got != "fresh-session" {
+		t.Fatalf("effectiveEnv session token = %q, want fresh wrapper token", got)
+	}
+}
+
 func TestResolveBrokerTransportFailsClosedWithoutSocketOrExplicitBroker(t *testing.T) {
 	_, err := resolveBrokerTransport(lookupEnvMap(nil), func(string) error {
 		return errors.New("missing")
@@ -235,5 +279,37 @@ func TestExecuteWithIntentFailsClosedWithoutExplicitBrokerTransport(t *testing.T
 	}
 	if !strings.Contains(err.Error(), "broker unix socket not found") {
 		t.Fatalf("expected fail-closed missing socket error, got %v", err)
+	}
+}
+
+func TestExecuteWithIntentUnknownIntentReturnsActionableHint(t *testing.T) {
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/intents/resolve" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("unknown intent"))
+	}))
+	defer broker.Close()
+
+	t.Setenv("PROMPTLOCK_BROKER_URL", broker.URL)
+	t.Setenv("PROMPTLOCK_AGENT_UNIX_SOCKET", "")
+	t.Setenv("PROMPTLOCK_SESSION_TOKEN", "sess_1")
+
+	_, err := executeWithIntent(context.Background(), map[string]interface{}{
+		"intent":  "run_make_demo_print_github_token",
+		"command": []interface{}{"make", "demo-print-github-token"},
+	})
+	if err == nil {
+		t.Fatalf("expected unknown intent error")
+	}
+	if !strings.Contains(err.Error(), "unknown intent") {
+		t.Fatalf("expected unknown intent in error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "configured intent id") {
+		t.Fatalf("expected configured intent id hint, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "run_tests") {
+		t.Fatalf("expected run_tests hint, got %v", err)
 	}
 }

@@ -415,65 +415,34 @@ func newWorkspaceSetupResult(layout workspaceSetupLayout, opts workspaceSetupOpt
 }
 
 func renderWorkspaceSetupSummary(result workspaceSetupResult) string {
-	sourceCmd := ". " + shellQuote(result.EnvPath)
-	changeDirCmd := "cd " + shellQuote(result.WorkspaceRoot)
 	creationVerb := "ready"
 	if !result.Created {
 		creationVerb = "reused"
 	}
 	lines := []string{
 		"PromptLock local docker quickstart is " + creationVerb + ".",
-		"You are ready for the first approval flow in this workspace.",
 		"",
-		"Workspace root: " + result.WorkspaceRoot,
-		"Instance dir:   " + result.InstanceDir,
-		"Socket dir:     " + result.SocketDir,
-		"Config file:    " + result.ConfigPath,
-		"Env file:       " + result.EnvPath,
-		"Audit log:      " + result.AuditPath,
+		"Host-side commands auto-detect this workspace setup when run from:",
+		"  cd " + shellQuote(result.WorkspaceRoot),
 		"",
-		"Next commands:",
-		"Run the following commands exactly once in three terminals:",
-		"Terminal A (broker host):",
-		"  " + changeDirCmd,
-		"  " + sourceCmd,
-		"  go run ./cmd/promptlock daemon start",
-		"Terminal B (operator watch UI):",
-		"  " + changeDirCmd,
-		"  " + sourceCmd,
-		"  go run ./cmd/promptlock watch",
-		"Terminal C (agent container launch):",
-		"  " + changeDirCmd,
-		"  docker build -t " + result.ImageName + " .",
-		"  " + sourceCmd,
-		"  go run ./cmd/promptlock auth docker-run \\",
-		"    --agent " + result.AgentID + " \\",
-		"    --container " + result.ContainerID + " \\",
-		"    --image " + result.ImageName + " \\",
-		"    --entrypoint /usr/local/bin/promptlock \\",
-		"    -- \\",
-		"    exec \\",
-		"    --agent " + result.AgentID + " \\",
-		"    --task " + result.TaskID + " \\",
-		"    --intent " + result.IntentName + " \\",
-		"    --reason " + shellQuote("workspace quickstart") + " \\",
-		"    --ttl 20 \\",
-		"    --wait-approve 5m \\",
-		"    --poll-interval 2s \\",
-		"    --broker-exec \\",
-		"    -- go version",
+		"1. go run ./cmd/promptlock daemon start",
+		"2. go run ./cmd/promptlock watch",
+		"3. docker build --target agent-lab -t " + result.ImageName + " .",
+		"4. go run ./cmd/promptlock auth docker-run \\",
+		"     --agent " + result.AgentID + " --container " + result.ContainerID + " --image " + result.ImageName + " \\",
+		"     --entrypoint /usr/local/bin/promptlock -- \\",
+		"     exec --agent " + result.AgentID + " --task " + result.TaskID + " --intent " + result.IntentName + " \\",
+		"     --reason " + shellQuote("workspace quickstart") + " --ttl 20 --wait-approve 5m \\",
+		"     --poll-interval 2s --broker-exec -- go version",
 		"",
-		"Notes:",
-		"  - The generated config and runtime env live outside the repo so supported state does not sit in the agent-controlled workspace.",
-		"  - Quickstart socket paths live under " + result.SocketDir + " so the local Unix-socket flow stays below desktop path-length limits.",
-		"  - The env file includes a demo " + setupSecretEnvName(result.SecretName) + " value for local quickstart only. Replace it before real use.",
-		"  - The generated quickstart config sets execution output to " + result.OutputSecurityMode + " so the first broker-exec demo prints output. Use output_security_mode=none for stronger containment once the flow is verified.",
+		"Config: " + result.ConfigPath,
+		"Env:    " + result.EnvPath,
+		"Source instance.env only if you want to run the quickstart from another directory or inspect the generated values.",
 	}
 	if result.DockerBridgeURL != "" {
-		lines = append(lines, "  - On non-Linux desktop Docker runtimes, the daemon also starts an agent-only loopback bridge for containerized MCP clients at "+result.DockerBridgeURL+".")
+		lines = append(lines, "On non-Linux desktop Docker runtimes, the daemon also starts the agent-only bridge automatically.")
 	} else if strings.TrimSpace(result.AgentBridgeAddress) != "" {
-		lines = append(lines, "  - On non-Linux desktop Docker runtimes, the daemon also starts an agent-only loopback bridge for containerized MCP clients.")
-		lines = append(lines, "  - After daemon start, use `go run ./cmd/promptlock daemon status --json` to discover the active container bridge URL.")
+		lines = append(lines, "On non-Linux desktop Docker runtimes, the daemon also starts the agent-only bridge automatically.")
 	}
 	return strings.Join(lines, "\n") + "\n"
 }

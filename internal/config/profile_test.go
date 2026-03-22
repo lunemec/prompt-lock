@@ -47,6 +47,18 @@ func TestApplyHardenedProfile(t *testing.T) {
 			}
 		}
 	}
+	for _, required := range []string{"go", "python", "python3", "git"} {
+		found := false
+		for _, allowed := range cfg.ExecutionPolicy.ExactMatchExecutables {
+			if allowed == required {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected %q in hardened allowlist, got %#v", required, cfg.ExecutionPolicy.ExactMatchExecutables)
+		}
+	}
 	if len(cfg.HostOpsPolicy.DockerComposeAllowVerbs) != 2 || cfg.HostOpsPolicy.DockerComposeAllowVerbs[0] != "config" || cfg.HostOpsPolicy.DockerComposeAllowVerbs[1] != "ps" {
 		t.Fatalf("expected hardened compose verbs to be [config ps], got %#v", cfg.HostOpsPolicy.DockerComposeAllowVerbs)
 	}

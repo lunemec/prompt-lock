@@ -170,7 +170,7 @@ if [[ -n "${REQ_ID2:-}" ]] && [[ -f "$AUDIT" ]]; then
 fi
 
 IMAGE="promptlock-agent-lab"
-docker build -t "$IMAGE" . >/dev/null
+docker build --target agent-lab -t "$IMAGE" . >/dev/null
 SKILL_IMAGE_OK=false
 if docker run --rm --entrypoint /bin/sh "$IMAGE" -lc 'test -x /usr/local/bin/secretctl.sh && test -f /opt/promptlock/skills/secret-request/SKILL.md'; then
   SKILL_IMAGE_OK=true

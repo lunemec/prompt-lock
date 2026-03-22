@@ -42,6 +42,7 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 func TestRunWatchListDisplaysDecisionContext(t *testing.T) {
+	t.Setenv("PROMPTLOCK_ENV_PATH_ROOT", "")
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/requests/pending" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
@@ -333,6 +334,82 @@ func TestShouldWatchAutostartDaemon(t *testing.T) {
 	t.Setenv("PROMPTLOCK_BROKER_URL", "http://example")
 	if shouldWatchAutostartDaemon(false, base) {
 		t.Fatalf("expected PROMPTLOCK_BROKER_URL to disable daemon auto-start")
+	}
+}
+
+func TestValidateWatchEnvPathExpectationErrorsWhenBrokerEnvPathDisabled(t *testing.T) {
+	t.Setenv("PROMPTLOCK_ENV_PATH_ROOT", "/tmp/demo-root")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/meta/capabilities" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"auth_enabled":                  true,
+			"allow_plaintext_secret_return": false,
+			"env_path_enabled":              false,
+		})
+	}))
+	defer ts.Close()
+
+	err := validateWatchEnvPathExpectation(ts.URL, "")
+	if err == nil {
+		t.Fatalf("expected mismatch error")
+	}
+	if !strings.Contains(err.Error(), "env_path disabled") {
+		t.Fatalf("expected env_path disabled message, got %v", err)
+	}
+}
+
+func TestValidateWatchEnvPathExpectationAllowsWhenBrokerEnvPathEnabled(t *testing.T) {
+	t.Setenv("PROMPTLOCK_ENV_PATH_ROOT", "/tmp/demo-root")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/meta/capabilities" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"auth_enabled":                  true,
+			"allow_plaintext_secret_return": false,
+			"env_path_enabled":              true,
+		})
+	}))
+	defer ts.Close()
+
+	if err := validateWatchEnvPathExpectation(ts.URL, ""); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestValidateWatchEnvPathExpectationSkipsWhenUnset(t *testing.T) {
+	t.Setenv("PROMPTLOCK_ENV_PATH_ROOT", "")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected request %s", r.URL.Path)
+	}))
+	defer ts.Close()
+
+	if err := validateWatchEnvPathExpectation(ts.URL, ""); err != nil {
+		t.Fatalf("expected no error when env root is unset, got %v", err)
+	}
+}
+
+func TestValidateWatchEnvPathExpectationErrorsWhenCapabilityMissing(t *testing.T) {
+	t.Setenv("PROMPTLOCK_ENV_PATH_ROOT", "/tmp/demo-root")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/meta/capabilities" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"auth_enabled":                  true,
+			"allow_plaintext_secret_return": false,
+		})
+	}))
+	defer ts.Close()
+
+	err := validateWatchEnvPathExpectation(ts.URL, "")
+	if err == nil {
+		t.Fatalf("expected mismatch error")
+	}
+	if !strings.Contains(err.Error(), "does not advertise env_path_enabled") {
+		t.Fatalf("expected missing capability message, got %v", err)
 	}
 }
 

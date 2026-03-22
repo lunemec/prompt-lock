@@ -97,6 +97,76 @@ func TestMCPStdioInitializeAndToolsList(t *testing.T) {
 	if !ok || len(tools) == 0 {
 		t.Fatalf("tools/list no tools: %+v", msg2)
 	}
+	tool, ok := tools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list tool shape invalid: %+v", msg2)
+	}
+	schema, ok := tool["inputSchema"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list inputSchema missing: %+v", msg2)
+	}
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list properties missing: %+v", msg2)
+	}
+	envPath, ok := props["env_path"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list missing env_path property: %+v", msg2)
+	}
+	if got, _ := envPath["type"].(string); got != "string" {
+		t.Fatalf("expected env_path type=string, got %+v", envPath)
+	}
+}
+
+func TestMCPToolsListIncludesIntentUsageGuidance(t *testing.T) {
+	_, writeLine, readJSON := launchMCP(t, map[string]string{})
+
+	writeLine(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	initResp := readJSON()
+	if initResp["error"] != nil {
+		t.Fatalf("initialize returned error: %+v", initResp)
+	}
+
+	writeLine(`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
+	msg := readJSON()
+	if msg["error"] != nil {
+		t.Fatalf("tools/list returned error: %+v", msg)
+	}
+	res, ok := msg["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list result shape invalid: %+v", msg)
+	}
+	tools, ok := res["tools"].([]any)
+	if !ok || len(tools) == 0 {
+		t.Fatalf("tools/list no tools: %+v", msg)
+	}
+	tool, ok := tools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list tool shape invalid: %+v", tools[0])
+	}
+	toolDescription, _ := tool["description"].(string)
+	if !strings.Contains(toolDescription, "configured intent id") {
+		t.Fatalf("expected tool description to explain configured intent ids, got %q", toolDescription)
+	}
+	if !strings.Contains(toolDescription, "run_tests") {
+		t.Fatalf("expected tool description to include run_tests quickstart hint, got %q", toolDescription)
+	}
+	schema, ok := tool["inputSchema"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list inputSchema missing: %+v", tool)
+	}
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list properties missing: %+v", schema)
+	}
+	intentProp, ok := props["intent"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list missing intent property: %+v", props)
+	}
+	intentDescription, _ := intentProp["description"].(string)
+	if !strings.Contains(intentDescription, "must exactly match") {
+		t.Fatalf("expected intent description to require exact match ids, got %q", intentDescription)
+	}
 }
 
 func TestMCPInitializeNotificationAndToolsCallSequence(t *testing.T) {
@@ -168,11 +238,17 @@ func TestMCPInitializeNotificationAndToolsCallSequence(t *testing.T) {
 }
 
 func TestMCPToolsCallExecuteWithIntentRoundtrip(t *testing.T) {
+	var leaseRequest struct {
+		EnvPath string `json:"env_path"`
+	}
 	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/v1/intents/resolve":
 			_ = json.NewEncoder(w).Encode(map[string]any{"secrets": []string{"github_token"}})
 		case r.URL.Path == "/v1/leases/request":
+			if err := json.NewDecoder(r.Body).Decode(&leaseRequest); err != nil {
+				t.Fatalf("decode lease request: %v", err)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"request_id": "r1"})
 		case r.URL.Path == "/v1/requests/status":
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "approved"})
@@ -191,7 +267,7 @@ func TestMCPToolsCallExecuteWithIntentRoundtrip(t *testing.T) {
 		"PROMPTLOCK_SESSION_TOKEN": "s1",
 	})
 
-	writeLine(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}`)
+	writeLine(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5,"env_path":"demo-envs/github.env"}}}`)
 	msg := readJSON()
 	if msg["error"] != nil {
 		t.Fatalf("tools/call returned error: %+v", msg)
@@ -211,6 +287,9 @@ func TestMCPToolsCallExecuteWithIntentRoundtrip(t *testing.T) {
 	text, _ := item["text"].(string)
 	if !strings.Contains(text, "exit=0") {
 		t.Fatalf("expected exit=0 in text, got: %s", text)
+	}
+	if leaseRequest.EnvPath != "demo-envs/github.env" {
+		t.Fatalf("expected lease request env_path to roundtrip, got %#v", leaseRequest)
 	}
 }
 
@@ -775,6 +854,58 @@ func TestMCPToolsCallInvalidSessionToken(t *testing.T) {
 	}
 }
 
+func TestMCPToolsCallPrefersWrapperSessionAndTransportOverStaleSavedEnv(t *testing.T) {
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer fresh-session" {
+			http.Error(w, "invalid session", http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/v1/intents/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{"secrets": []string{"github_token"}})
+		case "/v1/leases/request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"request_id": "r-wrapper"})
+		case "/v1/requests/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "approved"})
+		case "/v1/leases/by-request":
+			_ = json.NewEncoder(w).Encode(map[string]any{"lease_token": "l-wrapper"})
+		case "/v1/leases/execute":
+			_ = json.NewEncoder(w).Encode(map[string]any{"exit_code": 0, "stdout_stderr": "wrapper-env-ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer broker.Close()
+
+	_, writeLine, readJSON := launchMCP(t, map[string]string{
+		"PROMPTLOCK_BROKER_URL":            "http://127.0.0.1:1",
+		"PROMPTLOCK_SESSION_TOKEN":         "stale-session",
+		"PROMPTLOCK_WRAPPER_BROKER_URL":    broker.URL,
+		"PROMPTLOCK_WRAPPER_SESSION_TOKEN": "fresh-session",
+	})
+	writeLine(`{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"execute_with_intent","arguments":{"intent":"run_tests","command":["bash","-lc","echo ok"],"ttl_minutes":5}}}`)
+	msg := readJSON()
+	if msg["error"] != nil {
+		t.Fatalf("expected wrapper env to beat stale saved env, got error %+v", msg)
+	}
+	res, ok := msg["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("invalid result: %+v", msg)
+	}
+	content, ok := res["content"].([]any)
+	if !ok || len(content) == 0 {
+		t.Fatalf("missing content: %+v", msg)
+	}
+	item, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("invalid content shape: %+v", msg)
+	}
+	text, _ := item["text"].(string)
+	if !strings.Contains(text, "wrapper-env-ok") {
+		t.Fatalf("expected wrapper-backed execution output, got %q", text)
+	}
+}
+
 func TestMCPToolsCallPolicyDeniedPath(t *testing.T) {
 	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -802,6 +933,14 @@ func TestMCPToolsCallPolicyDeniedPath(t *testing.T) {
 	msg := readJSON()
 	if msg["error"] == nil {
 		t.Fatalf("expected policy denied error")
+	}
+	errObj, ok := msg["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected structured rpc error, got %+v", msg)
+	}
+	message, _ := errObj["message"].(string)
+	if !strings.Contains(message, "command denied by policy") {
+		t.Fatalf("expected policy body in MCP error message, got %q", message)
 	}
 }
 

@@ -938,7 +938,7 @@ func TestWatchHelpTextDocumentsOperatorActions(t *testing.T) {
 		"watch allow --ttl 5 <request_id>",
 		"auto-starts a local `promptlockd` daemon",
 		"--external",
-		"Defaults to the operator unix socket",
+		"auto-detect its config, operator token, and operator socket",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("watch help missing %q:\n%s", want, got)
@@ -969,6 +969,7 @@ func TestDaemonHelpTextDocumentsLifecycleCommands(t *testing.T) {
 		"promptlock daemon start",
 		"promptlock daemon status --json",
 		"manages a local `promptlockd` process",
+		"auto-detects that config",
 		"reports bridge reachability",
 	} {
 		if !strings.Contains(got, want) {
@@ -985,6 +986,8 @@ func TestSetupHelpTextDescribesGeneratedArtifactsAndReuse(t *testing.T) {
 		"Creates a per-workspace quickstart instance outside the repo",
 		"short runtime socket dir",
 		"Running setup again reuses the existing complete instance",
+		"the CLI auto-detects this quickstart for you",
+		"Source `instance.env` only when you want to run the quickstart from another directory",
 		"The generated quickstart defaults to `output_security_mode=raw`",
 	} {
 		if !strings.Contains(got, want) {
@@ -999,6 +1002,7 @@ func TestAuthDockerRunHelpTextExplainsHostSideFlow(t *testing.T) {
 		"PromptLock auth docker-run",
 		"Run this on the host to mint a short-lived agent session and launch `docker run` in one step.",
 		"The operator socket stays on the host.",
+		"`--hide-path`",
 		"Example:",
 	} {
 		if !strings.Contains(got, want) {

@@ -98,7 +98,7 @@ If hardened local config omits all socket fields and keeps the listener local-on
 - Validator remains fail closed during rotation: unknown `signature.key_id`, malformed keyring entries, missing keyring env vars, disabled overlap windows (`PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_OVERLAP_MAX_AGE` unset/zero), or expired overlap age all fail validation.
 - For release/readiness, use one-shot gate `make storage-fsync-release-gate MOUNT_DIRS=/path/a,/path/b FSYNC_REPORT=reports/storage-fsync-report.json` (fails closed when signature validation fails).
 - For hardened local deployments, prefer `agent_unix_socket` + `operator_unix_socket` and do not expose the operator socket to containers.
-- For a repo-local quickstart without storing supported state inside the repo, run `go run ./cmd/promptlock setup` (or `make setup-local-docker`). It generates a per-workspace host-side instance under `XDG_STATE_HOME` or `~/.local/state/promptlock/workspaces/...`, along with a sourceable `instance.env` that exports `PROMPTLOCK_CONFIG`, role-socket env vars, operator token, auth-store key, and a demo secret value for the first container-originated flow.
+- For a repo-local quickstart without storing supported state inside the repo, run `go run ./cmd/promptlock setup` (or `make setup-local-docker`). It generates a per-workspace host-side instance under `XDG_STATE_HOME` or `~/.local/state/promptlock/workspaces/...`, along with a sourceable `instance.env` that exports `PROMPTLOCK_CONFIG`, role-socket env vars, operator token, auth-store key, and a demo secret value for the first container-originated flow. When you later run host-side `promptlock daemon start`, `promptlock watch`, or `promptlock auth docker-run` from that workspace root with no explicit overrides, the CLI auto-detects the generated setup instance.
 - CLI now auto-selects local sockets by role when no broker transport flags/env are given:
   - `promptlock watch` and `promptlock auth bootstrap` target the operator socket.
   - `promptlock exec`, `promptlock auth pair`, and `promptlock auth mint` target the agent socket.
@@ -140,7 +140,7 @@ Startup guardrails:
 
 ## Execution policy notes
 - `execution_policy.exact_match_executables` is the canonical broker-exec executable allowlist key. Matching is exact executable identity after basename normalization, not prefix matching. `go` allows `go` and `/usr/local/bin/go`; it does not allow `goevil`.
-- In `security_profile: hardened`, broker-exec additionally requires `intent`, rejects raw shell wrappers (`bash`/`sh`/`zsh`), and tightens allowlist defaults to non-shell tool entrypoints (`npm`, `node`, `go`, `python`, `pytest`, `make`, `git`).
+- In `security_profile: hardened`, broker-exec additionally requires `intent`, rejects raw shell wrappers (`bash`/`sh`/`zsh`), and tightens allowlist defaults to non-shell tool entrypoints (`npm`, `node`, `go`, `python`, `python3`, `pytest`, `make`, `git`).
 - In `security_profile: hardened`, explicit `execution_policy.exact_match_executables` additions are merged with the hardened defaults, but raw shell wrappers remain disallowed even if configured.
 - `execution_policy.command_search_paths` defines the broker-managed executable lookup path for host-side execution. Bare command names are resolved only from these directories.
 - When `command_search_paths` is unset, PromptLock defaults to common host-owned tool directories (for example `/usr/local/bin`, `/usr/local/sbin`, `/usr/local/go/bin`, `/opt/homebrew/bin`, `/usr/bin`, and `/bin` on Unix-like hosts).

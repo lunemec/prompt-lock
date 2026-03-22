@@ -21,6 +21,7 @@ type capabilities struct {
 	AuthEnabled                bool   `json:"auth_enabled"`
 	AllowPlaintextSecretReturn bool   `json:"allow_plaintext_secret_return"`
 	AgentBridgeAddress         string `json:"agent_bridge_address"`
+	EnvPathEnabled             *bool  `json:"env_path_enabled,omitempty"`
 }
 
 type brokerFlags struct {
@@ -132,6 +133,28 @@ func resolveBrokerSelection(role brokerRole, in brokerSelectionInput) (brokerSel
 			}, nil
 		}
 		return brokerSelection{}, fmt.Errorf("%s broker unix socket not found at %s; set --broker or PROMPTLOCK_BROKER_URL for explicit TCP transport", role, roleUnix)
+	}
+	if setupUnix := workspaceSetupBrokerSocket(role, os.Getenv("PROMPTLOCK_CONFIG")); setupUnix != "" {
+		ready, err := brokerSocketExists(setupUnix)
+		if err != nil {
+			if errors.Is(err, errBrokerUnixSocketNotSocket) {
+				return brokerSelection{}, fmt.Errorf("%s broker unix socket path %s is not a unix socket; set --broker or PROMPTLOCK_BROKER_URL for explicit TCP transport", role, setupUnix)
+			}
+			return brokerSelection{}, fmt.Errorf("validate %s broker unix socket path %s: %w", role, setupUnix, err)
+		}
+		if ready {
+			return brokerSelection{
+				BaseURL:    normalizeBrokerURL(explicitURL),
+				UnixSocket: setupUnix,
+			}, nil
+		}
+		if envURL := strings.TrimSpace(os.Getenv("PROMPTLOCK_BROKER_URL")); envURL != "" {
+			return brokerSelection{
+				BaseURL:    envURL,
+				UnixSocket: "",
+			}, nil
+		}
+		return brokerSelection{}, fmt.Errorf("%s broker unix socket not found at %s; set --broker or PROMPTLOCK_BROKER_URL for explicit TCP transport", role, setupUnix)
 	}
 	defaultUnix := defaultBrokerUnixSocket(role)
 	ready, err := brokerSocketExists(defaultUnix)

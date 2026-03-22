@@ -57,6 +57,7 @@ Commands:
   watch       Review, list, approve, or deny pending requests from the operator side
   exec        Request secrets, wait for approval, and run locally or via broker-exec
   auth        Bootstrap, pair, mint, or launch a containerized agent session
+  mcp         Diagnose PromptLock MCP launcher/client preflight issues
   audit-verify Verify the audit log hash chain on the host
 
 Run "promptlock <command> --help" for command-specific guidance.
@@ -100,7 +101,7 @@ Usage:
 
 By default, `+"`promptlock watch`"+` auto-starts a local `+"`promptlockd`"+` daemon when needed.
 Use `+"`--external`"+` to connect to an already-running daemon only.
-Defaults to the operator unix socket when a hardened local setup is active.
+When a workspace setup from `+"`promptlock setup`"+` exists, host-side watch commands auto-detect its config, operator token, and operator socket from the workspace root.
 Use this from the host/operator side to review pending requests and make approval decisions.
 `) + "\n"
 }
@@ -135,6 +136,7 @@ Examples:
 
 Notes:
   - This command manages a local `+"`promptlockd`"+` process using a PID file.
+  - When no explicit config is set and the current workspace already has a `+"`promptlock setup`"+` instance, the daemon command auto-detects that config.
   - When `+"`PROMPTLOCK_CONFIG`"+` or `+"`--config`"+` points at a setup instance, the default PID and log files live next to that config so separate workspaces do not collide.
   - In local hardened dual-socket mode on non-Linux hosts, the daemon also starts an agent-only loopback bridge for desktop-Docker containers.
   - `+"`promptlock daemon status`"+` also probes the local agent API and reports bridge reachability when available.
@@ -161,7 +163,49 @@ Creates a per-workspace quickstart instance outside the repo with:
   - on non-Linux hosts, a daemon-managed agent bridge URL for desktop-Docker containers
 
 Running setup again reuses the existing complete instance instead of rotating secrets or rewriting files.
+When you later run host-side `+"`promptlock daemon start`"+`, `+"`promptlock watch`"+`, or `+"`promptlock auth docker-run`"+` from the workspace root, the CLI auto-detects this quickstart for you.
+Source `+"`instance.env`"+` only when you want to run the quickstart from another directory or inspect the generated values directly.
 The generated quickstart defaults to `+"`output_security_mode=raw`"+` so the first broker-exec demo can print output.
 After you verify the flow, switch back to `+"`output_security_mode=none`"+` for stronger containment.
+`) + "\n"
+}
+
+func mcpHelpText() string {
+	return strings.TrimSpace(`
+PromptLock mcp
+
+Usage:
+  promptlock mcp doctor [flags]
+
+Use this from the shell where you plan to launch an MCP-capable client.
+The doctor checks:
+  - `+"`promptlock-mcp-launch`"+` availability on PATH
+  - `+"`promptlock-mcp`"+` resolution for the launcher
+  - the shared Codex `+"`promptlock`"+` MCP registration when a Codex config exists
+  - current PromptLock session and transport env
+  - a real stdio `+"`initialize`"+` / `+"`tools/list`"+` handshake through the launcher
+
+The `+"`execute_with_intent`"+` MCP tool accepts `+"`intent`"+`, `+"`command`"+`, optional `+"`ttl_minutes`"+`,
+and optional `+"`env_path`"+` for approved `+"`.env`"+` / env-like file lookup.
+
+Subcommands:
+  doctor      Run MCP preflight checks for the current shell/client context
+`) + "\n"
+}
+
+func mcpDoctorHelpText() string {
+	return strings.TrimSpace(`
+PromptLock mcp doctor
+
+Usage:
+  promptlock mcp doctor [--json]
+
+This command is a preflight for the exact shell where your MCP client will run.
+It diagnoses the common failure modes that cause PromptLock MCP startup failures:
+  - missing `+"`promptlock-mcp-launch`"+` or `+"`promptlock-mcp`"+`
+  - stale or non-portable Codex MCP command configuration
+  - missing live `+"`PROMPTLOCK_SESSION_TOKEN`"+`
+  - missing `+"`PROMPTLOCK_AGENT_UNIX_SOCKET`"+` or `+"`PROMPTLOCK_BROKER_URL`"+`
+  - launcher startup failures before the MCP `+"`initialize`"+` handshake
 `) + "\n"
 }

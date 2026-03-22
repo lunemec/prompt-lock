@@ -1,12 +1,15 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -17,6 +20,14 @@ const (
 	defaultDaemonPIDFile     = "/tmp/promptlockd.pid"
 	defaultDaemonPIDFileName = "promptlockd.pid"
 	defaultDaemonLogFileName = "promptlockd.log"
+	defaultDaemonBinaryName  = "promptlockd-autostart"
+)
+
+var (
+	daemonLookPath           = exec.LookPath
+	daemonBuildSourceBinary  = buildDaemonBinaryFromSource
+	daemonReadProcessState   = readDaemonProcessState
+	daemonSourceBuildAllowed = daemonSourceBuildAvailable
 )
 
 type daemonFlags struct {
@@ -128,6 +139,11 @@ func daemonStop(flags daemonFlags) error {
 		}
 		return err
 	}
+	if !processAlive(pid) {
+		_ = os.Remove(flags.PIDFile)
+		fmt.Printf("promptlockd already exited (pid=%d)\n", pid)
+		return nil
+	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return fmt.Errorf("find process %d: %w", pid, err)
@@ -186,23 +202,104 @@ func processAlive(pid int) bool {
 		return false
 	}
 	err = proc.Signal(syscall.Signal(0))
-	return err == nil
+	if err != nil {
+		return false
+	}
+	state, err := daemonReadProcessState(pid)
+	if err != nil {
+		return true
+	}
+	state = strings.TrimSpace(strings.ToUpper(state))
+	if strings.HasPrefix(state, "Z") {
+		return false
+	}
+	return true
 }
 
 func buildDaemonCommand(flags daemonFlags) (*exec.Cmd, string, error) {
-	if path, err := exec.LookPath(flags.Binary); err == nil {
+	if path, err := daemonLookPath(flags.Binary); err == nil {
 		return exec.Command(path), path, nil
 	}
-	if strings.TrimSpace(flags.Binary) == "promptlockd" && fileExists("go.mod") && fileExists(filepath.Join("cmd", "promptlockd", "main.go")) {
-		if goPath, goErr := exec.LookPath("go"); goErr == nil {
-			return exec.Command(goPath, "run", "./cmd/promptlockd"), "go run ./cmd/promptlockd", nil
+	if strings.TrimSpace(flags.Binary) == "promptlockd" && daemonSourceBuildAllowed() {
+		if builtPath, buildErr := daemonBuildSourceBinary(flags.Config); buildErr == nil {
+			return exec.Command(builtPath), fmt.Sprintf("%s (built from source)", builtPath), nil
 		}
 	}
 	return nil, "", fmt.Errorf("resolve promptlockd binary %q: executable not found", flags.Binary)
 }
 
+func daemonSourceBuildAvailable() bool {
+	return fileExists("go.mod") && fileExists(filepath.Join("cmd", "promptlockd", "main.go"))
+}
+
+func buildDaemonBinaryFromSource(configPath string) (string, error) {
+	goPath, err := daemonLookPath("go")
+	if err != nil {
+		return "", fmt.Errorf("resolve go tool for promptlockd source build: %w", err)
+	}
+	targetPath, err := daemonBuiltBinaryPath(configPath)
+	if err != nil {
+		return "", err
+	}
+	if err := ensureParentDir(targetPath); err != nil {
+		return "", err
+	}
+
+	tempPath := targetPath + ".tmp-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	buildCmd := exec.Command(goPath, "build", "-o", tempPath, "./cmd/promptlockd")
+	buildCmd.Env = os.Environ()
+	output, err := buildCmd.CombinedOutput()
+	if err != nil {
+		_ = os.Remove(tempPath)
+		trimmed := strings.TrimSpace(string(output))
+		if trimmed == "" {
+			return "", fmt.Errorf("build promptlockd from source: %w", err)
+		}
+		return "", fmt.Errorf("build promptlockd from source: %w: %s", err, trimmed)
+	}
+	_ = os.Remove(targetPath)
+	if err := os.Rename(tempPath, targetPath); err != nil {
+		_ = os.Remove(tempPath)
+		return "", fmt.Errorf("activate built promptlockd binary: %w", err)
+	}
+	return targetPath, nil
+}
+
+func daemonBuiltBinaryPath(configPath string) (string, error) {
+	name := defaultDaemonBinaryName
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if trimmedConfig := strings.TrimSpace(resolvedWorkspaceSetupConfigPath(configPath)); trimmedConfig != "" {
+		return filepath.Join(filepath.Dir(trimmedConfig), name), nil
+	}
+
+	cwd, err := setupGetwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory for daemon binary path: %w", err)
+	}
+	sum := sha256.Sum256([]byte(cwd))
+	suffix := hex.EncodeToString(sum[:8])
+	return filepath.Join(os.TempDir(), name+"-"+suffix), nil
+}
+
+func readDaemonProcessState(pid int) (string, error) {
+	if runtime.GOOS == "windows" {
+		return "", nil
+	}
+	psPath, err := daemonLookPath("ps")
+	if err != nil {
+		return "", err
+	}
+	out, err := exec.Command(psPath, "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 func newDaemonFlags(pidFile, binary, configPath, logFile string, jsonOutput bool) daemonFlags {
-	trimmedConfig := strings.TrimSpace(configPath)
+	trimmedConfig := resolvedWorkspaceSetupConfigPath(strings.TrimSpace(configPath))
 	return daemonFlags{
 		PIDFile:    resolveDaemonPIDFile(pidFile, trimmedConfig),
 		Binary:     strings.TrimSpace(binary),
@@ -233,8 +330,9 @@ func resolveDaemonLogFile(logFile, configPath string) string {
 }
 
 func daemonEnv(configPath string) []string {
+	resolvedConfigPath := resolvedWorkspaceSetupConfigPath(configPath)
 	env := os.Environ()
-	if strings.TrimSpace(configPath) == "" {
+	if strings.TrimSpace(resolvedConfigPath) == "" {
 		return env
 	}
 	out := make([]string, 0, len(env)+1)
@@ -245,8 +343,8 @@ func daemonEnv(configPath string) []string {
 		}
 		out = append(out, kv)
 	}
-	out = append(out, prefix+configPath)
-	return out
+	out = append(out, prefix+resolvedConfigPath)
+	return mergeMissingEnv(out, loadWorkspaceSetupEnvExports(resolvedConfigPath))
 }
 
 func ensureParentDir(path string) error {
