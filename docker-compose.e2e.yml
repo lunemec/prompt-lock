@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runtime
     container_name: promptlockd-e2e
     environment:
       PROMPTLOCK_CONFIG: /app/config.e2e.json
@@ -18,6 +19,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: agent-lab
     container_name: promptlock-e2e-runner
     depends_on:
       - promptlockd
