@@ -3,9 +3,12 @@ package app
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/lunemec/promptlock/internal/core/domain"
 	"github.com/lunemec/promptlock/internal/core/ports"
@@ -16,6 +19,7 @@ type Clock func() time.Time
 type Service struct {
 	Policy                     domain.Policy
 	RequestPolicy              RequestPolicy
+	AllowPlaintextSecretReturn bool
 	MutationLock               sync.Locker
 	Requests                   ports.RequestStore
 	Leases                     ports.LeaseStore
@@ -63,11 +67,15 @@ func (s *Service) RequestLease(agentID, taskID, reason string, ttl int, secrets 
 }
 
 func (s *Service) RequestLeaseWithIntent(agentID, taskID, reason string, ttl int, secrets []string, intent, commandFingerprint, workdirFingerprint, envPath string) (domain.LeaseRequest, error) {
-	defer s.lockMutation()()
-	return s.requestLeaseUnlocked(agentID, taskID, reason, ttl, secrets, intent, commandFingerprint, workdirFingerprint, envPath)
+	return s.RequestLeaseWithIntentAndSummary(agentID, taskID, reason, ttl, secrets, intent, commandFingerprint, workdirFingerprint, envPath, "", "")
 }
 
-func (s *Service) requestLeaseUnlocked(agentID, taskID, reason string, ttl int, secrets []string, intent, commandFingerprint, workdirFingerprint, envPath string) (domain.LeaseRequest, error) {
+func (s *Service) RequestLeaseWithIntentAndSummary(agentID, taskID, reason string, ttl int, secrets []string, intent, commandFingerprint, workdirFingerprint, envPath, commandSummary, workdirSummary string) (domain.LeaseRequest, error) {
+	defer s.lockMutation()()
+	return s.requestLeaseUnlocked(agentID, taskID, reason, ttl, secrets, intent, commandFingerprint, workdirFingerprint, envPath, commandSummary, workdirSummary)
+}
+
+func (s *Service) requestLeaseUnlocked(agentID, taskID, reason string, ttl int, secrets []string, intent, commandFingerprint, workdirFingerprint, envPath, commandSummary, workdirSummary string) (domain.LeaseRequest, error) {
 	if err := s.Policy.ValidateRequest(ttl, secrets); err != nil {
 		return domain.LeaseRequest{}, err
 	}
@@ -86,6 +94,8 @@ func (s *Service) requestLeaseUnlocked(agentID, taskID, reason string, ttl int, 
 		Secrets:            append([]string{}, secrets...),
 		CommandFingerprint: commandFingerprint,
 		WorkdirFingerprint: workdirFingerprint,
+		CommandSummary:     NormalizeRequestSummary(commandSummary, maxRequestCommandSummaryRunes),
+		WorkdirSummary:     NormalizeRequestSummary(workdirSummary, maxRequestWorkdirSummaryRunes),
 		EnvPath:            envPath,
 		EnvPathCanonical:   envPathCanonical,
 		Status:             domain.RequestPending,
@@ -174,7 +184,119 @@ func (s *Service) approveRequestWithActorUnlocked(requestID string, ttlMinutes i
 			func() error { return s.Requests.UpdateRequest(original) },
 		))
 	}
+	if strings.TrimSpace(req.EnvPath) != "" {
+		_ = s.AuditEnvPathConfirmed(req.AgentID, req.TaskID, req.ID, req.EnvPath, req.EnvPathCanonical)
+	}
 	return lease, nil
+}
+
+func (s Service) RejectPlaintextSecretAccess(allowPlaintext bool, actorType, actorID string) error {
+	return s.rejectPlaintextSecretAccess(allowPlaintext, actorType, actorID)
+}
+
+func (s Service) RejectPlaintextSecretAccessFromState(actorType, actorID string) error {
+	return s.rejectPlaintextSecretAccess(s.AllowPlaintextSecretReturn, actorType, actorID)
+}
+
+func (s Service) rejectPlaintextSecretAccess(allowPlaintext bool, actorType, actorID string) error {
+	if allowPlaintext {
+		return nil
+	}
+	if err := s.auditCritical(ports.AuditEvent{
+		Event:     "plaintext_secret_access_blocked",
+		Timestamp: s.now(),
+		ActorType: actorType,
+		ActorID:   actorID,
+	}); err != nil {
+		return err
+	}
+	return ErrPlaintextSecretReturnDisabled
+}
+
+const (
+	maxRequestCommandSummaryRunes = 160
+	maxRequestWorkdirSummaryRunes = 120
+	maxRequestCommandArgRunes     = 48
+	maxRequestCommandArgsPreview  = 6
+)
+
+func NormalizeRequestSummary(text string, limit int) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return ""
+	}
+	if limit <= 0 {
+		limit = maxRequestCommandSummaryRunes
+	}
+	var b strings.Builder
+	b.Grow(len(trimmed))
+	for _, r := range trimmed {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			b.WriteByte(' ')
+		case unicode.IsControl(r):
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	collapsed := strings.Join(strings.Fields(b.String()), " ")
+	return truncateRequestSummary(collapsed, limit)
+}
+
+func SummarizeCommandArgs(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	limit := maxRequestCommandArgsPreview
+	if limit <= 0 {
+		limit = 1
+	}
+	end := len(args)
+	if end > limit {
+		end = limit
+	}
+	parts := make([]string, 0, end+1)
+	for _, arg := range args[:end] {
+		parts = append(parts, summarizeRequestCommandArg(arg))
+	}
+	if len(args) > limit {
+		parts = append(parts, fmt.Sprintf("... (+%d args)", len(args)-limit))
+	}
+	return NormalizeRequestSummary(strings.Join(parts, " "), maxRequestCommandSummaryRunes)
+}
+
+func SummarizeWorkdirPath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return ""
+	}
+	return NormalizeRequestSummary(filepath.Clean(trimmed), maxRequestWorkdirSummaryRunes)
+}
+
+func summarizeRequestCommandArg(arg string) string {
+	summary := NormalizeRequestSummary(arg, maxRequestCommandArgRunes)
+	if summary == "" {
+		return ""
+	}
+	if strings.ContainsAny(summary, " \t\"") {
+		return strconv.Quote(summary)
+	}
+	return summary
+}
+
+func truncateRequestSummary(text string, limit int) string {
+	if limit <= 0 {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	if limit <= 3 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-3]) + "..."
 }
 
 func (s Service) canonicalizeApprovedEnvPath(envPath string) (string, error) {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/lunemec/promptlock/internal/config"
+	"github.com/lunemec/promptlock/internal/core/domain"
 )
 
 var executionBaselineEnvAllowlist = []string{
@@ -67,7 +68,7 @@ func BuildExecutionEnvironmentWithPathOverride(ambient []string, leased map[stri
 
 	secretKeys := make([]string, 0, len(leased))
 	for name, value := range leased {
-		envName := SecretEnvName(name)
+		envName := domain.SecretEnvName(name)
 		if envName == "" {
 			continue
 		}
@@ -114,14 +115,6 @@ func canonicalExecutionBaselineEnvKey(key string) string {
 		}
 	}
 	return ""
-}
-
-func SecretEnvName(secretName string) string {
-	trimmed := strings.TrimSpace(secretName)
-	if trimmed == "" {
-		return ""
-	}
-	return strings.ToUpper(trimmed)
 }
 
 func ExecutableIdentity(command string) string {

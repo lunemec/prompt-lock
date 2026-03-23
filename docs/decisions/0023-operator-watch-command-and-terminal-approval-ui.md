@@ -1,6 +1,6 @@
 # 0023 - Operator watch command and minimal terminal approval UI
 
-- Status: accepted
+- Status: superseded
 - Date: 2026-03-14
 
 ## Context
@@ -33,4 +33,4 @@ PromptLock's host-side approval command was named `approve-queue`, but the prima
 
 ## Supersedes / Superseded by
 - Supersedes: none
-- Superseded by: none
+- Superseded by: 0031

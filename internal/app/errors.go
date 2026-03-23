@@ -12,4 +12,6 @@ var ErrAuditWriteFailed = errors.New("audit write failed")
 
 var ErrAuditUnavailable = errors.New("audit sink unavailable")
 
+var ErrPlaintextSecretReturnDisabled = errors.New("plaintext secret return disabled by policy")
+
 var ErrCommandExecutionFailed = errors.New("command execution failed")

@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/lunemec/promptlock/internal/app"
 )
 
 type requestBody struct {
@@ -19,6 +21,8 @@ type requestBody struct {
 	Secrets            []string `json:"secrets"`
 	CommandFingerprint string   `json:"command_fingerprint"`
 	WorkdirFingerprint string   `json:"workdir_fingerprint"`
+	CommandSummary     string   `json:"command_summary,omitempty"`
+	WorkdirSummary     string   `json:"workdir_summary,omitempty"`
 	EnvPath            string   `json:"env_path,omitempty"`
 }
 
@@ -114,6 +118,10 @@ func runExec(args []string) {
 	if err != nil {
 		fatal(err)
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		fatal(err)
+	}
 	reqID, err := requestLease(broker.BaseURL, broker.UnixSocket, *sessionToken, requestBody{
 		AgentID:            *agent,
 		TaskID:             *task,
@@ -123,6 +131,8 @@ func runExec(args []string) {
 		Secrets:            secrets,
 		CommandFingerprint: fingerprint,
 		WorkdirFingerprint: wdfp,
+		CommandSummary:     app.SummarizeCommandArgs(cmdArgs),
+		WorkdirSummary:     app.SummarizeWorkdirPath(cwd),
 		EnvPath:            strings.TrimSpace(*envPath),
 	})
 	if err != nil {

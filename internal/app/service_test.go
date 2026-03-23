@@ -190,6 +190,46 @@ func TestLeaseFlow(t *testing.T) {
 	}
 }
 
+func TestRequestLeaseWithIntentAndSummaryStoresSanitizedSummaries(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
+	rawCommandSummary := "git\tstatus\n--short " + strings.Repeat("x", maxRequestCommandSummaryRunes+24)
+	rawWorkdirSummary := "  ./workspace//nested/../repo  "
+	svc := Service{
+		Policy:       domain.DefaultPolicy(),
+		Requests:     store,
+		Leases:       store,
+		Secrets:      store,
+		Audit:        &auditBuf{},
+		Now:          func() time.Time { return now },
+		NewRequestID: func() string { return "req_summary" },
+		NewLeaseTok:  func() string { return "lease_summary" },
+	}
+
+	req, err := svc.RequestLeaseWithIntentAndSummary("agent1", "task1", "test", 5, []string{"github_token"}, "run_tests", "fp1", "wd1", "", rawCommandSummary, rawWorkdirSummary)
+	if err != nil {
+		t.Fatalf("request lease: %v", err)
+	}
+	stored, err := store.GetRequest(req.ID)
+	if err != nil {
+		t.Fatalf("get request: %v", err)
+	}
+	wantCommand := NormalizeRequestSummary(rawCommandSummary, maxRequestCommandSummaryRunes)
+	wantWorkdir := NormalizeRequestSummary(rawWorkdirSummary, maxRequestWorkdirSummaryRunes)
+	if stored.CommandSummary != wantCommand {
+		t.Fatalf("expected sanitized command summary %q, got %q", wantCommand, stored.CommandSummary)
+	}
+	if stored.WorkdirSummary != wantWorkdir {
+		t.Fatalf("expected sanitized workdir summary %q, got %q", wantWorkdir, stored.WorkdirSummary)
+	}
+	if strings.ContainsAny(stored.CommandSummary, "\n\r\t") {
+		t.Fatalf("command summary still contains control characters: %q", stored.CommandSummary)
+	}
+	if strings.ContainsAny(stored.WorkdirSummary, "\n\r\t") {
+		t.Fatalf("workdir summary still contains control characters: %q", stored.WorkdirSummary)
+	}
+}
+
 func TestApproveRequestRollsBackPendingStateWhenLeaseSaveFails(t *testing.T) {
 	store := memory.NewStore()
 	now := time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC)
@@ -358,6 +398,16 @@ func TestApproveRequestCarriesEnvPathMetadataOnPrimaryAudit(t *testing.T) {
 	}
 	if !foundPrimary {
 		t.Fatalf("expected request_approved audit event")
+	}
+	confirmed, ok := findAuditEvent(svc.Audit.(*scriptedAuditBuf).events, AuditEventEnvPathConfirmed)
+	if !ok {
+		t.Fatalf("expected %s audit event", AuditEventEnvPathConfirmed)
+	}
+	if confirmed.Metadata["env_path_original"] != "./.env" {
+		t.Fatalf("expected env_path_original on env-path confirmation, got %q", confirmed.Metadata["env_path_original"])
+	}
+	if confirmed.Metadata["env_path_canonical"] != "/workspace/.env" {
+		t.Fatalf("expected env_path_canonical on env-path confirmation, got %q", confirmed.Metadata["env_path_canonical"])
 	}
 }
 
@@ -541,6 +591,19 @@ func TestDenyRequestCarriesEnvPathMetadataOnPrimaryAudit(t *testing.T) {
 	}
 	if !foundPrimary {
 		t.Fatalf("expected request_denied audit event")
+	}
+	rejected, ok := findAuditEvent(svc.Audit.(*scriptedAuditBuf).events, AuditEventEnvPathRejected)
+	if !ok {
+		t.Fatalf("expected %s audit event", AuditEventEnvPathRejected)
+	}
+	if rejected.Metadata["env_path_original"] != "./.env" {
+		t.Fatalf("expected env_path_original on env-path rejection, got %q", rejected.Metadata["env_path_original"])
+	}
+	if rejected.Metadata["env_path_canonical"] != "/workspace/.env" {
+		t.Fatalf("expected env_path_canonical on env-path rejection, got %q", rejected.Metadata["env_path_canonical"])
+	}
+	if rejected.Metadata["reason"] != "deny" {
+		t.Fatalf("expected reason metadata on env-path rejection, got %q", rejected.Metadata["reason"])
 	}
 }
 
@@ -1556,5 +1619,22 @@ func TestRequestLeaseWithPolicyDoesNotReuseActiveLeaseWhenEnvPathProvided(t *tes
 	}
 	if len(pending) != 1 || pending[0].ID != "req_new_env" {
 		t.Fatalf("expected one new pending request, got %#v", pending)
+	}
+}
+
+func TestRejectPlaintextSecretAccessUsesServiceState(t *testing.T) {
+	svc := Service{
+		Audit: &auditBuf{},
+		Now:   func() time.Time { return time.Date(2026, 3, 7, 18, 0, 0, 0, time.UTC) },
+	}
+
+	svc.AllowPlaintextSecretReturn = false
+	if err := svc.RejectPlaintextSecretAccessFromState("agent", "agent-1"); !errors.Is(err, ErrPlaintextSecretReturnDisabled) {
+		t.Fatalf("expected plaintext secret access to be blocked, got %v", err)
+	}
+
+	svc.AllowPlaintextSecretReturn = true
+	if err := svc.RejectPlaintextSecretAccessFromState("agent", "agent-1"); err != nil {
+		t.Fatalf("expected plaintext secret access to be allowed, got %v", err)
 	}
 }

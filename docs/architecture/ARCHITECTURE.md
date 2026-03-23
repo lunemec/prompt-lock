@@ -30,6 +30,7 @@ make arch-conformance
 | Endpoint group | Handler layer | Owning use-case/policy |
 |---|---|---|
 | `/v1/leases/request`, `/approve`, `/deny`, `/cancel`, `/access`, `/by-request` | lease handlers | `internal/app.Service` |
+| `/v1/requests/pending` | pending handler | `internal/app.Service` |
 | `/v1/leases/execute` | execute handler | `internal/app.ControlPlanePolicy` + `internal/app.Service` |
 | `/v1/auth/*` | auth handlers | auth store + authz/rate-limit controls |
 | `/v1/meta/*`, `/v1/intents/*` | meta handlers | configuration + intent registry |

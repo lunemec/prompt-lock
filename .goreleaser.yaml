@@ -57,3 +57,21 @@ builds:
         goarch: arm64
       - goos: darwin
         goarch: amd64
+
+  - id: promptlock-mcp-launch
+    main: ./cmd/promptlock-mcp-launch
+    binary: promptlock-mcp-launch-{{ .Os }}-{{ .Arch }}
+    no_unique_dist_dir: true
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: linux
+        goarch: arm64
+      - goos: darwin
+        goarch: amd64

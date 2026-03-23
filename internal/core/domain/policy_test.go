@@ -17,3 +17,17 @@ func TestPolicyValidateRequest(t *testing.T) {
 		t.Fatalf("expected reserved secret name failure")
 	}
 }
+
+func TestPolicyValidateRequestRejectsUnsafeEnvNames(t *testing.T) {
+	p := DefaultPolicy()
+	for _, secrets := range [][]string{
+		{"PATH=/tmp/evil"},
+		{"bad-name"},
+		{"1bad"},
+		{"bad name"},
+	} {
+		if err := p.ValidateRequest(5, secrets); err == nil {
+			t.Fatalf("expected unsafe secret name %q to be rejected", secrets[0])
+		}
+	}
+}

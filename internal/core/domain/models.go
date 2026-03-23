@@ -20,10 +20,14 @@ type LeaseRequest struct {
 	Secrets            []string
 	CommandFingerprint string
 	WorkdirFingerprint string
-	EnvPath            string
-	EnvPathCanonical   string
-	Status             RequestStatus
-	CreatedAt          time.Time
+	// Presentation metadata captured for operator review only.
+	// It is persisted on requests, but excluded from request equivalence and lease ownership checks.
+	CommandSummary   string
+	WorkdirSummary   string
+	EnvPath          string
+	EnvPathCanonical string
+	Status           RequestStatus
+	CreatedAt        time.Time
 }
 
 type Lease struct {

@@ -22,6 +22,10 @@ func (s *Service) RequestLeaseWithPolicy(agentID, taskID, reason string, ttl int
 }
 
 func (s *Service) RequestLeaseWithPolicyAndIntent(agentID, taskID, reason string, ttl int, secrets []string, intent, commandFingerprint, workdirFingerprint, envPath string) (RequestLeaseResult, error) {
+	return s.RequestLeaseWithPolicyAndIntentAndSummary(agentID, taskID, reason, ttl, secrets, intent, commandFingerprint, workdirFingerprint, envPath, "", "")
+}
+
+func (s *Service) RequestLeaseWithPolicyAndIntentAndSummary(agentID, taskID, reason string, ttl int, secrets []string, intent, commandFingerprint, workdirFingerprint, envPath, commandSummary, workdirSummary string) (RequestLeaseResult, error) {
 	defer s.lockMutation()()
 	if err := s.Policy.ValidateRequest(ttl, secrets); err != nil {
 		return RequestLeaseResult{}, err
@@ -50,7 +54,7 @@ func (s *Service) RequestLeaseWithPolicyAndIntent(agentID, taskID, reason string
 		}
 	}
 
-	pending, err := s.Requests.ListPendingRequests()
+	pending, err := s.ListPendingRequests()
 	if err != nil {
 		return RequestLeaseResult{}, err
 	}
@@ -68,11 +72,15 @@ func (s *Service) RequestLeaseWithPolicyAndIntent(agentID, taskID, reason string
 		return RequestLeaseResult{}, NewRequestThrottleError(RequestThrottleReasonCooldown, retryAfter)
 	}
 
-	created, err := s.requestLeaseUnlocked(agentID, taskID, reason, ttl, secrets, intent, commandFingerprint, workdirFingerprint, envPath)
+	created, err := s.requestLeaseUnlocked(agentID, taskID, reason, ttl, secrets, intent, commandFingerprint, workdirFingerprint, envPath, commandSummary, workdirSummary)
 	if err != nil {
 		return RequestLeaseResult{}, err
 	}
 	return RequestLeaseResult{Request: created}, nil
+}
+
+func (s Service) ListPendingRequests() ([]domain.LeaseRequest, error) {
+	return s.Requests.ListPendingRequests()
 }
 
 func (s Service) findEquivalentActiveLease(input RequestPolicyInput) (domain.Lease, bool, error) {

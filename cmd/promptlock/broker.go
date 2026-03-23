@@ -324,7 +324,7 @@ func normalizeBrokerRequestError(err error) error {
 
 func responseError(prefix string, resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	msg := strings.TrimSpace(string(body))
+	msg := strings.TrimSpace(sanitizeTerminalText(string(body)))
 	if msg == "" {
 		return fmt.Errorf("%s: %s", prefix, resp.Status)
 	}

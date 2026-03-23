@@ -330,6 +330,29 @@ func TestBuildDockerRunArgsRejectsNonAllowlistedDockerFlags(t *testing.T) {
 	}
 }
 
+func TestBuildDockerRunArgsRejectsHostAliasRedirectFlagsForBrokerURL(t *testing.T) {
+	for _, dockerArgs := range [][]string{
+		{"--add-host", "host.docker.internal:10.0.0.2"},
+		{"--dns", "10.0.0.2"},
+		{"--dns-option", "ndots:1"},
+		{"--dns-search", "corp.local"},
+	} {
+		_, err := buildDockerRunArgs(dockerRunConfig{
+			Image:                "codex-promptlock",
+			ContainerName:        "codex-1",
+			SessionToken:         "sess_123",
+			BrokerURL:            "http://host.docker.internal:58879",
+			AdditionalDockerArgs: dockerArgs,
+		})
+		if err == nil {
+			t.Fatalf("expected host-alias redirect flags %v to fail", dockerArgs)
+		}
+		if !strings.Contains(err.Error(), "host.docker.internal") {
+			t.Fatalf("expected host-alias guidance, got %v", err)
+		}
+	}
+}
+
 func TestBuildDockerRunArgsRejectsAllowlistedFlagWithoutValue(t *testing.T) {
 	_, err := buildDockerRunArgs(dockerRunConfig{
 		Image:                "codex-promptlock",

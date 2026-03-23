@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/lunemec/promptlock/internal/core/domain"
 	"github.com/lunemec/promptlock/internal/core/ports"
@@ -47,6 +48,9 @@ func (s *Service) denyRequestWithActorUnlocked(requestID string, reason string, 
 		return domain.LeaseRequest{}, wrapRollbackError(err, s.rollbackRequestLeaseMutation(func() error {
 			return s.Requests.UpdateRequest(original)
 		}))
+	}
+	if strings.TrimSpace(req.EnvPath) != "" {
+		_ = s.AuditEnvPathRejected(req.AgentID, req.TaskID, req.ID, req.EnvPath, req.EnvPathCanonical, reason)
 	}
 	return req, nil
 }

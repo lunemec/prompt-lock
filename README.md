@@ -20,7 +20,7 @@ Project name: **PromptLock**
 
 Tagline: **Human-approved secret access for autonomous agents.**
 
-Status: **pre-1.0 OSS release candidate**. The supported OSS deployment target is local-only hardened operation with role-separated Unix sockets. PromptLock is intended for public OSS use, but it is not yet making a 1.0 stability commitment.
+Status: **public OSS prerelease/beta on the path to v1.0.0**. The supported OSS deployment target is local-only hardened operation with role-separated Unix sockets. PromptLock is intended for public OSS use, and the release tooling is already wired for `v0.x` prereleases/betas and `v1.x` normal releases.
 
 ## Who this is for
 
@@ -92,6 +92,8 @@ The repo already includes `demo-envs/github.env` with a disposable demo token va
 ```bash
 PROMPTLOCK_ENV_PATH_ROOT="$PWD" promptlock watch
 ```
+
+This opens the keyboard-driven TTY watch UI. Use `y` to approve, `n` to deny, `s` to skip, and `q` to quit. If you redirect or pipe the command instead of running it in a real terminal, it falls back to the plain prompt/output path.
 
 3. Terminal B (host wrapper launch with repo demo env hidden from the container):
 
@@ -185,7 +187,7 @@ Decision `0030` is now implemented:
 - `promptlock watch` can auto-start a local daemon when no explicit broker transport is configured,
 - `promptlockd` remains available as the underlying broker runtime and for compatibility/internal use.
 
-The published container image now includes:
+The local `agent-lab` image built by `docker build --target agent-lab` includes:
 
 - `secretctl.sh` on `PATH`
 - agent skill guidance at `/opt/promptlock/skills/secret-request/SKILL.md`
@@ -197,6 +199,7 @@ The published container image now includes:
 - PR-grade validation gate: `make release-readiness-gate-core`
 - Docker smoke test: `make e2e-compose`
 - Release-quality validation: `make release-readiness-gate`
+- Local release packaging helper: `scripts/release-package.sh <version>` (requires a clean git checkout at the exact tagged release commit; refuses dirty trees)
 - Quick fuzzing pass: `make fuzz`
 - Storage fsync release evidence and release packaging: `docs/operations/RELEASE.md`
 
@@ -456,7 +459,7 @@ This repository is primarily **agent-generated code and documentation**, followi
 
 ## Important
 
-This repository targets a **public pre-1.0 OSS release**.
+This repository targets a **public OSS prerelease/beta** that is being hardened for an eventual `v1.0.0`.
 
 Supported production posture:
 

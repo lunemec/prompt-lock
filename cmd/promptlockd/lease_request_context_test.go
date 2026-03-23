@@ -82,7 +82,7 @@ func TestHandlePendingRequestsIncludesEnvPathContext(t *testing.T) {
 		t.Fatalf("new env-path store: %v", err)
 	}
 	s.svc.EnvPathSecrets = envPathStore
-	req := httptest.NewRequest(http.MethodPost, "/v1/leases/request", bytes.NewBufferString(`{"agent_id":"a1","task_id":"t1","reason":"r","ttl_minutes":5,"secrets":["github_token"],"command_fingerprint":"cmd-1","workdir_fingerprint":"wd-1","env_path":"./.env","env_path_canonical":"should-be-overridden"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/leases/request", bytes.NewBufferString(`{"agent_id":"a1","task_id":"t1","reason":"r","ttl_minutes":5,"secrets":["github_token"],"command_fingerprint":"cmd-1","workdir_fingerprint":"wd-1","command_summary":"git status --short","workdir_summary":"./workspace","env_path":"./.env","env_path_canonical":"should-be-overridden"}`))
 	w := httptest.NewRecorder()
 	s.handleRequest(w, req)
 	if w.Code != http.StatusOK {
@@ -111,6 +111,12 @@ func TestHandlePendingRequestsIncludesEnvPathContext(t *testing.T) {
 	}
 	if got := item["WorkdirFingerprint"]; got != "wd-1" {
 		t.Fatalf("expected workdir fingerprint in pending item, got %#v", got)
+	}
+	if got := item["CommandSummary"]; got != "git status --short" {
+		t.Fatalf("expected command summary in pending item, got %#v", got)
+	}
+	if got := item["WorkdirSummary"]; got != "./workspace" {
+		t.Fatalf("expected workdir summary in pending item, got %#v", got)
 	}
 	if got := item["EnvPath"]; got != "./.env" {
 		t.Fatalf("expected env path in pending item, got %#v", got)

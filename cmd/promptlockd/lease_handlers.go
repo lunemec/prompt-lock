@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/lunemec/promptlock/internal/app"
-	"github.com/lunemec/promptlock/internal/core/ports"
 )
 
 func (s *server) handleRequestStatus(w http.ResponseWriter, r *http.Request) {
@@ -65,6 +64,8 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		Secrets            []string `json:"secrets"`
 		CommandFingerprint string   `json:"command_fingerprint"`
 		WorkdirFingerprint string   `json:"workdir_fingerprint"`
+		CommandSummary     string   `json:"command_summary"`
+		WorkdirSummary     string   `json:"workdir_summary"`
 		EnvPath            string   `json:"env_path"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -94,7 +95,7 @@ func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		effectiveAgentID = sessionAgentID
 	}
-	result, err := s.svc.RequestLeaseWithPolicyAndIntent(effectiveAgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.Intent, req.CommandFingerprint, req.WorkdirFingerprint, req.EnvPath)
+	result, err := s.svc.RequestLeaseWithPolicyAndIntentAndSummary(effectiveAgentID, req.TaskID, req.Reason, req.TTLMinutes, req.Secrets, req.Intent, req.CommandFingerprint, req.WorkdirFingerprint, req.EnvPath, req.CommandSummary, req.WorkdirSummary)
 	if err != nil {
 		var throttleErr *app.RequestThrottleError
 		if errors.As(err, &throttleErr) {
@@ -136,12 +137,6 @@ func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		writeMappedError(w, ErrBadRequest, "request_id required")
 		return
 	}
-	requestSnapshot, err := s.svc.Requests.GetRequest(requestID)
-	if err != nil {
-		kind, msg := stateStoreReadError(err)
-		writeMappedError(w, kind, msg)
-		return
-	}
 	var req approveReq
 	if err := decodeOptionalJSONBody(r, &req); err != nil {
 		writeMappedError(w, ErrBadRequest, err.Error())
@@ -153,9 +148,6 @@ func (s *server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		kind, msg := stateStoreMutationError(err)
 		writeMappedError(w, kind, msg)
 		return
-	}
-	if strings.TrimSpace(requestSnapshot.EnvPath) != "" {
-		_ = s.svc.AuditEnvPathConfirmed(requestSnapshot.AgentID, requestSnapshot.TaskID, requestSnapshot.ID, requestSnapshot.EnvPath, requestSnapshot.EnvPathCanonical)
 	}
 	writeJSON(w, map[string]any{"status": "approved", "lease_token": lease.Token, "expires_at": lease.ExpiresAt})
 }
@@ -173,13 +165,15 @@ func (s *server) handleAccess(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDurabilityReady(w) {
 		return
 	}
-	if !s.authCfg.AllowPlaintextSecretReturn {
-		at, aid := actorFromRequest(r)
-		if err := s.auditCritical(ports.AuditEvent{Event: "plaintext_secret_access_blocked", Timestamp: s.now(), ActorType: at, ActorID: aid}); err != nil {
-			writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
+	at, aid := actorFromRequest(r)
+	svc := s.svc
+	svc.AllowPlaintextSecretReturn = s.authCfg.AllowPlaintextSecretReturn
+	if err := svc.RejectPlaintextSecretAccessFromState(at, aid); err != nil {
+		if errors.Is(err, app.ErrPlaintextSecretReturnDisabled) {
+			writeMappedError(w, ErrForbidden, err.Error())
 			return
 		}
-		writeMappedError(w, ErrForbidden, "plaintext secret return disabled by policy")
+		writeMappedError(w, ErrServiceUnavailable, durabilityUnavailableMessage)
 		return
 	}
 	var req accessReq

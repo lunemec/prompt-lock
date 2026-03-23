@@ -40,28 +40,40 @@ func (p Policy) ValidateRequest(ttl int, secrets []string) error {
 }
 
 var reservedSecretEnvNames = map[string]struct{}{
-	"PATH":              {},
-	"HOME":              {},
-	"TMPDIR":            {},
-	"TMP":               {},
-	"TEMP":              {},
-	"SYSTEMROOT":        {},
-	"COMSPEC":           {},
-	"PATHEXT":           {},
-	"USERPROFILE":       {},
-	"LD_PRELOAD":        {},
-	"LD_LIBRARY_PATH":   {},
+	"PATH":                  {},
+	"HOME":                  {},
+	"TMPDIR":                {},
+	"TMP":                   {},
+	"TEMP":                  {},
+	"SYSTEMROOT":            {},
+	"COMSPEC":               {},
+	"PATHEXT":               {},
+	"USERPROFILE":           {},
+	"LD_PRELOAD":            {},
+	"LD_LIBRARY_PATH":       {},
 	"DYLD_INSERT_LIBRARIES": {},
-	"DYLD_LIBRARY_PATH": {},
-	"PYTHONPATH":        {},
-	"PYTHONHOME":        {},
-	"GIT_CONFIG":        {},
-	"GIT_CONFIG_GLOBAL": {},
-	"GIT_CONFIG_SYSTEM": {},
-	"GIT_EXEC_PATH":     {},
-	"NODE_OPTIONS":      {},
-	"RUBYOPT":           {},
-	"PERL5OPT":          {},
+	"DYLD_LIBRARY_PATH":     {},
+	"PYTHONPATH":            {},
+	"PYTHONHOME":            {},
+	"GIT_CONFIG":            {},
+	"GIT_CONFIG_GLOBAL":     {},
+	"GIT_CONFIG_SYSTEM":     {},
+	"GIT_EXEC_PATH":         {},
+	"NODE_OPTIONS":          {},
+	"RUBYOPT":               {},
+	"PERL5OPT":              {},
+}
+
+func SecretEnvName(secretName string) string {
+	trimmed := strings.TrimSpace(secretName)
+	if trimmed == "" {
+		return ""
+	}
+	envName := strings.ToUpper(trimmed)
+	if !isValidSecretEnvName(envName) {
+		return ""
+	}
+	return envName
 }
 
 func validateSecretName(secret string) error {
@@ -69,9 +81,28 @@ func validateSecretName(secret string) error {
 	if trimmed == "" {
 		return fmt.Errorf("secret names must be non-empty")
 	}
-	envName := strings.ToUpper(trimmed)
+	envName := SecretEnvName(trimmed)
+	if envName == "" {
+		return fmt.Errorf("secret name %q must map to a safe environment variable name", trimmed)
+	}
 	if _, reserved := reservedSecretEnvNames[envName]; reserved {
 		return fmt.Errorf("secret name %q is reserved and cannot be leased", trimmed)
 	}
 	return nil
+}
+
+func isValidSecretEnvName(envName string) bool {
+	if envName == "" {
+		return false
+	}
+	for i := 0; i < len(envName); i++ {
+		c := envName[i]
+		switch {
+		case c == '_' || (c >= 'A' && c <= 'Z'):
+		case i > 0 && c >= '0' && c <= '9':
+		default:
+			return false
+		}
+	}
+	return envName[0] == '_' || (envName[0] >= 'A' && envName[0] <= 'Z')
 }

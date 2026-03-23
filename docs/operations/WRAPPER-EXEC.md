@@ -74,7 +74,7 @@ Useful flags:
 - `--hide-path` to shadow mounted files or directories with empty readonly placeholders inside the container. This is the supported way to keep repo-local `.env` or SOPS files out of direct container reads while still letting host-side broker-exec resolve them from the host filesystem.
 - `--env` to add container env vars, except reserved PromptLock transport variables like `PROMPTLOCK_SESSION_TOKEN`, `PROMPTLOCK_BROKER_URL`, and `PROMPTLOCK_AGENT_UNIX_SOCKET`.
 - `--workdir` to set the in-container working directory.
-- `--docker-arg` as a narrow escape hatch for a small allowlist of extra `docker run` flags (`--pull`, `--init`, `--label`, `--label-file`, `--hostname`, `--add-host`, `--dns`, `--dns-option`, `--dns-search`, `--shm-size`, `--stop-timeout`, `--tmpfs`, `--ulimit`); PromptLock rejects raw env, env-file, mount, volume, user, workdir, and entrypoint overrides in both `--flag=value` and `--flag value` forms so the session/socket boundary cannot be bypassed accidentally.
+- `--docker-arg` as a narrow escape hatch for a small allowlist of extra `docker run` flags (`--pull`, `--init`, `--label`, `--label-file`, `--hostname`, `--shm-size`, `--stop-timeout`, `--tmpfs`, `--ulimit`). `--add-host`, `--dns`, `--dns-option`, and `--dns-search` are only accepted when the selected broker transport is not the host-alias broker URL; on that path PromptLock rejects them because the container could redirect PromptLock transport. PromptLock also rejects raw env, env-file, mount, volume, user, workdir, and entrypoint overrides in both `--flag=value` and `--flag value` forms so the session/socket boundary cannot be bypassed accidentally.
 
 For local demo only (no external approval watcher):
 
@@ -113,8 +113,8 @@ PROMPTLOCK_DEV_MODE=1 PROMPTLOCK_BROKER_URL=http://127.0.0.1:8765 \
 - `promptlock auth docker-run --container-broker-socket` sets the in-container mount path whenever the selected agent transport uses an actual Unix socket, including the default dual-socket and legacy compatibility socket paths.
 - Broker-facing CLI requests use a bounded `10s` client deadline on both Unix-socket and TCP transports. Stalled peers fail with `broker request timed out after 10s`.
 - Default mode waits for external human approval (`--wait-approve`, `--poll-interval`).
-- `promptlock watch` is a host-side queue watcher with a minimal terminal UI for approving/denying pending requests.
-- In a terminal, `promptlock watch` clears and redraws when the queue changes so new requests are visually distinct.
+- `promptlock watch` is a host-side queue watcher. In TTY sessions it uses an interactive keyboard-driven TUI (`y` approve, `n` deny, `s` skip, `q` quit) that keeps broker target, poll interval, pending count, and current request context visible while polling.
+- Non-interactive or redirected `promptlock watch` sessions fall back to the plain prompt/output path so existing scripts and automation keep working.
 - `--auto-approve` exists only for local prototyping and requires `PROMPTLOCK_DEV_MODE=1` and operator token.
 - Basic command policy blocks risky secret-dumping command patterns unless `--allow-risky-command` is explicitly set.
 

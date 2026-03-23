@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/lunemec/promptlock/internal/mcplaunchenv"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -135,9 +136,19 @@ func authLogin(broker, brokerUnix, operatorToken, agentID, containerID string) (
 }
 
 func runAuthBootstrap(args []string) {
+	if hasHelpFlag(args) {
+		fs := flag.NewFlagSet("auth bootstrap", flag.ContinueOnError)
+		conn := registerBrokerFlags(fs)
+		registerOperatorTokenFlag(fs, defaultOperatorToken())
+		fs.String("agent", "", "agent id")
+		fs.String("container", "", "container id")
+		_ = conn
+		printFlagHelp(os.Stdout, "PromptLock auth bootstrap\n\nUsage:\n  promptlock auth bootstrap [flags]\n", fs)
+		return
+	}
 	fs := flag.NewFlagSet("auth bootstrap", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
-	opToken := fs.String("operator-token", defaultOperatorToken(), "operator token")
+	opToken := registerOperatorTokenFlag(fs, defaultOperatorToken())
 	agent := fs.String("agent", "", "agent id")
 	container := fs.String("container", "", "container id")
 	fs.Parse(args)
@@ -195,9 +206,21 @@ func runAuthMint(args []string) {
 }
 
 func runAuthLogin(args []string) {
+	if hasHelpFlag(args) {
+		fs := flag.NewFlagSet("auth login", flag.ContinueOnError)
+		conn := registerBrokerFlags(fs)
+		registerOperatorTokenFlag(fs, defaultOperatorToken())
+		fs.String("agent", "", "agent id")
+		fs.String("container", "", "container id")
+		fs.Bool("show-grant-id", false, "include pairing grant id in stdout output")
+		fs.Bool("show-secrets", false, "include raw bearer credentials in stdout output")
+		_ = conn
+		printFlagHelp(os.Stdout, "PromptLock auth login\n\nUsage:\n  promptlock auth login [flags]\n", fs)
+		return
+	}
 	fs := flag.NewFlagSet("auth login", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
-	opToken := fs.String("operator-token", defaultOperatorToken(), "operator token")
+	opToken := registerOperatorTokenFlag(fs, defaultOperatorToken())
 	agent := fs.String("agent", "", "agent id")
 	container := fs.String("container", "", "container id")
 	showGrantID := fs.Bool("show-grant-id", false, "include pairing grant id in stdout output")
@@ -251,11 +274,49 @@ type dockerHiddenMount struct {
 	ReadOnly    bool
 }
 
+const redactedAutoDetectedOperatorTokenHelpValue = "<auto-detected workspace token>"
+
+type redactedStringFlag struct {
+	target   *string
+	redacted string
+}
+
+func newRedactedStringFlag(target *string, redacted string) *redactedStringFlag {
+	return &redactedStringFlag{target: target, redacted: redacted}
+}
+
+func (f *redactedStringFlag) String() string {
+	if f == nil || f.target == nil {
+		return ""
+	}
+	if strings.TrimSpace(*f.target) == "" {
+		return ""
+	}
+	if strings.TrimSpace(f.redacted) == "" {
+		return *f.target
+	}
+	return f.redacted
+}
+
+func (f *redactedStringFlag) Set(value string) error {
+	if f == nil || f.target == nil {
+		return fmt.Errorf("redacted string flag is not initialized")
+	}
+	*f.target = value
+	return nil
+}
+
+func registerOperatorTokenFlag(fs *flag.FlagSet, defaultValue string) *string {
+	token := defaultValue
+	fs.Var(newRedactedStringFlag(&token, redactedAutoDetectedOperatorTokenHelpValue), "operator-token", "operator token")
+	return &token
+}
+
 func runAuthDockerRun(args []string) {
 	if hasHelpFlag(args) {
 		fs := flag.NewFlagSet("auth docker-run", flag.ContinueOnError)
 		registerBrokerFlags(fs)
-		fs.String("operator-token", defaultOperatorToken(), "operator token")
+		registerOperatorTokenFlag(fs, defaultOperatorToken())
 		fs.String("agent", "", "agent id")
 		fs.String("container", "", "container id / docker name")
 		fs.String("image", "", "docker image to run")
@@ -276,7 +337,7 @@ func runAuthDockerRun(args []string) {
 
 	fs := flag.NewFlagSet("auth docker-run", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
-	opToken := fs.String("operator-token", defaultOperatorToken(), "operator token")
+	opToken := registerOperatorTokenFlag(fs, defaultOperatorToken())
 	agent := fs.String("agent", "", "agent id")
 	container := fs.String("container", "", "container id / docker name")
 	image := fs.String("image", "", "docker image to run")
@@ -642,11 +703,18 @@ var protectedDockerEnvVars = map[string]struct{}{
 
 var allowlistedDockerArgHelp = "allowed docker-arg flags: --pull, --init, --label, --label-file, --hostname, --add-host, --dns, --dns-option, --dns-search, --shm-size, --stop-timeout, --tmpfs, --ulimit"
 
+var hostAliasRedirectDockerArgs = map[string]struct{}{
+	"--add-host":   {},
+	"--dns":        {},
+	"--dns-option": {},
+	"--dns-search": {},
+}
+
 func validateDockerRunSecurity(cfg dockerRunConfig) error {
 	if err := validateAdditionalDockerEnvs(cfg.AdditionalEnv); err != nil {
 		return err
 	}
-	if err := validateAdditionalDockerArgs(cfg.AdditionalDockerArgs); err != nil {
+	if err := validateAdditionalDockerArgs(cfg); err != nil {
 		return err
 	}
 	containerSocket := strings.TrimSpace(cfg.ContainerBrokerSocket)
@@ -708,7 +776,8 @@ var allowlistedDockerArgs = map[string]dockerArgRule{
 	"--ulimit":       {expectsValue: true},
 }
 
-func validateAdditionalDockerArgs(items []string) error {
+func validateAdditionalDockerArgs(cfg dockerRunConfig) error {
+	items := cfg.AdditionalDockerArgs
 	var expectingValue *dockerArgRule
 	for _, item := range items {
 		trimmed := strings.TrimSpace(item)
@@ -729,6 +798,11 @@ func validateAdditionalDockerArgs(items []string) error {
 		if msg, blocked := forbiddenDockerArgs[flagName]; blocked {
 			return errors.New(msg)
 		}
+		if dockerRunUsesHostAliasBrokerURL(cfg) {
+			if _, blocked := hostAliasRedirectDockerArgs[flagName]; blocked {
+				return fmt.Errorf("docker-arg %q is not allowed when PromptLock uses host-alias broker URL %q; the container could redirect PromptLock transport. Use the built-in bridge or the mounted agent socket instead", flagName, cfg.BrokerURL)
+			}
+		}
 		rule, allowed := allowlistedDockerArgs[flagName]
 		if !allowed {
 			return fmt.Errorf("docker-arg %q is not allowed; use first-class PromptLock flags like --env, --mount, --workdir, or --entrypoint when available; %s", flagName, allowlistedDockerArgHelp)
@@ -741,6 +815,26 @@ func validateAdditionalDockerArgs(items []string) error {
 		return fmt.Errorf("docker-arg missing value for previous flag; %s", allowlistedDockerArgHelp)
 	}
 	return nil
+}
+
+func dockerRunUsesHostAliasBrokerURL(cfg dockerRunConfig) bool {
+	brokerURL := strings.TrimSpace(cfg.BrokerURL)
+	if brokerURL == "" || strings.TrimSpace(cfg.BrokerUnixSocket) != "" {
+		return false
+	}
+	parsed, err := url.Parse(brokerURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "" {
+		return false
+	}
+	alias := strings.ToLower(strings.TrimSpace(dockerHostAlias()))
+	if alias == "" {
+		return false
+	}
+	return host == alias
 }
 
 func parseDockerArgToken(item string) (string, bool) {

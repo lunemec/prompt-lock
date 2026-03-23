@@ -1,7 +1,7 @@
 # Release and versioned deployment guide
 
 This project follows SemVer and Keep-a-Changelog.
-PromptLock is currently pre-1.0; this checklist defines the gate for a public OSS prerelease and any later production-targeted release.
+PromptLock is currently a public OSS prerelease/beta on the path to v1.0.0; this checklist defines the gate for a public OSS prerelease and any later production-targeted release. The GitHub release workflow publishes `v0.x` tags as prereleases/betas and `v1.x` tags as normal releases. `-rc` tags are intentionally unsupported.
 
 ## Pre-release checklist
 
@@ -14,7 +14,7 @@ PromptLock is currently pre-1.0; this checklist defines the gate for a public OS
 make release-readiness-gate
 ```
 
-If Docker daemon is unavailable in your local environment, you can still run the release gate directly because it now uses the hardened host-side smoke path instead of the old compose demo. Run the non-compose subset only when you want a quicker preflight:
+`make release-readiness-gate` still requires a working Docker daemon because the supported hardened smoke path builds and runs the local `agent-lab` image. The smoke script also requires `python3` or `python` for its portable PTY runner. If Docker is unavailable, use the non-Docker core subset as a preflight instead:
 
 ```bash
 make release-readiness-gate-core
@@ -75,21 +75,6 @@ make storage-fsync-release-gate MOUNT_DIRS=/var/lib/promptlock,/var/log/promptlo
    - `reports/storage-fsync-report.json` (or your configured `FSYNC_REPORT` path)
    - report includes provenance metadata (`schema_version`, `generated_at`, `generated_by`, `hostname`) and attestation fields (`signature.alg`, `signature.key_id`, `signature.value`) validated by gate tooling
 
-## Build release artifacts
-
-```bash
-scripts/release-package.sh v0.2.0
-```
-
-Produces:
-- `dist/promptlock-0.2.0.tar.gz`
-
-Notes:
-- `scripts/release-package.sh` now uses GoReleaser for cross-platform binary builds (`linux/amd64`, `darwin/arm64`).
-- Tooling is pinned via `go run github.com/goreleaser/goreleaser/v2@v2.7.0` in the script for reproducibility.
-- Repository Go and Docker base-image pins are centralized in `.toolchain.env` and enforced by `make toolchain-guard`.
-- GitHub Actions, `go.mod`, and Docker build/runtime image tags are aligned to the current `.toolchain.env` values (`GO_VERSION=1.26.1`, `GO_BUILD_IMAGE=golang:1.26.1-alpine3.23`, `RUNTIME_IMAGE=alpine:3.23`).
-
 ## Tag and publish
 
 ```bash
@@ -97,8 +82,31 @@ git tag -a v0.2.0 -m "PromptLock v0.2.0"
 git push origin v0.2.0
 ```
 
-GitHub release workflow should attach build artifacts for tagged versions.
-Tagged release CI now enforces `make storage-fsync-release-gate`, requires `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY` + `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_ID`, and uploads `reports/storage-fsync-report-release-ci.json` as a release workflow artifact.
+## Build release artifacts
+
+Run this from a clean checkout that is already at the exact release tag:
+
+```bash
+scripts/release-package.sh v0.2.0
+```
+
+Produces:
+- `dist/promptlock-0.2.0.tar.gz`
+- `dist/promptlock-0.2.0.tar.gz.sha256`
+- bundled `LICENSE`, `README.md`, and `docs/`
+- `RELEASE-METADATA.txt` inside the tarball with exact tag/commit provenance
+- release binaries for `promptlock`, `promptlockd`, `promptlock-mcp`, and `promptlock-mcp-launch`
+
+Notes:
+- `scripts/release-package.sh` now uses GoReleaser for cross-platform binary builds (`linux/amd64`, `darwin/arm64`).
+- `scripts/release-package.sh` refuses to build from a dirty checkout and requires HEAD to be tagged exactly as the requested version, so local release artifacts are created from a clean provenance snapshot.
+- `scripts/release-package.sh` now writes embedded provenance metadata and a `sha256` sidecar for the release tarball.
+- Tooling is pinned via `go run github.com/goreleaser/goreleaser/v2@v2.7.0` in the script for reproducibility.
+- Repository Go and Docker base-image pins are centralized in `.toolchain.env` and enforced by `make toolchain-guard`.
+- GitHub Actions, `go.mod`, and Docker build/runtime image tags are aligned to the current `.toolchain.env` values (`GO_VERSION=1.26.1`, `GO_BUILD_IMAGE=golang:1.26.1-alpine3.23`, `RUNTIME_IMAGE=alpine:3.23`).
+
+The GitHub release workflow publishes the tarball, checksum sidecar, and fsync report as release assets for tagged versions. `v0.x` tags are published as prereleases/betas; `v1.x` tags are published as normal releases. `-rc` tags are intentionally unsupported.
+Tagged release CI now enforces `make storage-fsync-release-gate`, requires `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY` + `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_ID`, and still uploads `reports/storage-fsync-report-release-ci.json` as a CI artifact for the workflow run.
 Release CI now also exports optional rotation envs when configured (`PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_PREV`, `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEYRING`, `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_OVERLAP_MAX_AGE`).
 For additional rotated keys beyond `PROMPTLOCK_STORAGE_FSYNC_HMAC_KEY_PREV`, extend workflow `env` with the extra referenced key env names.
 If your release flow uses SOPS-managed files instead of pre-exported env vars, ensure `sops` is installed on the runner and set `PROMPTLOCK_SOPS_ENV_FILE`/`SOPS_ENV_FILE` to the decrypted file path during gate execution.

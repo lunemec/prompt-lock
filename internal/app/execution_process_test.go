@@ -84,6 +84,21 @@ func TestBuildExecutionEnvironmentStripsAmbientSecrets(t *testing.T) {
 	assertEnvOmitsPrefix(t, env, "LANG=")
 }
 
+func TestBuildExecutionEnvironmentRejectsUnsafeSecretNames(t *testing.T) {
+	env := BuildExecutionEnvironment([]string{
+		"PATH=/usr/local/bin:/usr/bin",
+		"HOME=/tmp/promptlock-home",
+	}, map[string]string{
+		"github_token":   "leased-github-token",
+		"PATH=/tmp/evil": "should-not-appear",
+		"bad-name":       "should-not-appear",
+	})
+
+	assertEnvContains(t, env, "GITHUB_TOKEN=leased-github-token")
+	assertEnvOmitsPrefix(t, env, "PATH=/tmp/evil=")
+	assertEnvOmitsPrefix(t, env, "BAD-NAME=")
+}
+
 func TestValidateNetworkEgressRejectsDirectClientWithoutInspectableDestination(t *testing.T) {
 	policy := DefaultControlPlanePolicy{
 		Network: config.NetworkEgressPolicy{
@@ -186,17 +201,18 @@ func TestValidateNetworkEgressRejectsOpaqueOrDestinationOverrideArgsEvenWithInsp
 }
 
 func TestRedactOutputScrubsBearerAndEnvTokenShapes(t *testing.T) {
+	bearerSecret := "super-secret-" + "bearer-token"
 	githubToken := "gh" + "p_" + "abcdef1234567890"
 	openAIToken := "sk" + "-live-" + "abcdef1234567890"
 	input := strings.Join([]string{
-		"Authorization: Bearer super-secret-bearer-token",
+		"Authorization: Bearer " + bearerSecret,
 		"GITHUB_TOKEN=" + githubToken,
 		"OPENAI_API_KEY=" + openAIToken,
 	}, "\n")
 
 	redacted := redactOutput(input)
 	for _, secret := range []string{
-		"super-secret-bearer-token",
+		bearerSecret,
 		githubToken,
 		openAIToken,
 	} {

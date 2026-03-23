@@ -15,7 +15,7 @@ func (s *server) handlePendingRequests(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDurabilityReady(w) {
 		return
 	}
-	items, err := s.svc.Requests.ListPendingRequests()
+	items, err := s.svc.ListPendingRequests()
 	if err != nil {
 		kind, msg := stateStoreListError(err)
 		writeMappedError(w, kind, msg)

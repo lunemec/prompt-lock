@@ -27,7 +27,7 @@ ADR metadata was normalized to the current status and supersession conventions o
 | 0020 | accepted | 2026-03-10 | Production hardening: release gates and persistence safety | - |
 | 0021 | accepted | 2026-03-10 | External request/lease state backend path | - |
 | 0022 | accepted | 2026-03-10 | SOPS-managed runtime and fsync key-material loading | - |
-| 0023 | accepted | 2026-03-14 | Operator watch command and minimal terminal approval UI | - |
+| 0023 | superseded | 2026-03-14 | Operator watch command and minimal terminal approval UI | - |
 | 0024 | accepted | 2026-03-14 | Dual unix sockets for local operator and agent separation | - |
 | 0025 | superseded | 2026-03-14 | Local-only OSS v1 transport scope and TLS/mTLS quarantine | - |
 | 0026 | accepted | 2026-03-14 | Exact executable identity and minimal child-process environment | - |
@@ -35,6 +35,7 @@ ADR metadata was normalized to the current status and supersession conventions o
 | 0028 | accepted | 2026-03-14 | Local-only transport and removal of TCP TLS/mTLS paths | 0025 |
 | 0029 | accepted | 2026-03-16 | Workspace-derived setup and container-first quickstart | - |
 | 0030 | accepted | 2026-03-18 | Single `promptlock` CLI surface with daemon lifecycle subcommands | - |
+| 0031 | accepted | 2026-03-22 | Operator watch Bubble Tea TUI with plain fallback | 0023 |
 
 Clarification notes:
 - `0014` was clarified on 2026-03-14: host-Docker mediation guarantees a pre-dispatch audit gate, while post-dispatch result recording is best-effort with an explicit durability warning if it fails after side effects.

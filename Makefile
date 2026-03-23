@@ -15,6 +15,7 @@ lint:
 	bash -n $(SHIPPED_SHELL_WORKFLOWS)
 
 toolchain-guard:
+	go mod verify
 	go run ./cmd/promptlock-validate-toolchain
 
 vet:

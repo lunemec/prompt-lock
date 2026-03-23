@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 )
 
 func fatal(err error) {
-	fmt.Fprintln(os.Stderr, "error:", err)
-	os.Exit(1)
+	fmt.Fprintln(os.Stderr, "error:", sanitizeTerminalText(fmt.Sprint(err)))
+	exitProcess(1)
 }
+
+var exitProcess = os.Exit
 
 func getenv(k, d string) string {
 	if v := os.Getenv(k); v != "" {
@@ -59,4 +62,29 @@ func detectRiskyCommand(cmd []string) string {
 func writeJSONStdout(v any) {
 	b, _ := json.Marshal(v)
 	fmt.Println(string(b))
+}
+
+func sanitizeTerminalText(value string) string {
+	var b strings.Builder
+	for _, r := range value {
+		switch r {
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			if r < 0x20 || r == 0x7f {
+				b.WriteString(fmt.Sprintf(`\x%02x`, r))
+				continue
+			}
+			if !unicode.IsPrint(r) {
+				b.WriteString(fmt.Sprintf(`\u%04x`, r))
+				continue
+			}
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

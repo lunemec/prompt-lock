@@ -2,7 +2,6 @@ package main
 
 import (
 	"net/http"
-	"strings"
 )
 
 type denyReq struct {
@@ -39,9 +38,6 @@ func (s *server) handleDeny(w http.ResponseWriter, r *http.Request) {
 		kind, msg := stateStoreMutationError(err)
 		writeMappedError(w, kind, msg)
 		return
-	}
-	if strings.TrimSpace(denied.EnvPath) != "" {
-		_ = s.svc.AuditEnvPathRejected(denied.AgentID, denied.TaskID, denied.ID, denied.EnvPath, denied.EnvPathCanonical, req.Reason)
 	}
 	writeJSON(w, map[string]any{"request_id": denied.ID, "status": denied.Status})
 }

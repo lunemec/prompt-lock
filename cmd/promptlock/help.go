@@ -59,6 +59,8 @@ Commands:
   auth        Bootstrap, pair, mint, or launch a containerized agent session
   mcp         Diagnose PromptLock MCP launcher/client preflight issues
   audit-verify Verify the audit log hash chain on the host
+               Auto-detects the workspace quickstart audit file when available
+               Use --print-file to show the resolved audit file path
 
 Run "promptlock <command> --help" for command-specific guidance.
 `) + "\n"
@@ -103,6 +105,23 @@ By default, `+"`promptlock watch`"+` auto-starts a local `+"`promptlockd`"+` dae
 Use `+"`--external`"+` to connect to an already-running daemon only.
 When a workspace setup from `+"`promptlock setup`"+` exists, host-side watch commands auto-detect its config, operator token, and operator socket from the workspace root.
 Use this from the host/operator side to review pending requests and make approval decisions.
+TTY terminals use a keyboard-driven interactive watch UI (`+"`j`"+`/`+"`k`"+` select, `+"`y`"+` approve, `+"`n`"+` deny, `+"`s`"+` skip, `+"`q`"+` quit, `+"`up`"+`/`+"`down`"+` history).
+Non-interactive or redirected sessions fall back to the plain prompt/output path.
+Use `+"`promptlock audit-verify --print-file`"+` to discover the current audit log path, or `+"`promptlock audit-verify`"+` to verify it.
+`) + "\n"
+}
+
+func auditVerifyHelpText() string {
+	return strings.TrimSpace(`
+PromptLock audit-verify
+
+Usage:
+  promptlock audit-verify [flags]
+
+Verify the current audit JSONL hash chain on the host.
+Use `+"`--print-file`"+` to show the resolved audit file path before verifying.
+When run from a workspace created with `+"`promptlock setup`"+`, the audit path is auto-detected.
+Use `+"`--checkpoint`"+` together with `+"`--write-checkpoint`"+` for incremental verification.
 `) + "\n"
 }
 

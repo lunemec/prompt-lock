@@ -64,6 +64,16 @@ func (a *auditCapture) Write(ev ports.AuditEvent) error {
 	return nil
 }
 
+type countingRequestStore struct {
+	*memory.Store
+	getRequestCalls int
+}
+
+func (s *countingRequestStore) GetRequest(id string) (domain.LeaseRequest, error) {
+	s.getRequestCalls++
+	return s.Store.GetRequest(id)
+}
+
 func newFileBackedLeaseTestServer(now time.Time, path string, store *memory.Store, auditSink ports.AuditSink, requestID, leaseToken string) *server {
 	s := wiredServerForTest(&server{
 		svc: app.Service{
@@ -86,6 +96,54 @@ func newFileBackedLeaseTestServer(now time.Time, path string, store *memory.Stor
 		return s.closeDurabilityGate("audit", err)
 	}
 	return s
+}
+
+func TestHandleApproveReadsRequestOnlyOnceThroughAppBoundary(t *testing.T) {
+	now := time.Now().UTC()
+	path := filepath.Join(t.TempDir(), "state-store.json")
+	store := &countingRequestStore{Store: memory.NewStore()}
+	if err := store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req-approve-count",
+		AgentID:            "a1",
+		TaskID:             "t1",
+		Reason:             "r",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp",
+		WorkdirFingerprint: "wd",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	}); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+
+	s := &server{
+		svc: app.Service{
+			Policy:       domain.DefaultPolicy(),
+			Requests:     store,
+			Leases:       store,
+			Secrets:      store,
+			Audit:        &auditCapture{},
+			Now:          func() time.Time { return now },
+			NewRequestID: func() string { return "req-unused" },
+			NewLeaseTok:  func() string { return "lease-approve-count" },
+		},
+		authEnabled:         false,
+		authCfg:             config.AuthConfig{EnableAuth: false},
+		stateStoreFile:      path,
+		stateStorePersister: store,
+		now:                 func() time.Time { return now },
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/leases/approve?request_id=req-approve-count", bytes.NewBufferString(`{"ttl_minutes":5}`))
+	w := httptest.NewRecorder()
+	s.handleApprove(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%q", w.Code, w.Body.String())
+	}
+	if store.getRequestCalls != 1 {
+		t.Fatalf("expected one request lookup through the app boundary, got %d", store.getRequestCalls)
+	}
 }
 
 func loadPersistedLeaseState(t *testing.T, path string) *memory.Store {

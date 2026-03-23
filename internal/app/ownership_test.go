@@ -79,6 +79,33 @@ func TestLeaseSecretUseRejectsCrossAgentAccess(t *testing.T) {
 	}
 }
 
+func TestListPendingRequestsReturnsOnlyPendingRequests(t *testing.T) {
+	now := time.Now().UTC()
+	svc, store := newOwnershipService(now)
+	_ = store.SaveRequest(domain.LeaseRequest{
+		ID:                 "req-pending",
+		AgentID:            "agent-b",
+		TaskID:             "task-b",
+		TTLMinutes:         5,
+		Secrets:            []string{"github_token"},
+		CommandFingerprint: "fp-b",
+		WorkdirFingerprint: "wd-b",
+		Status:             domain.RequestPending,
+		CreatedAt:          now,
+	})
+
+	pending, err := svc.ListPendingRequests()
+	if err != nil {
+		t.Fatalf("list pending requests: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected only the pending request to be returned, got %d", len(pending))
+	}
+	if pending[0].ID != "req-pending" {
+		t.Fatalf("expected req-pending, got %q", pending[0].ID)
+	}
+}
+
 func TestRequestLeaseWithPolicyDoesNotReuseOtherAgentsLease(t *testing.T) {
 	now := time.Now().UTC()
 	svc, store := newOwnershipService(now)
@@ -103,5 +130,38 @@ func TestRequestLeaseWithPolicyDoesNotReuseOtherAgentsLease(t *testing.T) {
 	}
 	if pending[0].AgentID != "agent-b" {
 		t.Fatalf("expected pending request to belong to agent-b, got %q", pending[0].AgentID)
+	}
+}
+
+func TestRequestLeaseWithPolicyIgnoresSummariesForReuse(t *testing.T) {
+	now := time.Now().UTC()
+	svc, store := newOwnershipService(now)
+
+	result, err := svc.RequestLeaseWithPolicyAndIntentAndSummary(
+		"agent-a",
+		"task-a",
+		"same request with different summaries",
+		5,
+		[]string{"github_token"},
+		"",
+		"fp-a",
+		"wd-a",
+		"",
+		"git status --short && printf 'changed'",
+		"/workspace/project/subdir",
+	)
+	if err != nil {
+		t.Fatalf("request lease with policy: %v", err)
+	}
+	if !result.Reused {
+		t.Fatalf("expected identical fingerprints to reuse the active lease even when summaries differ")
+	}
+
+	pending, err := store.ListPendingRequests()
+	if err != nil {
+		t.Fatalf("list pending requests: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected no new pending request when reuse succeeds, got %d", len(pending))
 	}
 }

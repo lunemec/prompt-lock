@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lunemec/promptlock/internal/adapters/audit"
+	"github.com/lunemec/promptlock/internal/config"
 	"github.com/lunemec/promptlock/internal/core/ports"
 )
 
@@ -338,6 +339,111 @@ func TestRunAuditVerifyAcceptsAppendAfterCheckpoint(t *testing.T) {
 	})
 	if !strings.Contains(out, "audit verify ok: records=2") {
 		t.Fatalf("expected audit verify success after append, got %q", out)
+	}
+}
+
+func TestRunAuditVerifyAutodetectsWorkspaceSetupAuditPath(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "repo-root")
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	stateDir := filepath.Join(t.TempDir(), "state-home")
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	t.Setenv("PROMPTLOCK_CONFIG", "")
+
+	restoreRand := stubSetupRandomBytes(t)
+	defer restoreRand()
+
+	result, err := ensureWorkspaceSetup(repoRoot, workspaceSetupOptions{
+		StateDir:           stateDir,
+		IntentName:         "run_tests",
+		SecretName:         "github_token",
+		AllowDomain:        "api.github.com",
+		DemoSecretValue:    "demo_github_token_value",
+		OutputSecurityMode: "raw",
+	})
+	if err != nil {
+		t.Fatalf("ensureWorkspaceSetup: %v", err)
+	}
+
+	sink, err := audit.NewFileSink(result.AuditPath)
+	if err != nil {
+		t.Fatalf("new file sink: %v", err)
+	}
+	if err := sink.Write(ports.AuditEvent{Event: "workspace-setup-event", Timestamp: time.Now().UTC()}); err != nil {
+		t.Fatalf("write audit event: %v", err)
+	}
+	if err := sink.Close(); err != nil {
+		t.Fatalf("close audit sink: %v", err)
+	}
+
+	origGetwd := setupGetwd
+	setupGetwd = func() (string, error) { return repoRoot, nil }
+	t.Cleanup(func() { setupGetwd = origGetwd })
+
+	out := captureCommandStdout(t, func() {
+		runAuditVerify(nil)
+	})
+	if !strings.Contains(out, "audit verify ok: records=1") {
+		t.Fatalf("expected audit verify success via workspace autodetect, got %q", out)
+	}
+}
+
+func TestRunAuditVerifyPrintFileAutodetectsWorkspaceSetupAuditPath(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "repo-root")
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	stateDir := filepath.Join(t.TempDir(), "state-home")
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	t.Setenv("PROMPTLOCK_CONFIG", "")
+
+	restoreRand := stubSetupRandomBytes(t)
+	defer restoreRand()
+
+	result, err := ensureWorkspaceSetup(repoRoot, workspaceSetupOptions{
+		StateDir:           stateDir,
+		IntentName:         "run_tests",
+		SecretName:         "github_token",
+		AllowDomain:        "api.github.com",
+		DemoSecretValue:    "demo_github_token_value",
+		OutputSecurityMode: "raw",
+	})
+	if err != nil {
+		t.Fatalf("ensureWorkspaceSetup: %v", err)
+	}
+
+	origGetwd := setupGetwd
+	setupGetwd = func() (string, error) { return repoRoot, nil }
+	t.Cleanup(func() { setupGetwd = origGetwd })
+
+	out := captureCommandStdout(t, func() {
+		runAuditVerify([]string{"--print-file"})
+	})
+	if strings.TrimSpace(out) != result.AuditPath {
+		t.Fatalf("print-file output = %q, want %q", strings.TrimSpace(out), result.AuditPath)
+	}
+}
+
+func TestRunAuditVerifyPrintFileUsesExplicitPath(t *testing.T) {
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+
+	out := captureCommandStdout(t, func() {
+		runAuditVerify([]string{"--file", auditPath, "--print-file"})
+	})
+	if strings.TrimSpace(out) != auditPath {
+		t.Fatalf("print-file output = %q, want %q", strings.TrimSpace(out), auditPath)
+	}
+}
+
+func TestDefaultAuditVerifyPathReturnsEmptyWhenNoWorkspaceSetupExists(t *testing.T) {
+	t.Setenv("PROMPTLOCK_CONFIG", "")
+	origGetwd := setupGetwd
+	setupGetwd = func() (string, error) { return t.TempDir(), nil }
+	t.Cleanup(func() { setupGetwd = origGetwd })
+
+	if got := defaultAuditVerifyPath(); got != "" {
+		t.Fatalf("defaultAuditVerifyPath = %q, want empty", got)
 	}
 }
 
@@ -908,6 +1014,8 @@ func TestPromptlockHelpTextPointsFirstTimeUsersToSetup(t *testing.T) {
 		"daemon      Start/stop/check the local promptlockd broker process",
 		"setup       Generate a hardened local quickstart",
 		"auth        Bootstrap, pair, mint, or launch a containerized agent session",
+		"Auto-detects the workspace quickstart audit file when available",
+		"Use --print-file to show the resolved audit file path",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("top-level help missing %q:\n%s", want, got)
@@ -939,10 +1047,59 @@ func TestWatchHelpTextDocumentsOperatorActions(t *testing.T) {
 		"auto-starts a local `promptlockd` daemon",
 		"--external",
 		"auto-detect its config, operator token, and operator socket",
+		"keyboard-driven interactive watch UI",
+		"Non-interactive or redirected sessions fall back",
+		"`promptlock audit-verify --print-file`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("watch help missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestAuditVerifyHelpTextDocumentsOperatorFlow(t *testing.T) {
+	got := auditVerifyHelpText()
+	for _, want := range []string{
+		"PromptLock audit-verify",
+		"promptlock audit-verify [flags]",
+		"Verify the current audit JSONL hash chain on the host.",
+		"`--print-file`",
+		"`promptlock setup`",
+		"`--checkpoint`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("audit-verify help missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWatchHelpRedactsAutoDetectedOperatorToken(t *testing.T) {
+	t.Setenv("PROMPTLOCK_OPERATOR_TOKEN", "op_hidden_watch")
+
+	out := captureStdout(t, func() {
+		runWatch([]string{"--help"})
+	})
+
+	if strings.Contains(out, "op_hidden_watch") {
+		t.Fatalf("expected watch help to omit the concrete operator token, got %q", out)
+	}
+	if !strings.Contains(out, redactedAutoDetectedOperatorTokenHelpValue) {
+		t.Fatalf("expected watch help to show the redacted operator-token placeholder, got %q", out)
+	}
+}
+
+func TestAuthDockerRunHelpRedactsAutoDetectedOperatorToken(t *testing.T) {
+	t.Setenv("PROMPTLOCK_OPERATOR_TOKEN", "op_hidden_auth")
+
+	out := captureStdout(t, func() {
+		runAuth([]string{"docker-run", "--help"})
+	})
+
+	if strings.Contains(out, "op_hidden_auth") {
+		t.Fatalf("expected auth docker-run help to omit the concrete operator token, got %q", out)
+	}
+	if !strings.Contains(out, redactedAutoDetectedOperatorTokenHelpValue) {
+		t.Fatalf("expected auth docker-run help to show the redacted operator-token placeholder, got %q", out)
 	}
 }
 
@@ -1007,6 +1164,60 @@ func TestAuthDockerRunHelpTextExplainsHostSideFlow(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("auth docker-run help missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestHelpCommandsDoNotLeakWorkspaceOperatorToken(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "repo-root")
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+
+	stateDir := filepath.Join(t.TempDir(), "state-home")
+	t.Setenv("PROMPTLOCK_OPERATOR_TOKEN", "")
+	t.Setenv("PROMPTLOCK_CONFIG", "")
+	restoreRand := stubSetupRandomBytes(t)
+	defer restoreRand()
+
+	result, err := ensureWorkspaceSetup(repoRoot, workspaceSetupOptions{
+		StateDir:           stateDir,
+		IntentName:         "run_tests",
+		SecretName:         "github_token",
+		AllowDomain:        "api.github.com",
+		DemoSecretValue:    "demo_github_token_value",
+		OutputSecurityMode: "raw",
+	})
+	if err != nil {
+		t.Fatalf("ensureWorkspaceSetup: %v", err)
+	}
+
+	cfg, err := config.Load(result.ConfigPath)
+	if err != nil {
+		t.Fatalf("load workspace config: %v", err)
+	}
+	token := strings.TrimSpace(cfg.Auth.OperatorToken)
+	if token == "" {
+		t.Fatalf("expected workspace operator token to be populated")
+	}
+
+	origGetwd := setupGetwd
+	setupGetwd = func() (string, error) { return repoRoot, nil }
+	t.Cleanup(func() { setupGetwd = origGetwd })
+
+	for _, tc := range []struct {
+		name string
+		fn   func([]string)
+	}{
+		{name: "watch", fn: runWatch},
+		{name: "auth login", fn: runAuthLogin},
+		{name: "auth docker-run", fn: runAuthDockerRun},
+	} {
+		out := captureCommandStdout(t, func() {
+			tc.fn([]string{"--help"})
+		})
+		if strings.Contains(out, token) {
+			t.Fatalf("%s help leaked workspace operator token %q:\n%s", tc.name, token, out)
 		}
 	}
 }

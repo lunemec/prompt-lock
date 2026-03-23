@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -81,5 +82,38 @@ func TestEquivalenceKeyChangesWhenFingerprintsDiffer(t *testing.T) {
 	}
 	if base == changedWorkdir.EquivalenceKey() {
 		t.Fatalf("expected workdir fingerprint changes to alter equivalence key")
+	}
+}
+
+func TestSummarizeCommandArgsSanitizesAndTruncates(t *testing.T) {
+	got := SummarizeCommandArgs([]string{
+		"git",
+		"commit",
+		"--message",
+		"hello\tworld\nline2",
+		strings.Repeat("x", 96),
+		"ignored",
+		"extra",
+	})
+	if strings.ContainsAny(got, "\n\r\t") {
+		t.Fatalf("expected command summary to be sanitized, got %q", got)
+	}
+	if !strings.Contains(got, "... (+1 args)") {
+		t.Fatalf("expected truncated summary to note omitted args, got %q", got)
+	}
+	if len([]rune(got)) > maxRequestCommandSummaryRunes {
+		t.Fatalf("expected summary to be capped at %d runes, got %d", maxRequestCommandSummaryRunes, len([]rune(got)))
+	}
+}
+
+func TestSummarizeWorkdirPathNormalizesAndTruncates(t *testing.T) {
+	got := SummarizeWorkdirPath("  ./workspace//nested/../repo  ")
+	if got != "workspace/repo" {
+		t.Fatalf("expected cleaned workdir summary, got %q", got)
+	}
+
+	long := SummarizeWorkdirPath(strings.Repeat("a", maxRequestWorkdirSummaryRunes+20))
+	if len([]rune(long)) > maxRequestWorkdirSummaryRunes {
+		t.Fatalf("expected workdir summary cap at %d runes, got %d", maxRequestWorkdirSummaryRunes, len([]rune(long)))
 	}
 }

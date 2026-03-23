@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-PromptLock is currently pre-1.0. Security fixes are applied to the latest `main` branch and latest tagged prerelease.
+PromptLock is currently pre-1.0. Security fixes are applied to the latest `main` branch. Once prerelease tags exist, fixes are also applied to the latest tagged prerelease. This is the public release-candidate branch for the eventual `v1.0.0` line.
 
 ## Reporting a vulnerability
 
@@ -32,5 +32,5 @@ Include:
 
 ## Scope notes
 
-PromptLock is currently pre-1.0. Hardened deployments are the supported path for real-world use, while dev/demo defaults remain available for local testing and examples.
+PromptLock is currently pre-1.0. Hardened deployments are the supported path for real-world use, while dev/demo defaults remain available for local testing and examples. The public release story is still a release candidate, not a stable 1.0 commitment.
 Please include deployment profile details (`security_profile`, transport mode, auth settings) in reports.

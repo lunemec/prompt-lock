@@ -5,12 +5,17 @@ on:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: write
+
 jobs:
   build-release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
 
       - name: Load toolchain versions
         run: |
@@ -22,7 +27,7 @@ jobs:
           done < .toolchain.env
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -50,10 +55,26 @@ jobs:
           chmod +x scripts/release-package.sh
           scripts/release-package.sh "$VERSION"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
         with:
           name: promptlock-${{ github.ref_name }}
           path: |
             dist/*.tar.gz
+            dist/*.sha256
             reports/storage-fsync-report-release-ci.json
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: PromptLock ${{ github.ref_name }}
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
+            reports/storage-fsync-report-release-ci.json
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

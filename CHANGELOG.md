@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- Release packaging now bundles `LICENSE` and `promptlock-mcp-launch`, writes exact tag/commit provenance plus a tarball checksum sidecar, and the tagged release workflow publishes the tarball, checksum, and fsync report as GitHub release assets while the release/support docs now describe the public OSS prerelease/beta branch consistently.
+- Secret-leak validation now blocks generic `*.env` files by default outside `demo-envs/`, scans both the working tree and git history for common token/key formats, and keeps explicit allowlists only for intentional demo/test fixtures and the validator implementation itself.
+- `cmd/promptlockd` request transport handlers now delegate pending-request listing, plaintext secret-access blocking, and env-path follow-up audits through `internal/app.Service` instead of keeping that policy and audit ownership inline in HTTP handler code.
+- `promptlock watch` now uses a Bubble Tea + Lip Gloss interactive TTY UI with a persistent header/footer, current-request detail panel, queue-awareness, and keyboard actions (`y` approve, `n` deny, `s` skip, `q` quit), while non-TTY and `--once` flows keep the plain fallback behavior and existing env-path preflight checks.
 - `promptlock-mcp` now advertises actionable `execute_with_intent` guidance directly in `tools/list` (configured intent-id requirement, quickstart `run_tests` example, schema field descriptions/examples), and unknown-intent failures now include an explicit hint instead of only forwarding the broker `404 unknown intent` text.
 - Added a second MCP env-path showcase under `demo-envs/showcase` plus `make demo-run-env-showcase-tests`, so demos can now prove env-backed `go test` execution (leased `GITHUB_TOKEN` + extra demo metadata env) instead of only printing a token.
 - Root `AGENTS.md` and the quickstart README flow now include explicit wrapper-container agent rules to use PromptLock MCP `execute_with_intent` for secret-dependent commands (with `run_tests`/`env_path` demo defaults) and to avoid direct secret file/env bypass.
@@ -39,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `make release-readiness-gate` now runs the supported hardened dual-socket smoke path (`make real-e2e-smoke`) instead of the older dev/insecure compose demo, and the hardened red-team smoke harness now exercises the same transport boundary.
 - Helper and operations docs now make the local hardened Unix-socket flow the primary path, relabel the mock broker as demo-only, document the canonical `session_token` revoke field, and remove dead backend settings from canonical config examples.
 - The supported OSS deployment target is explicitly local-only hardened operation with dual Unix sockets, and the public docs/release notes now describe the active product surface accordingly instead of referring to removed TLS/mTLS transport work.
-- PromptLock public docs and planning state now consistently describe the project as a pre-1.0 OSS release candidate rather than a draft/experimental v1 claim.
+- PromptLock public docs and planning state now consistently describe the project as a pre-1.0 OSS prerelease/beta rather than a draft/experimental v1 claim.
 - GitHub Actions CI now stays Go/shell-native by using `make validate-final` plus `make leak-guard` instead of installing Python and running `bandit`.
 - Pull-request CI now uses explicit `actions/setup-go`, runs `make release-readiness-gate-core`, preserves `make leak-guard`, and publishes MCP conformance output so PR validation reflects the repository’s claimed release-readiness posture more credibly.
 - Go and Docker base-image pins are now centralized in `.toolchain.env`, validated by `make toolchain-guard`, and aligned across `go.mod`, GitHub Actions, and the Docker build/runtime images.
@@ -52,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Planning and ADR docs now record the broker-managed executable-resolution decision and close the follow-up backlog items for schema cleanup, executable provenance hardening, and graceful compose teardown.
 
 ### Fixed
+- Secret leasing now fails closed on env-unsafe secret names, and execution env construction reuses the shared canonicalizer so invalid or injection-shaped names never reach child-process `key=value` entries.
+- `promptlock auth docker-run` now rejects `--add-host`, `--dns`, `--dns-option`, and `--dns-search` when the session broker uses the desktop-Docker host alias bridge, preventing agent transport redirection to attacker-controlled endpoints.
 - `promptlock watch` now waits for the operator broker transport to become reachable after auto-starting a local daemon, avoiding first-run `socket not found` / `connection refused` races in the new watch-first UX.
 - `promptlock auth docker-run` now falls back to an ephemeral agent-only host bridge on non-Linux desktop Docker runtimes, so the supported host-daemon + container-agent flow works even when host Unix-socket bind mounts are unreliable there.
 - Host/container operations docs and CLI help now describe the supported container leg as agent-side transport only, not socket-mount-only, so the published Linux socket path and non-Linux daemon-bridge path match runtime behavior.
@@ -106,7 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `promptlock auth docker-run` helper command to mint a short-lived session and launch `docker run` with PromptLock broker/session env already injected, reducing the copy-paste needed for containerized agent startup.
-- Published runtime images now include `secretctl.sh` on `PATH` plus `/opt/promptlock/skills/secret-request/SKILL.md` so containerized agents can discover PromptLock usage guidance without a repo checkout.
+- The local `agent-lab` image built by `docker build --target agent-lab` includes `secretctl.sh` on `PATH` plus `/opt/promptlock/skills/secret-request/SKILL.md` so containerized agents can discover PromptLock usage guidance without a repo checkout.
 - Role-separated local socket transport:
   - broker config fields `agent_unix_socket` and `operator_unix_socket`
   - CLI role-aware env defaults `PROMPTLOCK_AGENT_UNIX_SOCKET` and `PROMPTLOCK_OPERATOR_UNIX_SOCKET`

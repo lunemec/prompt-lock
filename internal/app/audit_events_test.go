@@ -212,6 +212,28 @@ func TestAuditEnvPathDecisionEvents(t *testing.T) {
 	}
 }
 
+func TestRejectPlaintextSecretAccessAuditsAndBlocks(t *testing.T) {
+	audit := &auditBuf{}
+	now := time.Date(2026, 3, 11, 18, 5, 0, 0, time.UTC)
+	svc := Service{Audit: audit, Now: func() time.Time { return now }}
+
+	if err := svc.RejectPlaintextSecretAccess(false, "agent", "agent-1"); !errors.Is(err, ErrPlaintextSecretReturnDisabled) {
+		t.Fatalf("expected plaintext secret return policy error, got %v", err)
+	}
+
+	blocked, ok := findAuditEvent(audit.events, "plaintext_secret_access_blocked")
+	if !ok {
+		t.Fatalf("expected plaintext_secret_access_blocked event")
+	}
+	if blocked.ActorType != "agent" || blocked.ActorID != "agent-1" {
+		t.Fatalf("expected actor context on plaintext block, got actor_type=%q actor_id=%q", blocked.ActorType, blocked.ActorID)
+	}
+
+	if err := svc.RejectPlaintextSecretAccess(true, "agent", "agent-1"); err != nil {
+		t.Fatalf("expected plaintext access to be allowed, got %v", err)
+	}
+}
+
 func TestRequestLeaseAndApprovePersistIntent(t *testing.T) {
 	store := memory.NewStore()
 	audit := &auditBuf{}

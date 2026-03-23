@@ -23,6 +23,8 @@ type pendingItem struct {
 	Secrets            []string `json:"Secrets"`
 	CommandFingerprint string   `json:"CommandFingerprint"`
 	WorkdirFingerprint string   `json:"WorkdirFingerprint"`
+	CommandSummary     string   `json:"CommandSummary"`
+	WorkdirSummary     string   `json:"WorkdirSummary"`
 	EnvPath            string   `json:"EnvPath"`
 	EnvPathCanonical   string   `json:"EnvPathCanonical"`
 }
@@ -59,15 +61,19 @@ func (c brokerWatchClient) Deny(requestID, reason string) error {
 }
 
 type watchOptions struct {
-	BrokerTarget string
-	PollInterval time.Duration
-	DefaultTTL   int
-	Once         bool
-	Input        *bufio.Reader
-	Output       io.Writer
-	ClearScreen  bool
-	Now          func() time.Time
-	Pause        func(time.Duration)
+	BrokerTarget   string
+	PollInterval   time.Duration
+	DefaultTTL     int
+	Once           bool
+	InteractiveTTY bool
+	KeyboardInput  io.Reader
+	Input          *bufio.Reader
+	Output         io.Writer
+	ClearScreen    bool
+	Now            func() time.Time
+	Pause          func(time.Duration)
+	RunInteractive func(watchClient, watchOptions) error
+	RunPlain       func(watchClient, watchOptions) error
 }
 
 type watchView struct {
@@ -108,7 +114,7 @@ func runWatch(args []string) {
 		conn := registerBrokerFlags(fs)
 		fs.Duration("poll-interval", 3*time.Second, "poll interval")
 		fs.Int("ttl", 5, "approval ttl override")
-		fs.String("operator-token", defaultOperatorToken(), "operator token")
+		registerOperatorTokenFlag(fs, defaultOperatorToken())
 		fs.Bool("once", false, "process one pass and exit")
 		fs.Bool("external", false, "connect to an already-running daemon only (disable auto-start)")
 		fs.String("pid-file", getenv("PROMPTLOCK_DAEMON_PID_FILE", ""), "daemon pid file path (auto-start mode; defaults to config-scoped path when --config/PROMPTLOCK_CONFIG is set)")
@@ -124,7 +130,7 @@ func runWatch(args []string) {
 	conn := registerBrokerFlags(fs)
 	poll := fs.Duration("poll-interval", 3*time.Second, "poll interval")
 	defaultTTL := fs.Int("ttl", 5, "approval ttl override")
-	operatorToken := fs.String("operator-token", defaultOperatorToken(), "operator token")
+	operatorToken := registerOperatorTokenFlag(fs, defaultOperatorToken())
 	once := fs.Bool("once", false, "process one pass and exit")
 	external := fs.Bool("external", false, "connect to an already-running daemon only (disable auto-start)")
 	pidFile := fs.String("pid-file", getenv("PROMPTLOCK_DAEMON_PID_FILE", ""), "daemon pid file path (auto-start mode; defaults to config-scoped path when --config/PROMPTLOCK_CONFIG is set)")
@@ -153,19 +159,36 @@ func runWatch(args []string) {
 		operatorToken: *operatorToken,
 	}
 	opts := watchOptions{
-		BrokerTarget: watchBrokerTarget(broker.BaseURL, broker.UnixSocket),
-		PollInterval: *poll,
-		DefaultTTL:   *defaultTTL,
-		Once:         *once,
-		Input:        bufio.NewReader(os.Stdin),
-		Output:       os.Stdout,
-		ClearScreen:  isTerminalFile(os.Stdin) && isTerminalFile(os.Stdout),
-		Now:          time.Now,
-		Pause:        time.Sleep,
+		BrokerTarget:   watchBrokerTarget(broker.BaseURL, broker.UnixSocket),
+		PollInterval:   *poll,
+		DefaultTTL:     *defaultTTL,
+		Once:           *once,
+		InteractiveTTY: isTerminalFile(os.Stdin) && isTerminalFile(os.Stdout),
+		KeyboardInput:  os.Stdin,
+		Input:          bufio.NewReader(os.Stdin),
+		Output:         os.Stdout,
+		ClearScreen:    isTerminalFile(os.Stdin) && isTerminalFile(os.Stdout),
+		Now:            time.Now,
+		Pause:          time.Sleep,
+		RunInteractive: runWatchTUI,
+		RunPlain:       runWatchLoop,
 	}
-	if err := runWatchLoop(client, opts); err != nil {
+	if err := runWatchSession(client, opts); err != nil {
 		fatal(err)
 	}
+}
+
+func runWatchSession(client watchClient, opts watchOptions) error {
+	if opts.RunInteractive == nil {
+		opts.RunInteractive = runWatchTUI
+	}
+	if opts.RunPlain == nil {
+		opts.RunPlain = runWatchLoop
+	}
+	if opts.InteractiveTTY && !opts.Once {
+		return opts.RunInteractive(client, opts)
+	}
+	return opts.RunPlain(client, opts)
 }
 
 func runWatchLoop(client watchClient, opts watchOptions) error {
@@ -190,10 +213,8 @@ func runWatchLoop(client watchClient, opts watchOptions) error {
 		}
 
 		membershipSignature := pendingMembershipSignature(items)
-		if membershipSignature != state.membershipSignature {
-			state.membershipSignature = membershipSignature
-			state.skipped = map[string]struct{}{}
-		}
+		state.membershipSignature = membershipSignature
+		state.skipped = pruneWatchSkipped(state.skipped, items)
 
 		current, moreQueued, message := selectWatchItem(items, state.skipped)
 		renderKey := watchRenderKey(membershipSignature, current, moreQueued, message)
@@ -229,17 +250,19 @@ func runWatchLoop(client watchClient, opts watchOptions) error {
 
 		switch decision {
 		case "approve":
-			if err := client.Approve(current.ID, opts.DefaultTTL); err != nil {
-				fmt.Fprintln(opts.Output, "approve failed:", err)
+			status, err := executeWatchAction(client, current, watchActionApprove, opts.DefaultTTL)
+			if err != nil {
+				fmt.Fprintln(opts.Output, "approve failed:", sanitizeTerminalText(fmt.Sprint(err)))
 			} else {
-				fmt.Fprintln(opts.Output, "approved")
+				fmt.Fprintln(opts.Output, status)
 			}
 			state.lastRenderKey = ""
 		case "deny":
-			if err := client.Deny(current.ID, "denied by operator"); err != nil {
-				fmt.Fprintln(opts.Output, "deny failed:", err)
+			status, err := executeWatchAction(client, current, watchActionDeny, opts.DefaultTTL)
+			if err != nil {
+				fmt.Fprintln(opts.Output, "deny failed:", sanitizeTerminalText(fmt.Sprint(err)))
 			} else {
-				fmt.Fprintln(opts.Output, "denied")
+				fmt.Fprintln(opts.Output, status)
 			}
 			state.lastRenderKey = ""
 		case "skip":
@@ -285,7 +308,7 @@ func promptWatchDecision(input *bufio.Reader, out io.Writer) (string, error) {
 func runWatchList(args []string) {
 	fs := flag.NewFlagSet("watch list", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
-	operatorToken := fs.String("operator-token", defaultOperatorToken(), "operator token")
+	operatorToken := registerOperatorTokenFlag(fs, defaultOperatorToken())
 	fs.Parse(args)
 	broker, err := conn.resolve(brokerRoleOperator)
 	if err != nil {
@@ -310,7 +333,7 @@ func runWatchList(args []string) {
 func runWatchAllow(args []string) {
 	fs := flag.NewFlagSet("watch allow", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
-	operatorToken := fs.String("operator-token", defaultOperatorToken(), "operator token")
+	operatorToken := registerOperatorTokenFlag(fs, defaultOperatorToken())
 	ttl := fs.Int("ttl", 5, "approval ttl override")
 	fs.Parse(args)
 	if fs.NArg() < 1 {
@@ -333,7 +356,7 @@ func runWatchAllow(args []string) {
 func runWatchDeny(args []string) {
 	fs := flag.NewFlagSet("watch deny", flag.ExitOnError)
 	conn := registerBrokerFlags(fs)
-	operatorToken := fs.String("operator-token", defaultOperatorToken(), "operator token")
+	operatorToken := registerOperatorTokenFlag(fs, defaultOperatorToken())
 	reason := fs.String("reason", "denied by operator", "deny reason")
 	fs.Parse(args)
 	if fs.NArg() < 1 {
@@ -380,7 +403,24 @@ func selectWatchItem(items []pendingItem, skipped map[string]struct{}) (*pending
 	if len(items) == 0 {
 		return nil, 0, "Watching for pending requests..."
 	}
-	return nil, 0, "All current pending requests have been skipped. Watching for queue changes..."
+	return nil, 0, "All current pending requests have been skipped. New requests will still appear; skipped requests stay hidden until they leave the queue."
+}
+
+func pruneWatchSkipped(skipped map[string]struct{}, items []pendingItem) map[string]struct{} {
+	if len(skipped) == 0 {
+		return map[string]struct{}{}
+	}
+	active := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		active[item.ID] = struct{}{}
+	}
+	next := make(map[string]struct{}, len(skipped))
+	for requestID := range skipped {
+		if _, ok := active[requestID]; ok {
+			next[requestID] = struct{}{}
+		}
+	}
+	return next
 }
 
 func unskippedPendingCount(items []pendingItem, skipped map[string]struct{}) int {
@@ -399,30 +439,43 @@ func renderWatchScreen(out io.Writer, view watchView, clearScreen bool) {
 		fmt.Fprint(out, ansiClearScreen)
 	}
 	fmt.Fprintln(out, "PromptLock Watch")
-	fmt.Fprintf(out, "Broker: %s | Poll: %s | Time: %s | Pending: %d\n", view.BrokerTarget, view.PollInterval, view.Now.Format(time.RFC3339), view.PendingCount)
+	fmt.Fprintf(out, "Broker: %s\n", watchDisplayValue(view.BrokerTarget))
+	fmt.Fprintf(out, "Poll: %s | Time: %s\n", view.PollInterval, view.Now.Format(time.RFC3339))
+	fmt.Fprintf(out, "Pending: %d\n", view.PendingCount)
 	fmt.Fprintln(out)
 	if view.Current == nil {
-		fmt.Fprintln(out, view.Message)
+		fmt.Fprintln(out, watchDisplayValue(view.Message))
 		if view.PendingCount == 0 {
 			fmt.Fprintln(out, "Waiting for the next approval request.")
 		}
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Action: q=quit")
 		return
 	}
 
 	it := view.Current
-	fmt.Fprintf(out, "Request %s | agent=%s task=%s ttl=%d\n", it.ID, it.AgentID, it.TaskID, it.TTLMinutes)
+	fmt.Fprintf(out, "Request %s\n", watchDisplayValue(it.ID))
+	fmt.Fprintf(out, "Agent: %s\n", watchDisplayValue(it.AgentID))
+	fmt.Fprintf(out, "Task: %s\n", watchDisplayValue(it.TaskID))
+	fmt.Fprintf(out, "TTL: %d minutes\n", it.TTLMinutes)
 	if strings.TrimSpace(it.Intent) != "" {
-		fmt.Fprintf(out, "Intent: %s\n", it.Intent)
+		fmt.Fprintf(out, "Intent: %s\n", watchDisplayValue(it.Intent))
 	}
-	fmt.Fprintf(out, "Reason: %s\n", it.Reason)
-	fmt.Fprintf(out, "Secrets: %s\n", strings.Join(it.Secrets, ", "))
-	fmt.Fprintf(out, "Command FP: %s\n", it.CommandFingerprint)
-	fmt.Fprintf(out, "Workdir FP: %s\n", it.WorkdirFingerprint)
+	fmt.Fprintf(out, "Reason: %s\n", watchDisplayValue(it.Reason))
+	fmt.Fprintf(out, "Secrets: %s\n", watchJoinSanitized(it.Secrets))
+	if strings.TrimSpace(it.CommandSummary) != "" {
+		fmt.Fprintf(out, "Command: %s\n", watchDisplayValue(it.CommandSummary))
+	}
+	if strings.TrimSpace(it.WorkdirSummary) != "" {
+		fmt.Fprintf(out, "Workdir: %s\n", watchDisplayValue(it.WorkdirSummary))
+	}
+	fmt.Fprintf(out, "Command FP: %s\n", watchDisplayValue(it.CommandFingerprint))
+	fmt.Fprintf(out, "Workdir FP: %s\n", watchDisplayValue(it.WorkdirFingerprint))
 	if strings.TrimSpace(it.EnvPath) != "" {
-		fmt.Fprintf(out, "Env Path: %s\n", it.EnvPath)
+		fmt.Fprintf(out, "Env Path: %s\n", watchDisplayValue(it.EnvPath))
 	}
 	if strings.TrimSpace(it.EnvPathCanonical) != "" {
-		fmt.Fprintf(out, "Env Path Canonical: %s\n", it.EnvPathCanonical)
+		fmt.Fprintf(out, "Env Path Canonical: %s\n", watchDisplayValue(it.EnvPathCanonical))
 	}
 	if view.MoreQueued > 0 {
 		fmt.Fprintf(out, "Queued after this: %d\n", view.MoreQueued)
@@ -484,8 +537,10 @@ func validateWatchEnvPathExpectation(broker, brokerUnix string) error {
 	}
 	if !*caps.EnvPathEnabled {
 		return fmt.Errorf(
-			"watch env-path preflight failed: broker %s has env_path disabled while PROMPTLOCK_ENV_PATH_ROOT=%q is set; restart the daemon with matching env or unset PROMPTLOCK_ENV_PATH_ROOT",
+			"watch env-path preflight failed: broker %s has env_path disabled while PROMPTLOCK_ENV_PATH_ROOT=%q is set; restart the daemon from the same shell so it inherits that value, for example: PROMPTLOCK_ENV_PATH_ROOT=%q promptlock daemon stop && PROMPTLOCK_ENV_PATH_ROOT=%q promptlock daemon start",
 			watchBrokerTarget(broker, brokerUnix),
+			expectedRoot,
+			expectedRoot,
 			expectedRoot,
 		)
 	}
@@ -512,25 +567,31 @@ func isTerminalFile(file *os.File) bool {
 
 func formatPendingListLine(it pendingItem) string {
 	line := fmt.Sprintf("%s | agent=%s task=%s ttl=%d",
-		it.ID,
-		it.AgentID,
-		it.TaskID,
+		watchDisplayValue(it.ID),
+		watchDisplayValue(it.AgentID),
+		watchDisplayValue(it.TaskID),
 		it.TTLMinutes,
 	)
 	if strings.TrimSpace(it.Intent) != "" {
-		line += " | intent=" + it.Intent
+		line += " | intent=" + watchDisplayValue(it.Intent)
 	}
 	line += fmt.Sprintf(" | secrets=%s | reason=%s | command_fp=%s | workdir_fp=%s",
-		strings.Join(it.Secrets, ","),
-		it.Reason,
-		it.CommandFingerprint,
-		it.WorkdirFingerprint,
+		watchJoinSanitized(it.Secrets),
+		watchDisplayValue(it.Reason),
+		watchDisplayValue(it.CommandFingerprint),
+		watchDisplayValue(it.WorkdirFingerprint),
 	)
+	if strings.TrimSpace(it.CommandSummary) != "" {
+		line += " | command=" + watchDisplayValue(it.CommandSummary)
+	}
+	if strings.TrimSpace(it.WorkdirSummary) != "" {
+		line += " | workdir=" + watchDisplayValue(it.WorkdirSummary)
+	}
 	if strings.TrimSpace(it.EnvPath) != "" {
-		line += " | env_path=" + it.EnvPath
+		line += " | env_path=" + watchDisplayValue(it.EnvPath)
 	}
 	if strings.TrimSpace(it.EnvPathCanonical) != "" {
-		line += " | env_path_canonical=" + it.EnvPathCanonical
+		line += " | env_path_canonical=" + watchDisplayValue(it.EnvPathCanonical)
 	}
 	return line
 }

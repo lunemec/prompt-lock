@@ -64,12 +64,13 @@ func TestAuditSanitizesTokenFields(t *testing.T) {
 	}
 	defer s.Close()
 
+	bearerSecret := "sess_" + strings.Repeat("b", 32)
 	e := ports.AuditEvent{
 		Event:      "x",
 		Timestamp:  time.Now().UTC(),
 		LeaseToken: "lease_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Metadata: map[string]string{
-			"note": "Bearer sess_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			"note": "Bearer " + bearerSecret,
 		},
 	}
 	if err := s.Write(e); err != nil {
@@ -92,7 +93,7 @@ func TestAuditSanitizesTokenFields(t *testing.T) {
 	if r.Event.LeaseToken == "" || r.Event.LeaseToken == "lease_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("expected lease token to be sanitized, got %q", r.Event.LeaseToken)
 	}
-	if got := r.Event.Metadata["note"]; got == "Bearer sess_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" || got == "" {
+	if got := r.Event.Metadata["note"]; got == "Bearer "+bearerSecret || got == "" {
 		t.Fatalf("expected metadata note sanitized, got %q", got)
 	}
 }
