@@ -308,7 +308,7 @@ func sampleToolchainFiles(cfg toolchainConfig) map[string]string {
 		"docs/standards/ENGINEERING-STANDARDS.md": "make toolchain-guard\n.toolchain.env\n",
 		"scripts/run_real_e2e_smoke.sh":           "go build -o \"$PROMPTLOCK_BIN\" ./cmd/promptlock\ngo build -o \"$PTY_RUNNER\" ./cmd/promptlock-pty-runner\n--inputs\npromptlock-pty-runner\n",
 		"docs/operations/WRAPPER-EXEC.md":         "--docker-arg as a narrow escape hatch\nhost-alias broker URL\ncontainer could redirect PromptLock transport\n",
-		"scripts/release-package.sh":              "require_clean_worktree\nclean git checkout; refusing to build from a dirty tree\ncp LICENSE README.md \"$OUT_DIR/\"\npromptlock-mcp-launch-linux-amd64\npromptlock-mcp-launch-darwin-arm64\n",
+		"scripts/release-package.sh":              "require_clean_worktree\nclean git checkout; refusing to build from a dirty tree\ngo run \"github.com/goreleaser/goreleaser/v2@v2.7.0\" build --clean --config .goreleaser.yaml\ncp LICENSE README.md \"$OUT_DIR/\"\npromptlock-mcp-launch-linux-amd64\npromptlock-mcp-launch-darwin-arm64\n",
 		".goreleaser.yaml":                        "cmd/promptlock-mcp-launch\npromptlock-mcp-launch-{{ .Os }}-{{ .Arch }}\n",
 		"SECURITY.md":                             "latest `main` branch\nOnce prerelease tags exist, fixes are also applied to the latest tagged prerelease.\n",
 	}

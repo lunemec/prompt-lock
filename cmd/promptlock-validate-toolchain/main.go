@@ -215,8 +215,15 @@ func validateDocs(files map[string]string) error {
 
 func validateReleasePackaging(files map[string]string) error {
 	requirements := map[string][]string{
-		"scripts/release-package.sh": {"require_clean_worktree", "clean git checkout; refusing to build from a dirty tree", "LICENSE", "promptlock-mcp-launch"},
-		".goreleaser.yaml":           {"cmd/promptlock-mcp-launch", "promptlock-mcp-launch-{{ .Os }}-{{ .Arch }}"},
+		"scripts/release-package.sh": {
+			"require_clean_worktree",
+			"clean git checkout; refusing to build from a dirty tree",
+			"github.com/goreleaser/goreleaser/v2@v2.7.0",
+			"build --clean --config .goreleaser.yaml",
+			"LICENSE",
+			"promptlock-mcp-launch",
+		},
+		".goreleaser.yaml": {"cmd/promptlock-mcp-launch", "promptlock-mcp-launch-{{ .Os }}-{{ .Arch }}"},
 		".github/workflows/release.yml": {
 			"softprops/action-gh-release@",
 			"permissions:",
@@ -265,6 +272,12 @@ func validateReleasePackaging(files map[string]string) error {
 	}
 	if strings.Contains(files["docs/operations/RELEASE.md"], "python") {
 		return fmt.Errorf("docs/operations/RELEASE.md: must not reference python in the supported smoke path")
+	}
+	if strings.Contains(files["scripts/release-package.sh"], "GORELEASER_VERSION=\"${GORELEASER_VERSION:-") {
+		return fmt.Errorf("scripts/release-package.sh: must pin GoReleaser directly instead of allowing env override")
+	}
+	if strings.Contains(files["scripts/release-package.sh"], " build --snapshot ") {
+		return fmt.Errorf("scripts/release-package.sh: must build tagged release artifacts without goreleaser --snapshot")
 	}
 	return nil
 }

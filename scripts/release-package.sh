@@ -62,7 +62,6 @@ VERSION="${VERSION#v}"
 TAG="v${VERSION}"
 OUT_DIR="dist/promptlock-${VERSION}"
 GORELEASER_DIST=".goreleaser-dist"
-GORELEASER_VERSION="${GORELEASER_VERSION:-v2.7.0}"
 
 cd "$ROOT_DIR"
 require_clean_worktree
@@ -79,7 +78,7 @@ tag: ${TAG}
 commit: ${SOURCE_COMMIT}
 EOF
 
-go run "github.com/goreleaser/goreleaser/v2@${GORELEASER_VERSION}" build --snapshot --clean --config .goreleaser.yaml
+go run github.com/goreleaser/goreleaser/v2@v2.7.0 build --clean --config .goreleaser.yaml
 
 for bin in \
   promptlockd-linux-amd64 \

@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lunemec/promptlock/internal/buildinfo"
 	"github.com/lunemec/promptlock/internal/config"
 )
 
@@ -63,6 +64,7 @@ const executeWithIntentToolDescription = "Request a lease by configured intent i
 const unknownIntentHint = "intent must be a configured intent id (for example run_tests); check broker config.intents or your quickstart setup"
 
 var brokerClientTimeout = 10 * time.Second
+var version = "dev"
 
 type mcpServer struct {
 	emitMu     sync.Mutex
@@ -149,7 +151,7 @@ func (s *mcpServer) handle(req rpcReq) bool {
 				"capabilities": map[string]any{
 					"tools": map[string]any{},
 				},
-				"serverInfo": map[string]string{"name": "promptlock-mcp", "version": "0.1.0"},
+				"serverInfo": map[string]string{"name": "promptlock-mcp", "version": buildinfo.ResolveVersion(version)},
 			}})
 		}
 	case "tools/list":

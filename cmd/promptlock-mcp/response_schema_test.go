@@ -99,6 +99,16 @@ func TestInitializeResponseSchema(t *testing.T) {
 	if _, ok := caps["prompts"]; ok {
 		t.Fatalf("initialize.capabilities.prompts must be omitted until prompts namespace is implemented: %+v", caps)
 	}
+	info, ok := res["serverInfo"].(map[string]any)
+	if !ok {
+		t.Fatalf("initialize.serverInfo must be object: %+v", res)
+	}
+	if _, ok := info["name"].(string); !ok {
+		t.Fatalf("initialize.serverInfo.name must be string: %+v", info)
+	}
+	if got, ok := info["version"].(string); !ok || got == "" {
+		t.Fatalf("initialize.serverInfo.version must be non-empty string: %+v", info)
+	}
 }
 
 func TestPingResponseSchema(t *testing.T) {

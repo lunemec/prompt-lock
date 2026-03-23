@@ -156,6 +156,16 @@ func TestInitializeEchoesStringID(t *testing.T) {
 	if _, ok := caps["prompts"]; ok {
 		t.Fatalf("did not expect initialize.capabilities.prompts advertisement, got %+v", caps)
 	}
+	info, ok := res["serverInfo"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected initialize.serverInfo object, got %+v", res)
+	}
+	if name, ok := info["name"].(string); !ok || name != "promptlock-mcp" {
+		t.Fatalf("expected initialize.serverInfo.name=promptlock-mcp, got %+v", info)
+	}
+	if got, ok := info["version"].(string); !ok || got == "" || got == "0.1.0" {
+		t.Fatalf("expected initialize.serverInfo.version to be non-empty and non-hard-coded, got %+v", info)
+	}
 }
 
 func TestPingSupported(t *testing.T) {

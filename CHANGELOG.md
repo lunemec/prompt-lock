@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Planning and ADR docs now record the broker-managed executable-resolution decision and close the follow-up backlog items for schema cleanup, executable provenance hardening, and graceful compose teardown.
 
 ### Fixed
+- `promptlock-mcp` initialize responses now advertise a build-derived server version instead of a stale hard-coded `0.1.0`, and local release packaging now uses a truly pinned GoReleaser version plus tagged release builds instead of overrideable snapshot-mode packaging.
 - Secret leasing now fails closed on env-unsafe secret names, and execution env construction reuses the shared canonicalizer so invalid or injection-shaped names never reach child-process `key=value` entries.
 - `promptlock auth docker-run` now rejects `--add-host`, `--dns`, `--dns-option`, and `--dns-search` when the session broker uses the desktop-Docker host alias bridge, preventing agent transport redirection to attacker-controlled endpoints.
 - `promptlock watch` now waits for the operator broker transport to become reachable after auto-starting a local daemon, avoiding first-run `socket not found` / `connection refused` races in the new watch-first UX.
