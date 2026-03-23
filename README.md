@@ -6,6 +6,10 @@ Instead of mounting raw long-lived secrets into agent containers, agents request
 
 This reduces prompt-injection blast radius while keeping autonomous workflows practical.
 
+<p align="center">
+  <img src=".github/assets/promptlock.png" alt="PromptLock mascot" width="720">
+</p>
+
 ## Quick Links
 
 - Fastest end-to-end repo demo: [`Minimal Quickstart`](#minimal-quickstart)
