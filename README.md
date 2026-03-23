@@ -18,14 +18,6 @@ This reduces prompt-injection blast radius while keeping autonomous workflows pr
 - CLI behavior and approval semantics: [`docs/operations/WRAPPER-EXEC.md`](docs/operations/WRAPPER-EXEC.md)
 - Contributor map and repo rules: [`AGENTS.md`](AGENTS.md), [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
-## Name
-
-Project name: **PromptLock**
-
-Tagline: **Human-approved secret access for autonomous agents.**
-
-Status: **public OSS prerelease/beta on the path to v1.0.0**. The supported OSS deployment target is local-only hardened operation with role-separated Unix sockets. PromptLock is intended for public OSS use, and the release tooling is already wired for `v0.x` prereleases/betas and `v1.x` normal releases.
-
 ## Who this is for
 
 - You run local or containerized coding agents and do not want to inject long-lived secrets into their runtime by default.
