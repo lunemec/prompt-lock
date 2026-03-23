@@ -46,6 +46,8 @@ builds:
     no_unique_dist_dir: true
     env:
       - CGO_ENABLED=0
+    ldflags:
+      - -X main.version={{ .Version }}
     goos:
       - linux
       - darwin

@@ -1,9 +1,12 @@
 package buildinfo
 
 import (
+	"regexp"
 	"runtime/debug"
 	"strings"
 )
+
+var pseudoVersionPattern = regexp.MustCompile(`(?:-|\.)(\d{14})-[0-9a-fA-F]{12}(?:\+dirty)?$`)
 
 func ResolveVersion(explicit string) string {
 	return resolveVersion(explicit, debug.ReadBuildInfo)
@@ -18,16 +21,6 @@ func resolveVersion(explicit string, readInfo func() (*debug.BuildInfo, bool)) s
 			if v := normalizeVersion(info.Main.Version); v != "" {
 				return v
 			}
-			if rev := buildSetting(info, "vcs.revision"); rev != "" {
-				short := rev
-				if len(short) > 12 {
-					short = short[:12]
-				}
-				if buildSetting(info, "vcs.modified") == "true" {
-					return "dev+" + short + "-dirty"
-				}
-				return "dev+" + short
-			}
 		}
 	}
 	return "dev"
@@ -39,18 +32,9 @@ func normalizeVersion(v string) string {
 	case "", "dev", "(devel)":
 		return ""
 	default:
+		if pseudoVersionPattern.MatchString(trimmed) {
+			return ""
+		}
 		return strings.TrimPrefix(trimmed, "v")
 	}
-}
-
-func buildSetting(info *debug.BuildInfo, key string) string {
-	if info == nil {
-		return ""
-	}
-	for _, setting := range info.Settings {
-		if setting.Key == key {
-			return strings.TrimSpace(setting.Value)
-		}
-	}
-	return ""
 }

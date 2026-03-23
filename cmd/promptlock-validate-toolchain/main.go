@@ -223,7 +223,11 @@ func validateReleasePackaging(files map[string]string) error {
 			"LICENSE",
 			"promptlock-mcp-launch",
 		},
-		".goreleaser.yaml": {"cmd/promptlock-mcp-launch", "promptlock-mcp-launch-{{ .Os }}-{{ .Arch }}"},
+		".goreleaser.yaml": {
+			"cmd/promptlock-mcp-launch",
+			"promptlock-mcp-launch-{{ .Os }}-{{ .Arch }}",
+			"-X main.version={{ .Version }}",
+		},
 		".github/workflows/release.yml": {
 			"softprops/action-gh-release@",
 			"permissions:",

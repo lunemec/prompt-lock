@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,11 @@ func exchangeLine(t *testing.T, line string) map[string]any {
 	t.Helper()
 	cmd := exec.Command("go", "run", ".")
 	cmd.Dir = "."
+	return exchangeLineWithCommand(t, cmd, line)
+}
+
+func exchangeLineWithCommand(t *testing.T, cmd *exec.Cmd, line string) map[string]any {
+	t.Helper()
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -108,6 +114,28 @@ func TestInitializeResponseSchema(t *testing.T) {
 	}
 	if got, ok := info["version"].(string); !ok || got == "" {
 		t.Fatalf("initialize.serverInfo.version must be non-empty string: %+v", info)
+	}
+}
+
+func TestInitializeResponseUsesInjectedBuildVersion(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "promptlock-mcp")
+	build := exec.Command("go", "build", "-ldflags", "-X main.version=v7.8.9", "-o", bin, ".")
+	build.Dir = "."
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build promptlock-mcp with injected version: %v\n%s", err, out)
+	}
+	msg := exchangeLineWithCommand(t, exec.Command(bin), `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	assertBaseJSONRPCShape(t, msg, true)
+	res, ok := msg["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("initialize result must be object: %+v", msg)
+	}
+	info, ok := res["serverInfo"].(map[string]any)
+	if !ok {
+		t.Fatalf("initialize.serverInfo must be object: %+v", res)
+	}
+	if got, ok := info["version"].(string); !ok || got != "7.8.9" {
+		t.Fatalf("initialize.serverInfo.version = %#v, want 7.8.9", info["version"])
 	}
 }
 

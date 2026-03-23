@@ -64,7 +64,7 @@ const executeWithIntentToolDescription = "Request a lease by configured intent i
 const unknownIntentHint = "intent must be a configured intent id (for example run_tests); check broker config.intents or your quickstart setup"
 
 var brokerClientTimeout = 10 * time.Second
-var version = "dev"
+var version string
 
 type mcpServer struct {
 	emitMu     sync.Mutex

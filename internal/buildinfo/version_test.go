@@ -23,18 +23,19 @@ func TestResolveVersionFallsBackToBuildInfoModuleVersion(t *testing.T) {
 	}
 }
 
-func TestResolveVersionFallsBackToVCSRevisionForDevelBuilds(t *testing.T) {
-	got := resolveVersion("dev", func() (*debug.BuildInfo, bool) {
-		return &debug.BuildInfo{
-			Main: debug.Module{Version: "(devel)"},
-			Settings: []debug.BuildSetting{
-				{Key: "vcs.revision", Value: "0123456789abcdef0123456789abcdef"},
-				{Key: "vcs.modified", Value: "true"},
-			},
-		}, true
-	})
-	if got != "dev+0123456789ab-dirty" {
-		t.Fatalf("ResolveVersion() = %q, want dev+0123456789ab-dirty", got)
+func TestResolveVersionNormalizesPseudoVersionsToDev(t *testing.T) {
+	for _, version := range []string{
+		"0.0.0-20260323102103-06079e3985f8",
+		"0.0.0-20260323102103-06079e3985f8+dirty",
+	} {
+		got := resolveVersion("", func() (*debug.BuildInfo, bool) {
+			return &debug.BuildInfo{
+				Main: debug.Module{Version: version},
+			}, true
+		})
+		if got != "dev" {
+			t.Fatalf("ResolveVersion(%q) = %q, want dev", version, got)
+		}
 	}
 }
 

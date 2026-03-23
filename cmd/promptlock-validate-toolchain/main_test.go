@@ -103,6 +103,26 @@ cp LICENSE README.md "$OUT_DIR/"
 	}
 }
 
+func TestValidateToolchainFilesFailsWhenReleasePackageAllowsGoReleaserEnvOverride(t *testing.T) {
+	cfg := sampleToolchainConfig()
+	files := sampleToolchainFiles(cfg)
+	files["scripts/release-package.sh"] = "require_clean_worktree\nclean git checkout; refusing to build from a dirty tree\nGORELEASER_VERSION=\"${GORELEASER_VERSION:-v2.7.0}\"\ngo run github.com/goreleaser/goreleaser/v2@${GORELEASER_VERSION} build --clean --config .goreleaser.yaml\nLICENSE\npromptlock-mcp-launch\n"
+
+	if err := validateToolchainFiles(cfg, files); err == nil {
+		t.Fatalf("expected env-overridable goreleaser pin to fail")
+	}
+}
+
+func TestValidateToolchainFilesFailsWhenReleasePackageUsesSnapshotBuild(t *testing.T) {
+	cfg := sampleToolchainConfig()
+	files := sampleToolchainFiles(cfg)
+	files["scripts/release-package.sh"] = "require_clean_worktree\nclean git checkout; refusing to build from a dirty tree\ngo run github.com/goreleaser/goreleaser/v2@v2.7.0 build --snapshot --clean --config .goreleaser.yaml\nLICENSE\npromptlock-mcp-launch\n"
+
+	if err := validateToolchainFiles(cfg, files); err == nil {
+		t.Fatalf("expected snapshot release packaging to fail")
+	}
+}
+
 func TestValidateToolchainFilesFailsWhenSmokeScriptReferencesPython(t *testing.T) {
 	cfg := sampleToolchainConfig()
 	files := sampleToolchainFiles(cfg)
@@ -309,7 +329,7 @@ func sampleToolchainFiles(cfg toolchainConfig) map[string]string {
 		"scripts/run_real_e2e_smoke.sh":           "go build -o \"$PROMPTLOCK_BIN\" ./cmd/promptlock\ngo build -o \"$PTY_RUNNER\" ./cmd/promptlock-pty-runner\n--inputs\npromptlock-pty-runner\n",
 		"docs/operations/WRAPPER-EXEC.md":         "--docker-arg as a narrow escape hatch\nhost-alias broker URL\ncontainer could redirect PromptLock transport\n",
 		"scripts/release-package.sh":              "require_clean_worktree\nclean git checkout; refusing to build from a dirty tree\ngo run \"github.com/goreleaser/goreleaser/v2@v2.7.0\" build --clean --config .goreleaser.yaml\ncp LICENSE README.md \"$OUT_DIR/\"\npromptlock-mcp-launch-linux-amd64\npromptlock-mcp-launch-darwin-arm64\n",
-		".goreleaser.yaml":                        "cmd/promptlock-mcp-launch\npromptlock-mcp-launch-{{ .Os }}-{{ .Arch }}\n",
+		".goreleaser.yaml":                        "cmd/promptlock-mcp-launch\npromptlock-mcp-launch-{{ .Os }}-{{ .Arch }}\n-X main.version={{ .Version }}\n",
 		"SECURITY.md":                             "latest `main` branch\nOnce prerelease tags exist, fixes are also applied to the latest tagged prerelease.\n",
 	}
 }
