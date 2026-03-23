@@ -37,14 +37,15 @@ func TestHandleAccessReturns503WhenSecretBackendUnavailable(t *testing.T) {
 
 	s := &server{
 		svc: app.Service{
-			Policy:       domain.DefaultPolicy(),
-			Requests:     stateStore,
-			Leases:       stateStore,
-			Secrets:      failingSecretStore{},
-			Audit:        unavailableTestAudit{},
-			Now:          func() time.Time { return now },
-			NewRequestID: func() string { return "req-1" },
-			NewLeaseTok:  func() string { return "lease-1" },
+			Policy:                     domain.DefaultPolicy(),
+			AllowPlaintextSecretReturn: true,
+			Requests:                   stateStore,
+			Leases:                     stateStore,
+			Secrets:                    failingSecretStore{},
+			Audit:                      unavailableTestAudit{},
+			Now:                        func() time.Time { return now },
+			NewRequestID:               func() string { return "req-1" },
+			NewLeaseTok:                func() string { return "lease-1" },
 		},
 		authEnabled: false,
 		authCfg: config.AuthConfig{

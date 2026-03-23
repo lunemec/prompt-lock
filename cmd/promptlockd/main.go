@@ -165,14 +165,15 @@ func run() error {
 			MaxPendingPerAgent:       cfg.RequestPolicy.MaxPendingPerAgent,
 			EnableActiveLeaseReuse:   cfg.RequestPolicy.EnableActiveLeaseReuse,
 		},
-		Requests:       requestStore,
-		Leases:         leaseStore,
-		Secrets:        secretStore,
-		EnvPathSecrets: envPathStore,
-		Audit:          sink,
-		Now:            func() time.Time { return time.Now().UTC() },
-		NewRequestID:   newReq,
-		NewLeaseTok:    newLease,
+		AllowPlaintextSecretReturn: cfg.Auth.AllowPlaintextSecretReturn,
+		Requests:                   requestStore,
+		Leases:                     leaseStore,
+		Secrets:                    secretStore,
+		EnvPathSecrets:             envPathStore,
+		Audit:                      sink,
+		Now:                        func() time.Time { return time.Now().UTC() },
+		NewRequestID:               newReq,
+		NewLeaseTok:                newLease,
 	}
 
 	if err := validateSecurityProfile(cfg, getenv("PROMPTLOCK_ALLOW_INSECURE_PROFILE", "")); err != nil {

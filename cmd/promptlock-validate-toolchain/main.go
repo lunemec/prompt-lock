@@ -71,6 +71,7 @@ func run(root string) error {
 		"docs/operations/RELEASE.md",
 		"docs/operations/WRAPPER-EXEC.md",
 		"docs/standards/ENGINEERING-STANDARDS.md",
+		"scripts/run_real_e2e_smoke.sh",
 		"scripts/release-package.sh",
 		".goreleaser.yaml",
 		"SECURITY.md",
@@ -228,9 +229,16 @@ func validateReleasePackaging(files map[string]string) error {
 			"`v0.x` tags are published as prereleases/betas",
 			"`v1.x` tags as normal releases",
 			"refuses to build from a dirty checkout",
+			"cmd/promptlock-pty-runner",
 			"promptlock-mcp-launch",
 			"LICENSE",
 			"sha256",
+			"Go-native PTY helper",
+		},
+		"scripts/run_real_e2e_smoke.sh": {
+			"go build -o \"$PTY_RUNNER\" ./cmd/promptlock-pty-runner",
+			"--inputs",
+			"promptlock-pty-runner",
 		},
 		"docs/operations/WRAPPER-EXEC.md": {
 			"host-alias broker URL",
@@ -251,6 +259,12 @@ func validateReleasePackaging(files map[string]string) error {
 				return fmt.Errorf("%s: missing %q", path, needle)
 			}
 		}
+	}
+	if strings.Contains(files["scripts/run_real_e2e_smoke.sh"], "python") {
+		return fmt.Errorf("scripts/run_real_e2e_smoke.sh: must not reference python")
+	}
+	if strings.Contains(files["docs/operations/RELEASE.md"], "python") {
+		return fmt.Errorf("docs/operations/RELEASE.md: must not reference python in the supported smoke path")
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 - Release packaging now bundles `LICENSE` and `promptlock-mcp-launch`, writes exact tag/commit provenance plus a tarball checksum sidecar, and the tagged release workflow publishes the tarball, checksum, and fsync report as GitHub release assets while the release/support docs now describe the public OSS prerelease/beta branch consistently.
+- The hardened release smoke PTY runner is now Go-native instead of Python-based, so the supported release gate stays inside the repo's primary Go toolchain.
 - Secret-leak validation now blocks generic `*.env` files by default outside `demo-envs/`, scans both the working tree and git history for common token/key formats, and keeps explicit allowlists only for intentional demo/test fixtures and the validator implementation itself.
 - `cmd/promptlockd` request transport handlers now delegate pending-request listing, plaintext secret-access blocking, and env-path follow-up audits through `internal/app.Service` instead of keeping that policy and audit ownership inline in HTTP handler code.
 - `promptlock watch` now uses a Bubble Tea + Lip Gloss interactive TTY UI with a persistent header/footer, current-request detail panel, queue-awareness, and keyboard actions (`y` approve, `n` deny, `s` skip, `q` quit), while non-TTY and `--once` flows keep the plain fallback behavior and existing env-path preflight checks.

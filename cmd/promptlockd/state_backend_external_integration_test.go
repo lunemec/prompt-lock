@@ -105,14 +105,15 @@ func TestExternalStateBackendHappyPathFlow(t *testing.T) {
 	now := time.Now().UTC()
 	s := &server{
 		svc: app.Service{
-			Policy:       domain.DefaultPolicy(),
-			Requests:     store,
-			Leases:       store,
-			Secrets:      secrets,
-			Audit:        unavailableTestAudit{},
-			Now:          func() time.Time { return now },
-			NewRequestID: func() string { return "req-ext-1" },
-			NewLeaseTok:  func() string { return "lease-ext-1" },
+			Policy:                     domain.DefaultPolicy(),
+			AllowPlaintextSecretReturn: true,
+			Requests:                   store,
+			Leases:                     store,
+			Secrets:                    secrets,
+			Audit:                      unavailableTestAudit{},
+			Now:                        func() time.Time { return now },
+			NewRequestID:               func() string { return "req-ext-1" },
+			NewLeaseTok:                func() string { return "lease-ext-1" },
 		},
 		authEnabled: false,
 		authCfg:     config.AuthConfig{AllowPlaintextSecretReturn: true},

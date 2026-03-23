@@ -20,7 +20,7 @@ type LeaseRequest struct {
 	Secrets            []string
 	CommandFingerprint string
 	WorkdirFingerprint string
-	// Presentation metadata captured for operator review only.
+	// Approval-context metadata captured for operator review and audit trails.
 	// It is persisted on requests, but excluded from request equivalence and lease ownership checks.
 	CommandSummary   string
 	WorkdirSummary   string

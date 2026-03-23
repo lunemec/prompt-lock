@@ -103,6 +103,16 @@ cp LICENSE README.md "$OUT_DIR/"
 	}
 }
 
+func TestValidateToolchainFilesFailsWhenSmokeScriptReferencesPython(t *testing.T) {
+	cfg := sampleToolchainConfig()
+	files := sampleToolchainFiles(cfg)
+	files["scripts/run_real_e2e_smoke.sh"] = "#!/usr/bin/env bash\npython3 - <<'PY'\nprint('nope')\nPY\n"
+
+	if err := validateToolchainFiles(cfg, files); err == nil {
+		t.Fatalf("expected smoke script python reference to fail")
+	}
+}
+
 func TestValidateToolchainFilesFailsWhenReleaseWorkflowAlwaysPublishesPrerelease(t *testing.T) {
 	cfg := sampleToolchainConfig()
 	files := sampleToolchainFiles(cfg)
@@ -294,8 +304,9 @@ func sampleToolchainFiles(cfg toolchainConfig) map[string]string {
 		".github/workflows/release.yml":           "permissions:\n  contents: write\nsteps:\n  - name: Load toolchain versions\n    run: |\n      while IFS= read -r line; do\n        echo \"$line\" >> \"$GITHUB_ENV\"\n      done < .toolchain.env\n  - uses: actions/setup-go@v5\n    with:\n      go-version: ${{ env.GO_VERSION }}\n  - uses: softprops/action-gh-release@deadbeef\n    with:\n      prerelease: ${{ startsWith(github.ref_name, 'v0.') }}\n      files: |\n        dist/*.sha256\n",
 		"README.md":                               "make toolchain-guard\n.toolchain.env\nLocal release packaging helper\nrequires a clean git checkout at the exact tagged release commit\n",
 		"docs/operations/TESTING.md":              "make toolchain-guard\n.toolchain.env\n",
-		"docs/operations/RELEASE.md":              "make toolchain-guard\n.toolchain.env\nGitHub release workflow publishes the tarball, checksum sidecar, and fsync report as release assets for tagged versions.\n`v0.x` tags are published as prereleases/betas\n`v1.x` tags as normal releases\nrefuses to build from a dirty checkout\npromptlock-mcp-launch\nLICENSE\nsha256\n",
+		"docs/operations/RELEASE.md":              "make toolchain-guard\n.toolchain.env\nGitHub release workflow publishes the tarball, checksum sidecar, and fsync report as release assets for tagged versions.\n`v0.x` tags are published as prereleases/betas\n`v1.x` tags as normal releases\nrefuses to build from a dirty checkout\ncmd/promptlock-pty-runner\npromptlock-mcp-launch\nLICENSE\nsha256\nGo-native PTY helper\n",
 		"docs/standards/ENGINEERING-STANDARDS.md": "make toolchain-guard\n.toolchain.env\n",
+		"scripts/run_real_e2e_smoke.sh":           "go build -o \"$PROMPTLOCK_BIN\" ./cmd/promptlock\ngo build -o \"$PTY_RUNNER\" ./cmd/promptlock-pty-runner\n--inputs\npromptlock-pty-runner\n",
 		"docs/operations/WRAPPER-EXEC.md":         "--docker-arg as a narrow escape hatch\nhost-alias broker URL\ncontainer could redirect PromptLock transport\n",
 		"scripts/release-package.sh":              "require_clean_worktree\nclean git checkout; refusing to build from a dirty tree\ncp LICENSE README.md \"$OUT_DIR/\"\npromptlock-mcp-launch-linux-amd64\npromptlock-mcp-launch-darwin-arm64\n",
 		".goreleaser.yaml":                        "cmd/promptlock-mcp-launch\npromptlock-mcp-launch-{{ .Os }}-{{ .Arch }}\n",

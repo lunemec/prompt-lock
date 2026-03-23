@@ -166,9 +166,7 @@ func (s *server) handleAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	at, aid := actorFromRequest(r)
-	svc := s.svc
-	svc.AllowPlaintextSecretReturn = s.authCfg.AllowPlaintextSecretReturn
-	if err := svc.RejectPlaintextSecretAccessFromState(at, aid); err != nil {
+	if err := s.svc.RejectPlaintextSecretAccess(at, aid); err != nil {
 		if errors.Is(err, app.ErrPlaintextSecretReturnDisabled) {
 			writeMappedError(w, ErrForbidden, err.Error())
 			return

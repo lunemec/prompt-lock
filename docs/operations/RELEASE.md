@@ -14,7 +14,7 @@ PromptLock is currently a public OSS prerelease/beta on the path to v1.0.0; this
 make release-readiness-gate
 ```
 
-`make release-readiness-gate` still requires a working Docker daemon because the supported hardened smoke path builds and runs the local `agent-lab` image. The smoke script also requires `python3` or `python` for its portable PTY runner. If Docker is unavailable, use the non-Docker core subset as a preflight instead:
+`make release-readiness-gate` still requires a working Docker daemon because the supported hardened smoke path builds and runs the local `agent-lab` image. The smoke script uses a Go-native PTY helper from `cmd/promptlock-pty-runner` and requires Go plus `jq`. If Docker is unavailable, use the non-Docker core subset as a preflight instead:
 
 ```bash
 make release-readiness-gate-core

@@ -190,16 +190,8 @@ func (s *Service) approveRequestWithActorUnlocked(requestID string, ttlMinutes i
 	return lease, nil
 }
 
-func (s Service) RejectPlaintextSecretAccess(allowPlaintext bool, actorType, actorID string) error {
-	return s.rejectPlaintextSecretAccess(allowPlaintext, actorType, actorID)
-}
-
-func (s Service) RejectPlaintextSecretAccessFromState(actorType, actorID string) error {
-	return s.rejectPlaintextSecretAccess(s.AllowPlaintextSecretReturn, actorType, actorID)
-}
-
-func (s Service) rejectPlaintextSecretAccess(allowPlaintext bool, actorType, actorID string) error {
-	if allowPlaintext {
+func (s Service) RejectPlaintextSecretAccess(actorType, actorID string) error {
+	if s.AllowPlaintextSecretReturn {
 		return nil
 	}
 	if err := s.auditCritical(ports.AuditEvent{

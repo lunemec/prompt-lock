@@ -1629,12 +1629,12 @@ func TestRejectPlaintextSecretAccessUsesServiceState(t *testing.T) {
 	}
 
 	svc.AllowPlaintextSecretReturn = false
-	if err := svc.RejectPlaintextSecretAccessFromState("agent", "agent-1"); !errors.Is(err, ErrPlaintextSecretReturnDisabled) {
+	if err := svc.RejectPlaintextSecretAccess("agent", "agent-1"); !errors.Is(err, ErrPlaintextSecretReturnDisabled) {
 		t.Fatalf("expected plaintext secret access to be blocked, got %v", err)
 	}
 
 	svc.AllowPlaintextSecretReturn = true
-	if err := svc.RejectPlaintextSecretAccessFromState("agent", "agent-1"); err != nil {
+	if err := svc.RejectPlaintextSecretAccess("agent", "agent-1"); err != nil {
 		t.Fatalf("expected plaintext secret access to be allowed, got %v", err)
 	}
 }
